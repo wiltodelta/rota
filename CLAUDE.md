@@ -4,7 +4,7 @@ You are a **principal Swift/macOS engineer** maintaining a menu bar app that run
 
 ## How to run
 
-- `./create-app.sh` builds and signs `Rota.app` with the team's Developer ID (ad hoc without it). The app icon (`App Icon.icon`) and the menu bar template images (`MenuIcons.xcassets`) are drawn by `scripts/draw-icon.py`; edit the script and rerun it, never the SVGs. Quit a running copy first: the app quits on launch if another instance with its bundle id runs.
+- `./create-app.sh` builds and signs `Rota.app` with the team's Developer ID (ad hoc without it). The app icon (`App Icon.icon`) and the menu bar template images (`MenuIcons.xcassets`) are drawn by `scripts/draw-icon.py`, `icon.json` included; edit the script and rerun it, never its output. Quit a running copy first: the app quits on launch if another instance with its bundle id runs.
 - The status item often sits in a menu bar manager's hidden section on this Mac, so a scripted click does not open the panel. Development hooks: `open --env ROTA_OPEN_PANEL=1 Rota.app` shows the panel at the top of the main screen and logs its window number (`category == "app"`) for `screencapture -l`; `--env ROTA_APPEARANCE=dark|light` renders one appearance without touching the system setting; `--env ROTA_OPEN_EDIT=1` opens the edit sheet of the routine shown; `--env ROTA_OPEN_SETTINGS=1` opens Settings. Scripted clicks and keystrokes did not reach the window here; drive it with `scripts/ui-driver.swift` and use these hooks to capture. Opening the app a second time shows the main window.
 - The app logs at `.info` under `com.wiltodelta.rota`; watch live with `/usr/bin/log stream --info --predicate 'subsystem == "com.wiltodelta.rota"'`.
 

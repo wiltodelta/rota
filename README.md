@@ -67,7 +67,7 @@ Desktop.
 1. Download the latest `Rota-vX.Y.Z-macOS.zip` from the
    [Releases](https://github.com/wiltodelta/rota/releases) page.
 2. Unzip it and move **Rota.app** to `/Applications`.
-3. Launch it. A loop-and-play icon appears in the menu bar (filled while a
+3. Launch it. A dial-and-play icon appears in the menu bar (a solid disc while a
    routine runs); the window opens on the first launch.
 
 ### From source

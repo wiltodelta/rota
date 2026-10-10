@@ -237,7 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func updateStatusItem() {
         guard let button = statusItem.button else { return }
         let running = model.scheduler.active.count
-        // Template images from scripts/draw-icon.py: an outlined play when idle, a filled one while running.
+        // Template images from scripts/draw-icon.py: the dial when idle, a solid disc while running.
         if let image = NSImage(named: running > 0 ? "MenuIconActive" : "MenuIcon")?.copy() as? NSImage {
             image.size = NSSize(width: 18, height: 18)
             image.isTemplate = true

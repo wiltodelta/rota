@@ -1,34 +1,70 @@
 {
-  "fill" : {
-    "linear-gradient" : [
+  "fill": {
+    "linear-gradient": [
       "extended-srgb:0.17647,0.83137,0.74902,1.00000",
       "extended-srgb:0.03137,0.42745,0.35686,1.00000"
     ]
   },
-  "groups" : [
+  "groups": [
     {
-      "layers" : [
+      "layers": [
         {
-          "image-name" : "play.svg",
-          "name" : "play"
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:1.00000,0.62745,0.25098,1.00000"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "srgb:0.03137,0.42745,0.35686,1.00000"
+              }
+            }
+          ],
+          "glass": false,
+          "image-name": "play.svg",
+          "name": "play"
         },
         {
-          "image-name" : "loop.svg",
-          "name" : "loop"
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.03137,0.42745,0.35686,1.00000"
+              }
+            }
+          ],
+          "glass": false,
+          "image-name": "ticks.svg",
+          "name": "ticks"
+        },
+        {
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            }
+          ],
+          "glass": true,
+          "image-name": "face.svg",
+          "name": "face"
         }
       ],
-      "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.5
+      "lighting": "individual",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
       },
-      "translucency" : {
-        "enabled" : false,
-        "value" : 0.5
+      "specular": true,
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
       }
     }
   ],
-  "supported-platforms" : {
-    "squares" : [
+  "supported-platforms": {
+    "squares": [
       "macOS"
     ]
   }

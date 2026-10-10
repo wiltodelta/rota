@@ -8,8 +8,9 @@ one; CI refuses a build without a tag), a check that the binary carries the
 macOS 26 SDK stamp from `Package.swift`, the embedded Sparkle framework, and
 the Info.plist, and one `Assets.car` compiled by `actool` from the Icon
 Composer icon (`App Icon.icon`) and the menu bar template images
-(`MenuIcons.xcassets`). `scripts/draw-icon.py` draws the SVGs of both from one
-geometry; change the script and rerun it rather than editing an SVG.
+(`MenuIcons.xcassets`). `scripts/draw-icon.py` writes both from one
+geometry, the icon's `icon.json` included; change the script and rerun it
+rather than editing its output.
 
 ## Signing and notarization
 
