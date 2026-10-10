@@ -40,7 +40,9 @@ final class ScreenRun: RunControl, @unchecked Sendable {
         }
         let run = ScreenRun(journal: journal, name: name, exitFile: exitFile, script: script)
         journal.session(name)
-        run.queue.asyncAfter(deadline: .now() + spec.timeout) { [weak run] in run?.end(as: .timedOut) }
+        if let timeout = spec.timeout {
+            run.queue.asyncAfter(deadline: .now() + timeout) { [weak run] in run?.end(as: .timedOut) }
+        }
         run.poll()
         return run
     }

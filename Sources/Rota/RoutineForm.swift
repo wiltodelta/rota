@@ -40,10 +40,16 @@ struct RoutineForm: View {
                 ForEach(Harness.allCases) { Text($0.title).tag($0) }
             }
             .accessibilityIdentifier("routineHarness")
-            HarnessWarnings(routine: draft)
-            Stepper(value: $draft.timeoutMinutes, in: 5...480, step: 5) {
-                LabeledContent("Time limit", value: "\(draft.timeoutMinutes) min")
+            .onChange(of: draft.harness) {
+                // Model ids and efforts belong to one harness.
+                draft.model = nil
+                draft.effort = nil
             }
+            if draft.harness.isAgent {
+                ModelPickers(draft: $draft)
+            }
+            HarnessWarnings(routine: draft)
+            TimeLimitField(minutes: $draft.timeLimitMinutes)
             VStack(alignment: .leading, spacing: 6) {
                 Text(draft.harness.isAgent ? "Prompt" : "Command")
                 TextEditor(text: $draft.prompt)
@@ -88,9 +94,10 @@ private struct ScheduleField: View {
                 switch Result(catching: { try CronSchedule(schedule) }) {
                 case .success(let cron):
                     let times = cron.upcoming(after: .now, count: 3)
-                    Text(times.isEmpty ? "Never fires" :
-                         "Next: " + times.map { $0.formatted(date: .abbreviated, time: .shortened) }
-                            .joined(separator: ", "))
+                    let next = times.isEmpty ? "Never fires" :
+                        "Next: " + times.map { $0.formatted(date: .abbreviated, time: .shortened) }
+                            .joined(separator: ", ")
+                    Text([ScheduleText.describe(schedule), next].compactMap { $0 }.joined(separator: ". "))
                 case .failure(let error):
                     Text(error.localizedDescription).foregroundStyle(.red)
                 }
@@ -134,5 +141,66 @@ struct HarnessWarnings: View {
         case .missing:
             return "The skill uses \(capability.title), which \(routine.harness.title) does not have."
         }
+    }
+}
+
+/// The model a routine runs on and its reasoning effort, from what the
+/// harness's CLI lists. Default leaves the choice to the CLI.
+private struct ModelPickers: View {
+    @Environment(AppModel.self) private var model
+    @Binding var draft: Routine
+
+    var body: some View {
+        let options = model.settings.models[draft.harness] ?? []
+        // Claude names no default; its aliases share one set of efforts.
+        let selected = options.first { $0.id == draft.model } ?? options.first(where: \.isDefault)
+            ?? (draft.model == nil ? options.first : nil)
+        Picker("Model", selection: $draft.model) {
+            Text(options.first(where: \.isDefault).map { "Default (\($0.title))" } ?? "Default")
+                .tag(String?.none)
+            Divider()
+            ForEach(options) { Text($0.title).tag(Optional($0.id)) }
+            if let current = draft.model, !options.contains(where: { $0.id == current }) {
+                Text(current).tag(Optional(current))
+            }
+        }
+        .accessibilityIdentifier("routineModel")
+        .onChange(of: draft.model) {
+            if let effort = draft.effort, let selected, !selected.efforts.contains(effort) { draft.effort = nil }
+        }
+        Picker("Effort", selection: $draft.effort) {
+            Text("Default").tag(String?.none)
+            Divider()
+            ForEach(selected?.efforts ?? [], id: \.self) { Text($0.capitalized).tag(Optional($0)) }
+            if let current = draft.effort, selected?.efforts.contains(current) != true {
+                Text(current.capitalized).tag(Optional(current))
+            }
+        }
+        .accessibilityIdentifier("routineEffort")
+        .disabled(selected?.efforts.isEmpty ?? true)
+    }
+}
+
+/// Off by default: a run takes as long as it needs. On, Rota stops a run that
+/// passes the limit and records it as timed out.
+private struct TimeLimitField: View {
+    @Binding var minutes: Int?
+
+    var body: some View {
+        Toggle("Time limit", isOn: Binding(
+            get: { minutes != nil },
+            set: { minutes = $0 ? 60 : nil }
+        ))
+        .accessibilityIdentifier("routineTimeLimit")
+        if let limit = minutes {
+            Stepper(value: Binding(get: { limit }, set: { minutes = $0 }), in: 5...1440, step: 5) {
+                LabeledContent("Stop a run after", value: Self.text(limit))
+            }
+        }
+    }
+
+    static func text(_ minutes: Int) -> String {
+        minutes < 60 ? "\(minutes) min"
+            : minutes % 60 == 0 ? "\(minutes / 60) h" : "\(minutes / 60) h \(minutes % 60) min"
     }
 }

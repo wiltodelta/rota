@@ -19,12 +19,13 @@ final class LiveHarnessTests: XCTestCase {
 
     private func run(_ harness: Harness, prompt: String, message: String?, timeout: TimeInterval = 240,
                      directory: String? = nil, resume: String? = nil,
-                     stopAfter: TimeInterval? = nil) throws -> (RunOutcome, String, String?) {
+                     stopAfter: TimeInterval? = nil, model: String? = nil,
+                     effort: String? = nil) throws -> (RunOutcome, String, String?) {
         let log = folder.appendingPathComponent("\(harness.rawValue).log")
         let spec = LaunchSpec(executable: harness.defaultExecutable(), prompt: prompt,
                               arguments: harness.arguments(needs: [], resume: resume),
                               workingDirectory: directory ?? folder.path, environment: [:], mode: harness.launchMode,
-                              timeout: timeout, log: log, resume: resume)
+                              timeout: timeout, log: log, resume: resume, model: model, effort: effort)
         let ended = expectation(description: "run ended")
         var outcome: RunOutcome?
         var session: String?
@@ -113,6 +114,26 @@ final class LiveHarnessTests: XCTestCase {
             print("\(harness.rawValue) stopped \(elapsed) s after launch")
             XCTAssertEqual(outcome, .cancelled, "\(harness.rawValue): \(log)")
         }
+    }
+
+    /// Each agent runs on the model the routine picks, and Grok's own default stays as it was.
+    func testEveryAgentRunsOnTheChosenModel() throws {
+        let grokDefault = { ProcessLauncher.capture(Harness.grok.defaultExecutable(), ["models"],
+                                                    in: NSTemporaryDirectory()).1
+            .split(separator: "\n").first { $0.hasPrefix("Default model:") } }
+        let before = grokDefault()
+        let picks: [(Harness, String, String, String)] = [
+            (.claude, "haiku", "low", "haiku"), (.codex, "gpt-6-luna", "low", "gpt-6-luna"),
+            (.grok, "grok-4.6", "low", "grok-4.6")
+        ]
+        for (harness, model, effort, expected) in picks {
+            let (outcome, log, _) = try run(harness, prompt: "Reply with exactly: ok", message: nil,
+                                            model: model, effort: effort)
+            XCTAssertEqual(outcome, .succeeded, log)
+            let header = log.split(separator: "\n").first { Transcript.isHeader(String($0)) } ?? ""
+            XCTAssertTrue(header.contains(expected), "\(harness.rawValue) header: \(header)")
+        }
+        XCTAssertEqual(grokDefault(), before, "a routine's model must not change Grok's default")
     }
 
     /// A command that ends at once used to race the poll and read as interrupted.

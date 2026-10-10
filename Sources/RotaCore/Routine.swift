@@ -8,13 +8,18 @@ public struct Routine: Codable, Identifiable, Equatable, Sendable {
     public var harness: Harness
     public var enabled: Bool
     public var prompt: String
-    public var timeoutMinutes: Int
+    /// Stops a run that takes longer; nil lets every run take as long as it needs.
+    public var timeLimitMinutes: Int?
+    /// The model id to run on; nil leaves the harness's own default.
+    public var model: String?
+    /// The reasoning effort; nil leaves the model's default.
+    public var effort: String?
     /// The next slot the scheduler will fire; nil while disabled.
     public var nextFire: Date?
 
     public init(id: String, name: String, workingDirectory: String, schedule: String,
                 harness: Harness = .claude, enabled: Bool = false, prompt: String,
-                timeoutMinutes: Int = 60, nextFire: Date? = nil) {
+                timeLimitMinutes: Int? = nil, nextFire: Date? = nil, model: String? = nil, effort: String? = nil) {
         self.id = id
         self.name = name
         self.workingDirectory = workingDirectory
@@ -22,8 +27,32 @@ public struct Routine: Codable, Identifiable, Equatable, Sendable {
         self.harness = harness
         self.enabled = enabled
         self.prompt = prompt
-        self.timeoutMinutes = timeoutMinutes
+        self.timeLimitMinutes = timeLimitMinutes
         self.nextFire = nextFire
+        self.model = model
+        self.effort = effort
+    }
+
+    /// 0.1 saved `timeoutMinutes`, 60 unless changed. Its 60 was a default
+    /// nobody chose, so it loads as no limit; any other value was picked and stays.
+    private enum LegacyKeys: String, CodingKey { case timeoutMinutes }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        workingDirectory = try values.decode(String.self, forKey: .workingDirectory)
+        schedule = try values.decode(String.self, forKey: .schedule)
+        harness = try values.decode(Harness.self, forKey: .harness)
+        enabled = try values.decode(Bool.self, forKey: .enabled)
+        prompt = try values.decode(String.self, forKey: .prompt)
+        nextFire = try values.decodeIfPresent(Date.self, forKey: .nextFire)
+        model = try values.decodeIfPresent(String.self, forKey: .model)
+        effort = try values.decodeIfPresent(String.self, forKey: .effort)
+        let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+            .decodeIfPresent(Int.self, forKey: .timeoutMinutes)
+        timeLimitMinutes = try values.decodeIfPresent(Int.self, forKey: .timeLimitMinutes)
+            ?? legacy.flatMap { $0 == 60 ? nil : $0 }
     }
 
     /// The handoff Claude Desktop stubs carry, for a routine created by hand.

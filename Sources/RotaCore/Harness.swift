@@ -42,6 +42,12 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
 
     public var id: String { rawValue }
 
+    /// The harnesses that run an agent CLI, as opposed to a shell command.
+    public static let agents = allCases.filter(\.isAgent)
+
+    /// The CLI's name: the agent's own, or the shell that runs a command.
+    public var commandName: String { self == .shell ? "zsh" : rawValue }
+
     public var title: String {
         switch self {
         case .claude: return "Claude Code"
@@ -56,10 +62,9 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
     /// Where the CLI installs itself, used until the user sets another path.
     public func defaultExecutable(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String {
         switch self {
-        case .claude: return home.appendingPathComponent(".local/bin/claude").path
-        case .codex: return "/opt/homebrew/bin/codex"
-        case .grok: return home.appendingPathComponent(".local/bin/grok").path
-        case .shell: return "/bin/zsh"
+        case .claude, .grok: return home.appendingPathComponent(".local/bin/\(commandName)").path
+        case .codex: return "/opt/homebrew/bin/\(commandName)"
+        case .shell: return "/bin/\(commandName)"
         }
     }
 

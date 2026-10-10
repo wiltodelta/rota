@@ -78,10 +78,11 @@ final class StorageTests: XCTestCase {
         try json.write(to: tasks, atomically: true, encoding: .utf8)
 
         let candidates = try ClaudeDesktopImport.candidates(from: tasks)
-        XCTAssertEqual(candidates.map(\.id), ["daily-report", "no-stub"])
+        XCTAssertEqual(candidates.map(\.routine.id), ["daily-report", "no-stub"])
+        XCTAssertEqual(Set(candidates.map(\.source)), [.claudeDesktop])
         XCTAssertEqual(candidates[0].routine.name, "Daily report")
         XCTAssertEqual(candidates[0].routine.prompt, "Invoke the `daily-report` skill.")
-        XCTAssertTrue(candidates[0].enabledInClaudeDesktop)
+        XCTAssertTrue(candidates[0].onInSource)
         XCTAssertFalse(candidates[0].routine.enabled, "imports start turned off")
         XCTAssertEqual(candidates[1].routine.name, "no-stub")
         XCTAssertEqual(candidates[1].routine.prompt,

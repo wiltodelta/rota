@@ -1,3 +1,4 @@
+import AppKit
 import os
 import RotaCore
 import ServiceManagement
@@ -31,15 +32,20 @@ struct SettingsView: View {
                 }
             }
             ChatTextSection()
-            Section("Harness executables") {
-                ForEach(Harness.allCases) { harness in
-                    ExecutableField(harness: harness)
+            Section {
+                ForEach(Harness.agents) { harness in
+                    ExecutablePicker(harness: harness)
                 }
+            } header: {
+                Text("Agents")
+            } footer: {
+                Text("Rota lists the copies it finds on your login shell's PATH and in the usual install folders.")
             }
         }
         .formStyle(.grouped)
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
+        .onAppear { model.settings.refreshInstalled() }
     }
 
     private func setLaunchAtLogin(_ on: Bool) {
@@ -55,27 +61,81 @@ struct SettingsView: View {
     }
 }
 
-private struct ExecutableField: View {
+/// Picks which installed copy of an agent CLI runs: the first one found, one
+/// of the others, or any file chosen in an open panel.
+private struct ExecutablePicker: View {
     @Environment(AppModel.self) private var model
     let harness: Harness
-    @State private var path = ""
+    private static let chooseTag = "\u{0}choose"
 
     var body: some View {
-        let found = FileManager.default.isExecutableFile(atPath: model.settings.executable(for: harness))
-        LabeledContent(harness.title) {
-            HStack {
-                TextField(harness.title, text: $path, prompt: Text(harness.defaultExecutable()))
-                    .labelsHidden()
-                    .font(.body.monospaced())
-                    .onSubmit { model.settings.setExecutable(path, for: harness) }
-                Image(systemName: found ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundStyle(found ? .green : .red)
-                    .help(found ? "Found" : "No executable at this path")
+        let settings = model.settings
+        let installed = settings.installed[harness] ?? []
+        let chosen = settings.chosenExecutable(for: harness)
+        let effective = settings.executable(for: harness)
+        VStack(alignment: .leading, spacing: 4) {
+            Picker(harness.title, selection: Binding(
+                get: { chosen ?? "" },
+                set: { choose($0) }
+            )) {
+                Text(installed.first.map { "Automatic (\(Self.display($0.path)))" } ?? "Automatic")
+                    .tag("")
+                Divider()
+                ForEach(installed) { copy in
+                    Text(Self.display(copy.path)).tag(copy.path)
+                }
+                if let chosen, !installed.contains(where: { $0.path == chosen }) {
+                    Text(Self.display(chosen)).tag(chosen)
+                }
+                Divider()
+                Text("Choose Other\u{2026}").tag(Self.chooseTag)
             }
+            status(effective: effective, installed: installed)
         }
-        .onAppear {
-            path = model.settings.executable(for: harness) == harness.defaultExecutable()
-                ? "" : model.settings.executable(for: harness)
+    }
+
+    @ViewBuilder
+    private func status(effective: String, installed: [InstalledExecutable]) -> some View {
+        if !FileManager.default.isExecutableFile(atPath: effective) {
+            Label("Not installed. Install \(harness.commandName) or choose its file.",
+                  systemImage: "xmark.circle.fill")
+                .foregroundStyle(.red)
+                .font(.caption)
+        } else if let version = installed.first(where: { $0.path == effective })?.version {
+            Label(version, systemImage: "checkmark.circle.fill")
+                .labelStyle(StatusLabelStyle())
+                .font(.caption)
+        }
+    }
+
+    private func choose(_ tag: String) {
+        guard tag == Self.chooseTag else {
+            model.settings.setExecutable(tag.isEmpty ? nil : tag, for: harness)
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.message = "Choose the \(harness.title) executable"
+        panel.canChooseDirectories = false
+        panel.showsHiddenFiles = true
+        panel.treatsFilePackagesAsDirectories = true
+        panel.directoryURL = URL(fileURLWithPath: (model.settings.executable(for: harness) as NSString)
+            .deletingLastPathComponent)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        model.settings.setExecutable(url.path, for: harness)
+        model.settings.refreshInstalled()
+    }
+
+    static func display(_ path: String) -> String {
+        (path as NSString).abbreviatingWithTildeInPath
+    }
+}
+
+/// A green check before secondary text, as the status under a picker reads.
+private struct StatusLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) {
+            configuration.icon.foregroundStyle(.green)
+            configuration.title.foregroundStyle(.secondary)
         }
     }
 }

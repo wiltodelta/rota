@@ -46,7 +46,8 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     }
 
     private func launch() throws {
-        let process = ProcessLauncher.loginShellProcess(spec.executable, spec.arguments,
+        let process = ProcessLauncher.loginShellProcess(spec.executable,
+                                                        spec.arguments + spec.modelFlags(effortFlag: "--effort"),
                                                         in: spec.workingDirectory, environment: spec.environment)
         let stdin = Pipe()
         let stdout = Pipe()
@@ -69,7 +70,9 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         input = stdin.fileHandleForWriting
         try input?.write(contentsOf: Self.userMessage(spec.prompt))
         if let session = spec.resume { journal.session(session) }
-        queue.asyncAfter(deadline: .now() + spec.timeout) { [weak self] in self?.end(as: .timedOut) }
+        if let timeout = spec.timeout {
+            queue.asyncAfter(deadline: .now() + timeout) { [weak self] in self?.end(as: .timedOut) }
+        }
     }
 
     func send(_ message: String) {
@@ -110,6 +113,8 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         switch type {
         case "system":
             if event["subtype"] as? String == "init", let session = event["session_id"] as? String {
+                // The header names the model Claude picked, so a chosen one can be checked.
+                if let header = StreamJSONFormatter.format(line) { journal.line(header) }
                 journal.session(session)
             }
         case "result":

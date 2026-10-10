@@ -3,13 +3,6 @@ import Foundation
 /// Reads the routines Claude Desktop schedules, read-only: Claude Desktop owns
 /// that file and rewrites it wholesale, so Rota never writes to it.
 public enum ClaudeDesktopImport {
-    public struct Candidate: Identifiable, Equatable, Sendable {
-        public var routine: Routine
-        /// Still enabled in Claude Desktop, so importing it enabled would fire it twice.
-        public var enabledInClaudeDesktop: Bool
-        public var id: String { routine.id }
-    }
-
     struct Registration: Decodable {
         var id: String
         var displayName: String?
@@ -37,7 +30,7 @@ public enum ClaudeDesktopImport {
         return newest?.0
     }
 
-    public static func candidates(from file: URL) throws -> [Candidate] {
+    public static func candidates(from file: URL) throws -> [ImportCandidate] {
         let registrations = try JSONDecoder().decode(File.self, from: Data(contentsOf: file)).scheduledTasks
         return registrations.compactMap { registration in
             guard let cron = registration.cronExpression, let cwd = registration.cwd else { return nil }
@@ -45,7 +38,7 @@ public enum ClaudeDesktopImport {
                 ?? Routine.defaultPrompt(skill: registration.id, workingDirectory: cwd)
             let routine = Routine(id: registration.id, name: registration.displayName ?? registration.id,
                                   workingDirectory: cwd, schedule: cron, prompt: prompt)
-            return Candidate(routine: routine, enabledInClaudeDesktop: registration.enabled ?? false)
+            return ImportCandidate(routine: routine, source: .claudeDesktop, onInSource: registration.enabled ?? false)
         }
     }
 

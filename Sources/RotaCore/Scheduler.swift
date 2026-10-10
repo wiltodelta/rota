@@ -140,17 +140,22 @@ public final class Scheduler {
                                startedAt: now(), outcome: .running)
         let logURL = history.logFile(for: record)
         record.logPath = logURL.path
+        start(record, spec: spec(for: routine, harness: routine.harness, prompt: routine.prompt, log: logURL))
+    }
+
+    /// How `routine` runs `prompt` on `harness`: a new session, or `resume`'s.
+    private func spec(for routine: Routine, harness: Harness, prompt: String, log: URL,
+                      resume: String? = nil) -> LaunchSpec {
         let needs = requirements(of: routine)
-        let spec = LaunchSpec(
-            executable: executable(routine.harness),
-            prompt: routine.prompt,
-            arguments: routine.harness.arguments(needs: needs),
-            workingDirectory: routine.workingDirectory,
-            environment: routine.harness.environment(needs: needs),
-            mode: routine.harness.launchMode,
-            timeout: TimeInterval(routine.timeoutMinutes * 60),
-            log: logURL)
-        start(record, spec: spec)
+        // A session started on another harness keeps that harness; the routine's model ids are not its.
+        let sameHarness = harness == routine.harness
+        return LaunchSpec(
+            executable: executable(harness), prompt: prompt,
+            arguments: harness.arguments(needs: needs, resume: resume),
+            workingDirectory: routine.workingDirectory, environment: harness.environment(needs: needs),
+            mode: harness.launchMode, timeout: routine.timeLimitMinutes.map { TimeInterval($0 * 60) },
+            log: log, resume: resume,
+            model: sameHarness ? routine.model : nil, effort: sameHarness ? routine.effort : nil)
     }
 
     /// Launches `spec` as `record`, which becomes the routine's active run.
@@ -229,14 +234,8 @@ public final class Scheduler {
         var record = record
         record.outcome = .running
         record.endedAt = nil
-        let needs = requirements(of: routine)
-        let spec = LaunchSpec(
-            executable: executable(record.harness), prompt: message,
-            arguments: record.harness.arguments(needs: needs, resume: session),
-            workingDirectory: routine.workingDirectory, environment: record.harness.environment(needs: needs),
-            mode: record.harness.launchMode,
-            timeout: TimeInterval(routine.timeoutMinutes * 60), log: URL(fileURLWithPath: logPath), resume: session)
-        start(record, spec: spec)
+        start(record, spec: spec(for: routine, harness: record.harness, prompt: message,
+                                 log: URL(fileURLWithPath: logPath), resume: session))
     }
 
     private func attachSession(_ session: String, to routineID: String) {

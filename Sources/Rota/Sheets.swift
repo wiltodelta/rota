@@ -1,92 +1,173 @@
 import RotaCore
 import SwiftUI
 
-/// Lists Claude Desktop's routines and copies the chosen ones into Rota, turned off.
+/// Lists the routines other apps schedule, by source, and copies the chosen
+/// ones into Rota, turned off.
 struct ImportSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var candidates: [ClaudeDesktopImport.Candidate] = []
+    @State private var scans: [ImportScan]?
     @State private var chosen: Set<String> = []
-    @State private var harness: Harness = .claude
-    @State private var problem: String?
+    /// nil keeps each routine on the agent it ran on in its app.
+    @State private var harness: Harness?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Import from Claude Desktop").font(.headline)
-            Text("""
-                Imported routines start turned off. Turn each one off in Claude Desktop before \
-                turning it on here, or both apps will run it.
-                """)
+            Text("Import routines").font(.headline)
+            Text("Rota copies the routines you pick from other apps, turned off.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let problem {
-                Text(problem).foregroundStyle(.red)
-            }
-            List(candidates) { candidate in
-                Toggle(isOn: Binding(
-                    get: { chosen.contains(candidate.id) },
-                    set: { if $0 { chosen.insert(candidate.id) } else { chosen.remove(candidate.id) } }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(candidate.routine.name)
-                        Text(detail(candidate))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            if let scans {
+                List {
+                    ForEach(scans, id: \.source) { scan in
+                        Section {
+                            if scan.candidates.isEmpty {
+                                Text(scan.problem ?? "No routines scheduled there.")
+                                    .foregroundStyle(.secondary)
+                            }
+                            ForEach(scan.candidates) { ImportRow(candidate: $0, chosen: $chosen) }
+                        } header: {
+                            sectionHeader(scan)
+                        }
                     }
                 }
-                .disabled(model.scheduler.routine(candidate.id) != nil)
+                .frame(minHeight: 180, idealHeight: 360)
+            } else {
+                ProgressView("Looking for routines\u{2026}")
+                    .frame(maxWidth: .infinity, minHeight: 180)
             }
-            .frame(minHeight: 140, idealHeight: 280)
             Picker("Run on", selection: $harness) {
-                ForEach(Harness.allCases) { Text($0.title).tag($0) }
+                Text("The same agent as in its app").tag(Harness?.none)
+                Divider()
+                ForEach(Harness.agents) { Text($0.title).tag(Optional($0)) }
             }
-            .pickerStyle(.segmented)
+            .fixedSize()
+            if stillOn > 0 {
+                Label(stillOn == 1
+                      ? "1 of them is still on in its app. Turn it off there before turning it on here, "
+                        + "or both apps will run it."
+                      : "\(stillOn) of them are still on in their apps. Turn them off there before turning "
+                        + "them on here, or both apps will run them.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
-                Button("Import \(chosen.count)") { importChosen() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(chosen.isEmpty)
+                Button(chosen.isEmpty ? "Import" : "Import \(chosen.count) Routine\(chosen.count == 1 ? "" : "s")") {
+                    importChosen()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(chosen.isEmpty)
             }
         }
         .padding(20)
-        .frame(width: 560)
-        .onAppear(perform: load)
+        .frame(width: 600)
+        .task {
+            let found = await Task.detached(priority: .userInitiated) { RoutineImport.scanAll() }.value
+            scans = found
+        }
     }
 
-    private func detail(_ candidate: ClaudeDesktopImport.Candidate) -> String {
-        var parts = [candidate.routine.schedule,
-                     URL(fileURLWithPath: candidate.routine.workingDirectory).lastPathComponent]
-        if model.scheduler.routine(candidate.id) != nil {
-            parts.append("already in Rota")
-        } else if candidate.enabledInClaudeDesktop {
-            parts.append("on in Claude Desktop")
-        }
-        return parts.joined(separator: " \u{00B7} ")
+    private var candidates: [ImportCandidate] { scans?.flatMap(\.candidates) ?? [] }
+
+    private var stillOn: Int { candidates.filter { chosen.contains($0.id) && $0.onInSource }.count }
+
+    private func importable(_ scan: ImportScan) -> [String] {
+        scan.candidates.filter { $0.unsupported == nil && model.scheduler.routine($0.routine.id) == nil }.map(\.id)
     }
 
-    private func load() {
-        guard let file = ClaudeDesktopImport.locate() else {
-            problem = "No Claude Desktop scheduled tasks found."
-            return
-        }
-        do {
-            candidates = try ClaudeDesktopImport.candidates(from: file)
-                .sorted { $0.routine.name.localizedStandardCompare($1.routine.name) == .orderedAscending }
-        } catch {
-            problem = "Could not read \(file.path): \(error.localizedDescription)"
+    private func sectionHeader(_ scan: ImportScan) -> some View {
+        let ids = importable(scan)
+        let all = !ids.isEmpty && Set(ids).isSubset(of: chosen)
+        return HStack {
+            Text(scan.source.title)
+            Spacer()
+            if !ids.isEmpty {
+                Button(all ? "Select None" : "Select All") {
+                    if all { chosen.subtract(ids) } else { chosen.formUnion(ids) }
+                }
+                .buttonStyle(.link)
+                .font(.callout)
+            }
         }
     }
 
     private func importChosen() {
+        var first: String?
         for candidate in candidates where chosen.contains(candidate.id) {
             var routine = candidate.routine
-            routine.harness = harness
+            if let harness, harness != candidate.source.harness {
+                // Model ids belong to the agent they came from.
+                routine.harness = harness
+                routine.model = nil
+                routine.effort = nil
+            }
+            routine.enabled = false
             model.scheduler.save(routine)
+            first = first ?? routine.id
         }
-        model.selection = chosen.min().map { .routine($0) }
+        model.selection = first.map { .routine($0) }
         dismiss()
+    }
+}
+
+/// One importable routine: its name, schedule in words, folder, and whether it
+/// is still on in its app, already in Rota, or cannot be imported.
+private struct ImportRow: View {
+    @Environment(AppModel.self) private var model
+    let candidate: ImportCandidate
+    @Binding var chosen: Set<String>
+
+    var body: some View {
+        let inRota = model.scheduler.routine(candidate.routine.id) != nil
+        Toggle(isOn: Binding(
+            get: { chosen.contains(candidate.id) },
+            set: { if $0 { chosen.insert(candidate.id) } else { chosen.remove(candidate.id) } }
+        )) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(candidate.routine.name)
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                    if let reason = candidate.unsupported {
+                        Text(reason).font(.caption).foregroundStyle(.red)
+                    }
+                }
+                Spacer(minLength: 8)
+                if inRota {
+                    Tag(text: "In Rota", color: .secondary)
+                } else if candidate.onInSource {
+                    Tag(text: "On in \(candidate.source.title)", color: .orange)
+                }
+            }
+        }
+        .disabled(inRota || candidate.unsupported != nil)
+        .help(candidate.routine.schedule)
+    }
+
+    private var detail: String {
+        let routine = candidate.routine
+        let schedule = ScheduleText.describe(routine.schedule) ?? routine.schedule
+        var parts = [schedule, URL(fileURLWithPath: routine.workingDirectory).lastPathComponent]
+        if let modelID = routine.model { parts.append(modelID) }
+        return parts.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+    }
+}
+
+/// A small capsule label for a row's state.
+private struct Tag: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12), in: Capsule())
     }
 }
 

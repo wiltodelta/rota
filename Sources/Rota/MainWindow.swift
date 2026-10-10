@@ -45,9 +45,9 @@ struct MainWindow: View {
                     ContentUnavailableView {
                         Label("No routines", systemImage: "calendar.badge.clock")
                     } description: {
-                        Text("Import the routines Claude Desktop schedules, or add one.")
+                        Text("Import the routines Claude Desktop or Codex schedules, or add one.")
                     } actions: {
-                        Button("Import from Claude Desktop") { model.presentingImport = true }
+                        Button("Import Routines") { model.presentingImport = true }
                     }
                 }
             }
@@ -58,9 +58,9 @@ struct MainWindow: View {
         .toolbar {
             ToolbarItemGroup {
                 Button { model.presentingImport = true } label: {
-                    Label("Import from Claude Desktop", systemImage: "square.and.arrow.down")
+                    Label("Import routines", systemImage: "square.and.arrow.down")
                 }
-                .help("Import from Claude Desktop")
+                .help("Import routines from Claude Desktop or Codex")
                 .accessibilityIdentifier("import")
                 Button { model.presentingNew = true } label: {
                     Label("New routine", systemImage: "plus")

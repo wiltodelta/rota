@@ -40,19 +40,28 @@ restore() {
     rm -rf "$WORK" "$BACKUP"
 }
 
+# LaunchServices can refuse to open an app that has just quit (error -600), so try again.
+open_rota() {
+    for _ in 1 2 3; do open "$@" Rota.app && return 0; sleep 2; done
+    return 1
+}
+
 launch() {
-    open --env "ROTA_APPEARANCE=$1" Rota.app
+    open_rota --env "ROTA_APPEARANCE=$1"
     sleep 4
-    open Rota.app
+    open_rota
     sleep 2
 }
 
 capture() {
-    local title="$1" name="$2" id
+    local title="$1" name="$2" id violations
     "$DRIVER" window "$title" 820 600 || true
     sleep 1
     id="$("$DRIVER" wid "$title")"
     screencapture -x -o -l "$id" "$OUT/$name.png" && pass "captured $name"
+    # Frames that leave their window or parent: clipped or overflowing controls.
+    violations="$("$DRIVER" gate | tail -1)"
+    [[ "$violations" == "0 violations" ]] && pass "layout $name" || { fail "layout $name: $violations"; "$DRIVER" gate | sed 's/^/      /'; }
 }
 
 session_value() {
@@ -77,6 +86,12 @@ for appearance in light dark; do
     check "$DRIVER" exists newRoutine
     capture "Rota" "$appearance-empty"
 
+    # The import sheet reads Claude Desktop and Codex as they are on this Mac; Cancel leaves both untouched.
+    "$DRIVER" press import; sleep 4
+    check "$DRIVER" exists Cancel
+    capture "Rota" "$appearance-import"
+    "$DRIVER" press Cancel; sleep 1
+
     # A routine made the way a person makes one: the New routine sheet.
     "$DRIVER" press newRoutine; sleep 1.5
     "$DRIVER" set routineSkill "ui-shell-$appearance"
@@ -84,6 +99,11 @@ for appearance in light dark; do
     "$DRIVER" set routineFolder "$WORK/project"
     "$DRIVER" set routineSchedule "0 9 * * 1"
     "$DRIVER" set routinePrompt 'echo hello from rota; sleep 6; echo done'
+    # An agent shows the model and effort its CLI lists; the list loads in the background.
+    "$DRIVER" choose routineHarness Codex; sleep 4
+    check "$DRIVER" exists routineModel
+    check "$DRIVER" exists routineEffort
+    capture "Rota" "$appearance-new"
     "$DRIVER" choose routineHarness Shell
     check "$DRIVER" choose routineHarness Shell
     "$DRIVER" press addRoutine; sleep 1
@@ -108,7 +128,19 @@ for appearance in light dark; do
     "$DRIVER" press editRoutine; sleep 1
     check "$DRIVER" exists saveRoutine
     capture "UI check $appearance" "$appearance-edit"
+    # No time limit by default; turning it on shows its length.
+    [[ "$("$DRIVER" value routineTimeLimit)" == 0 ]] && pass "no time limit by default" || fail "no time limit by default"
+    "$DRIVER" press routineTimeLimit; sleep 1
+    [[ "$("$DRIVER" value routineTimeLimit)" == 1 ]] && pass "time limit turns on" || fail "time limit turns on"
+    capture "UI check $appearance" "$appearance-edit-limit"
     "$DRIVER" press Cancel; sleep 0.5
+    quit_rota
+
+    # Settings, with each agent's installed copies and versions.
+    open_rota --env "ROTA_APPEARANCE=$appearance" --env ROTA_OPEN_SETTINGS=1
+    sleep 8
+    settings_id="$("$DRIVER" wid "Rota Settings")" && screencapture -x -o -l "$settings_id" "$OUT/$appearance-settings.png" \
+        && pass "captured $appearance-settings" || fail "captured $appearance-settings"
     quit_rota
 done
 
@@ -123,6 +155,8 @@ if [[ "$LIVE" == --live ]]; then
     "$DRIVER" press addRoutine; sleep 1
     "$DRIVER" press runNow; sleep 6
     "$DRIVER" set composer "Reply with exactly: purple otter"
+    check "$DRIVER" exists composerStop
+    capture "UI check codex" codex-running
     "$DRIVER" press send
     for _ in $(seq 1 30); do
         sleep 3

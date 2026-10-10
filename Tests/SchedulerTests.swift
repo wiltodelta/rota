@@ -72,7 +72,7 @@ final class SchedulerTests: XCTestCase {
 
     private func addDailyRoutine(enabled: Bool = true) -> Routine {
         let routine = Routine(id: "report", name: "Report", workingDirectory: "/p", schedule: "0 10 * * *",
-                              harness: .codex, enabled: enabled, prompt: "go", timeoutMinutes: 30)
+                              harness: .codex, enabled: enabled, prompt: "go", timeLimitMinutes: 30)
         scheduler.save(routine)
         return routine
     }
@@ -273,6 +273,35 @@ final class SchedulerTests: XCTestCase {
         XCTAssertEqual(scheduler.terminalCommand(for: finished)?.arguments, ["--resume", "abc123"])
         scheduler.message("and then?", to: finished)
         XCTAssertEqual(Array(try XCTUnwrap(launcher.specs.last).arguments.suffix(2)), ["--resume", "abc123"])
+    }
+
+    func testARunTakesAsLongAsItNeedsUnlessTheRoutineSetsALimit() throws {
+        var routine = addDailyRoutine()
+        routine.timeLimitMinutes = nil
+        scheduler.save(routine)
+        scheduler.run(routine, trigger: .manual)
+        XCTAssertNil(try XCTUnwrap(launcher.specs.last).timeout)
+        launcher.completions[0](.succeeded)
+        routine.timeLimitMinutes = 90
+        scheduler.save(routine)
+        scheduler.run(routine, trigger: .manual)
+        XCTAssertEqual(try XCTUnwrap(launcher.specs.last).timeout, 90 * 60)
+        XCTAssertNil(Routine(id: "r", name: "R", workingDirectory: "/p", schedule: "0 9 * * *", prompt: "go")
+            .timeLimitMinutes, "a new routine has no limit")
+    }
+
+    func testTheRoutinesModelReachesTheRunAndItsContinuation() throws {
+        var routine = addDailyRoutine()
+        routine.model = "gpt-6-luna"
+        routine.effort = "high"
+        scheduler.save(routine)
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("thread-1")
+        launcher.completions[0](.succeeded)
+        let finished = try XCTUnwrap(scheduler.history.records(for: "report").first)
+        scheduler.message("and then?", to: finished)
+        XCTAssertEqual(launcher.specs.map(\.model), ["gpt-6-luna", "gpt-6-luna"])
+        XCTAssertEqual(launcher.specs.map(\.effort), ["high", "high"])
     }
 
     func testCodexRunTakesMessagesWhileRunningAndContinuesAfter() throws {

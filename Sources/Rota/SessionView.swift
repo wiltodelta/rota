@@ -161,54 +161,105 @@ private struct ChatItemView: View {
     }
 }
 
-/// The message field. It talks to the live session where the harness allows it,
-/// continues a finished session otherwise, and says where to go when neither works.
+/// The field under the chat: one rounded box holding the message, Stop while
+/// the session runs, and Send. Return sends, Option-Return starts a new line.
+/// It talks to the live session where the harness allows it, continues a
+/// finished session otherwise, and says where to go when neither works.
 private struct Composer: View {
     @Environment(AppModel.self) private var model
     let record: RunRecord
     @State private var text = ""
+    @FocusState private var focused: Bool
+
+    private var running: Bool { model.scheduler.isActive(record) }
+    private var canSend: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
-        if model.scheduler.canMessage(record) {
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField(placeholder, text: $text, axis: .vertical)
-                    .font(model.chatText.body)
-                    .lineLimit(1...6)
-                    .textFieldStyle(.plain)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
-                    .onSubmit(send)
-                    .accessibilityIdentifier("composer")
-                Button("Send", systemImage: "arrow.up.circle.fill", action: send)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .font(.title)
-                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .help("Send (Command-Return)")
-                    .accessibilityIdentifier("send")
+        Group {
+            if model.scheduler.canMessage(record) {
+                VStack(alignment: .leading, spacing: 6) {
+                    field
+                    HStack {
+                        Text(effect)
+                        Spacer(minLength: 12)
+                        Text("Return to send, Option-Return for a new line")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 4)
+                }
+            } else if let note {
+                Text(note)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
             }
-            .padding(12)
-            .background(.bar)
-        } else if let note {
-            Text(note)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-                .padding(12)
-                .background(.bar)
         }
+        // The chat's column, so the field lines up with the messages above it.
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 14)
+        .frame(maxWidth: 820)
+        .frame(maxWidth: .infinity)
+        // The chat's own background, so the field floats on it rather than on a band.
+        .background(Color(nsColor: .textBackgroundColor))
+        .task(id: record.id) { focused = true }
+    }
+
+    private var field: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField(placeholder, text: $text, axis: .vertical)
+                .font(model.chatText.body)
+                .lineLimit(1...8)
+                .textFieldStyle(.plain)
+                .focused($focused)
+                .onSubmit(send)
+                .padding(.vertical, 5)
+                .accessibilityIdentifier("composer")
+            if running {
+                RoundButton(symbol: "stop.fill", fill: Color.secondary.opacity(0.18), foreground: .primary) {
+                    model.scheduler.stop(record.routineID)
+                }
+                .help("Stop the session")
+                .accessibilityLabel("Stop")
+                .accessibilityIdentifier("composerStop")
+            }
+            RoundButton(symbol: "arrow.up",
+                        fill: canSend ? Color.accentColor : Color.secondary.opacity(0.25),
+                        foreground: canSend ? .white : .secondary, action: send)
+                .disabled(!canSend)
+                .keyboardShortcut(.return, modifiers: .command)
+                .help("Send (Return)")
+                .accessibilityLabel("Send")
+                .accessibilityIdentifier("send")
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .strokeBorder(focused ? Color.accentColor.opacity(0.6) : Color(nsColor: .separatorColor),
+                              lineWidth: focused ? 1.5 : 1)
+        }
+        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .contentShape(RoundedRectangle(cornerRadius: 18))
+        .onTapGesture { focused = true }
     }
 
     private var placeholder: String {
-        model.scheduler.isActive(record) ? "Message the running session" : "Continue this session"
+        running ? "Message the running session" : "Continue this session"
+    }
+
+    /// What sending does here, which differs by harness and state.
+    private var effect: String {
+        guard running else { return "Sends a new turn in this session." }
+        return record.harness == .grok ? "Answered after the current turn." : "Joins the current turn."
     }
 
     /// Why there is no field.
     private var note: String? {
-        let running = model.scheduler.isActive(record)
         switch record.harness {
         case .shell:
             return running ? "Open in Terminal to type into the command." : nil
@@ -223,6 +274,25 @@ private struct Composer: View {
         guard !message.isEmpty else { return }
         model.scheduler.message(message, to: record)
         text = ""
+    }
+}
+
+/// A 28 pt circular icon button, as the composer's Send and Stop.
+private struct RoundButton: View {
+    let symbol: String
+    let fill: Color
+    let foreground: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(foreground)
+                .frame(width: 28, height: 28)
+                .background(fill, in: Circle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

@@ -73,7 +73,9 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         peer.request("initialize", ["clientInfo": ["name": "rota", "version": "1"]]) { [weak self] result in
             self?.queue.async { self?.initialized(result) }
         }
-        queue.asyncAfter(deadline: .now() + spec.timeout) { [weak self] in self?.interrupt(as: .timedOut) }
+        if let timeout = spec.timeout {
+            queue.asyncAfter(deadline: .now() + timeout) { [weak self] in self?.interrupt(as: .timedOut) }
+        }
     }
 
     private func initialized(_ result: Result<Any, JSONRPCError>) {
@@ -81,6 +83,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         peer?.notify("initialized")
         var params: [String: Any] = ["cwd": spec.workingDirectory, "approvalPolicy": "never",
                                      "sandbox": "danger-full-access"]
+        if let model = spec.model { params["model"] = model }
         // A continued session loads its thread back onto the daemon and takes the next turn.
         let method = spec.resume == nil ? "thread/start" : "thread/resume"
         if let thread = spec.resume { params["threadId"] = thread }
@@ -96,9 +99,13 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
             return fail(result, spec.resume == nil ? "thread/start" : "thread/resume")
         }
         threadID = id
-        if spec.resume == nil { journal.line("[codex thread \(id)]") }
+        // The header names the model the daemon picked, so a chosen one can be checked.
+        let model = (value as? [String: Any])?["model"] as? String
+        if spec.resume == nil { journal.line("[codex thread \(id)" + (model.map { ", \($0)" } ?? "") + "]") }
         journal.session(id)
-        let params: [String: Any] = ["threadId": id, "input": [["type": "text", "text": spec.prompt]]]
+        var params: [String: Any] = ["threadId": id, "input": [["type": "text", "text": spec.prompt]]]
+        if let model = spec.model { params["model"] = model }
+        if let effort = spec.effort { params["effort"] = effort }
         peer?.request("turn/start", params) { [weak self] result in
             self?.queue.async {
                 guard case .success(let value) = result,

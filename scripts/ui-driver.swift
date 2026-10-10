@@ -92,7 +92,9 @@ case "set":
     guard result == .success else { fail("set failed: \(result.rawValue)") }
 case "value":
     guard arguments.count == 2, let element = find({ matches($0, arguments[1]) }) else { fail("no element") }
-    print(attribute(element, kAXValueAttribute) as String? ?? "")
+    // A switch or checkbox reports a number, a field a string.
+    let value: Any? = attribute(element, kAXValueAttribute)
+    print((value as? String) ?? (value as? NSNumber)?.stringValue ?? "")
 case "exists":
     guard arguments.count == 2 else { fail("exists <id-or-title>") }
     exit(find({ matches($0, arguments[1]) }) == nil ? 1 : 0)
@@ -142,14 +144,15 @@ case "gate":
     var violations = 0
     for window in windows() {
         guard let windowFrame = frame(window) else { continue }
-        func walk(_ element: AXUIElement, parent: CGRect) {
+        // `clip` is the visible part of the nearest scroll area: content scrolled
+        // out of it is not on screen, so it is neither outside the window nor clipped.
+        func walk(_ element: AXUIElement, parent: CGRect, clip: CGRect) {
             for child in children(element) {
-                guard let rect = frame(child) else { walk(child, parent: parent); continue }
+                guard let rect = frame(child) else { walk(child, parent: parent, clip: clip); continue }
                 let role: String = attribute(child, kAXRoleAttribute) ?? "?"
-                let visible = rect.width > 0 && rect.height > 0
-                // Scrolling content may extend past its scroll area; only check what is laid out.
+                let visible = rect.width > 0 && rect.height > 0 && rect.intersects(clip)
                 let scrolls = role == "AXScrollArea" || role == "AXOutline" || role == "AXTable"
-                if visible && !windowFrame.insetBy(dx: -1, dy: -1).contains(rect) {
+                if visible && !windowFrame.insetBy(dx: -1, dy: -1).contains(rect.intersection(clip)) {
                     violations += 1
                     print("outside window  \(role)  \(label(child))  \(rect)")
                 } else if visible && !scrolls && role != "AXRow" && role != "AXCell"
@@ -157,10 +160,18 @@ case "gate":
                     violations += 1
                     print("outside parent  \(role)  \(label(child))  \(rect) in \(parent)")
                 }
-                walk(child, parent: scrolls ? .infinite : rect)
+                // A list cell's content sits on the row's inset, a few points past the
+                // cell's own frame, so it may pass the cell sideways by that much and no
+                // more. Up and down only the list bounds it: a pinned section header
+                // floats over the rows while its own row scrolls away.
+                let inList = role == "AXCell" || role == "AXRow"
+                let next = scrolls ? CGRect.infinite
+                    : inList ? CGRect(x: rect.minX - 8, y: -1e6, width: rect.width + 16, height: 2e6) : rect
+                walk(child, parent: next, clip: role == "AXScrollArea" ? clip.intersection(rect) : clip)
             }
         }
-        walk(window, parent: windowFrame)
+        // Outside any scroll area nothing is clipped: a control past the window's edge is a defect.
+        walk(window, parent: windowFrame, clip: .infinite)
     }
     print("\(violations) violations")
 case "wid":

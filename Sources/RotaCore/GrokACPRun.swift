@@ -48,7 +48,10 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     // MARK: On `queue`
 
     private func connect() {
-        let arguments = ["agent", "--leader", "--always-approve", "stdio"]
+        // On the command line, not session/set_config_option: Grok's guide says a
+        // model set that way is synced to the leader's other clients.
+        let arguments = ["agent", "--leader", "--always-approve"]
+            + spec.modelFlags(effortFlag: "--reasoning-effort") + ["stdio"]
         let process = ProcessLauncher.loginShellProcess(spec.executable, arguments,
                                                         in: spec.workingDirectory, environment: spec.environment)
         let stdin = Pipe()
@@ -72,7 +75,9 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         peer.request("initialize", hello) { [weak self] result in
             self?.queue.async { self?.initialized(result) }
         }
-        queue.asyncAfter(deadline: .now() + spec.timeout) { [weak self] in self?.cancel(as: .timedOut) }
+        if let timeout = spec.timeout {
+            queue.asyncAfter(deadline: .now() + timeout) { [weak self] in self?.cancel(as: .timedOut) }
+        }
     }
 
     private func initialized(_ result: Result<Any, JSONRPCError>) {
@@ -100,7 +105,9 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         guard case .success(let value) = result, let id = (value as? [String: Any])?["sessionId"] as? String else {
             return fail(result, "session/new")
         }
-        journal.line("[grok session \(id)]")
+        let options = (value as? [String: Any])?["configOptions"] as? [[String: Any]] ?? []
+        let model = options.first { $0["id"] as? String == "model" }?["currentValue"] as? String
+        journal.line("[grok session \(id)" + (model.map { ", \($0)" } ?? "") + "]")
         sessionReady(id)
     }
 

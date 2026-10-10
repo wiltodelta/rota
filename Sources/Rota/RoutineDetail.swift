@@ -86,9 +86,10 @@ struct RoutineDetail: View {
         }
     }
 
-    /// "Codex, next run Mon, Oct 12, 10:15 AM", or why it will not run.
+    /// "Codex gpt-6-sol high, next run Mon, Oct 12, 10:15 AM", or why it will not run.
     private var summary: String {
-        let harness = routine.harness.title
+        let harness = ([routine.harness.title] + [routine.model, routine.effort].compactMap { $0 })
+            .joined(separator: " ")
         guard routine.enabled else { return "\(harness), paused" }
         guard let next = routine.nextFire else { return "\(harness), no upcoming run" }
         return "\(harness), next run \(NextRunFormat.string(next))"

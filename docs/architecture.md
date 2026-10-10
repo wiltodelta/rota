@@ -28,8 +28,37 @@ flowchart LR
   mode, chat arguments, and which capabilities (Chrome, phone push) it has.
   `SkillRequirements` reads the routine's `.claude/skills/<id>/SKILL.md` for
   markers of those capabilities.
+- A routine's `model` and `effort` (nil leaves the CLI's default) travel only
+  in `LaunchSpec`; each runner turns them into its own form, Claude
+  `--model`/`--effort` and Grok `--model`/`--reasoning-effort` through
+  `LaunchSpec.modelFlags`, Codex fields in `thread/start` and `turn/start`. A
+  session continued on a harness the routine has since left runs without them. `ModelCatalog` lists the choices without
+  spending quota: Codex `model/list` with each model's efforts, `grok models`,
+  and Claude's family aliases (it has no list). Each runner writes the model
+  the CLI actually picked into its log header. A Grok model passed on the
+  command line in leader mode left `grok models`' default untouched (live test,
+  2026-10-09); Grok's agent-mode guide says a `session/set_config_option`
+  model change is synced to the leader's other clients, so Rota does not use it.
+- `RoutineImport.scanAll` reads every source read-only into `ImportCandidate`s:
+  `ClaudeDesktopImport` (`scheduled-tasks.json` and its stubs) and
+  `CodexAutomationsImport` (the `automations` table of the Codex app's
+  `~/.codex/sqlite/*.db`, opened `mode=ro`; schedules are RFC 5545 RRULEs that
+  `ScheduleText.cron(fromRRule:anchor:)` converts where cron can say the same,
+  and a rule without an hour, such as the default `FREQ=HOURLY;INTERVAL=24`,
+  takes it from `next_run_at`). A Codex automation that continues a thread,
+  has no folder or has no cron equivalent is listed with the reason and cannot
+  be picked. Grok Build has nothing to import: its scheduler holds one
+  session's `/loop` tasks for at most seven days. `ScheduleText.describe` puts
+  common cron shapes in words for the import list and the schedule field.
 - `ProcessLauncher` runs every CLI through `zsh -lc 'exec "$0" "$@"'`, so a
   routine sees the PATH a login terminal sees.
+- `ExecutableDiscovery` lists each agent CLI's installed copies: the PATH of a
+  login shell started from an empty environment (an app opened from a terminal
+  inherits that terminal's PATH, which put another tool's agent wrappers first
+  on 2026-10-09), then the folders installers use, one entry per real file, each with
+  the first line of its `--version`. A run uses the copy picked in Settings,
+  else the first one found, else `Harness.defaultExecutable`. Shell routines
+  always run in `/bin/zsh`, so Settings lists agents only.
 - `ClaudeStreamRun` runs Claude the way Claude Desktop does
   (read from its live `ps` on 2026-10-09): `claude -p --input-format
   stream-json --output-format stream-json --verbose --permission-mode
@@ -94,6 +123,10 @@ flowchart LR
   record read interrupted.
 - A notification carries its session id (its routine's, for a skip or a
   pause) in `userInfo`; clicking it opens that item.
+- A run has no time limit unless its routine sets `timeLimitMinutes`; each
+  runner arms its timer only when `LaunchSpec.timeout` is set. The key replaced
+  0.1's `timeoutMinutes`: `Routine.init(from:)` reads its 60, the default, as
+  no limit and keeps any other value. An overlap is still skipped, so a long run never stacks.
 - `RunHistory` keeps the last 50 records per routine and deletes the logs of
   the ones it drops. Runs left `running` by a previous launch become
   `interrupted` at start.
@@ -134,5 +167,9 @@ Layout rules learned while measuring the narrowest window (820 pt):
 API with `scripts/ui-driver.swift` (synthetic clicks and keystrokes do not
 reach the windows here; `AXPress` and `AXValue` do). Controls it needs carry
 `accessibilityIdentifier`s. Its `gate` command lists elements whose frame
-leaves the window or its parent. `choose` reads the pop-up back and retries,
+leaves the window or its parent; inside a scroll area only what is scrolled
+into view counts, and a list cell's content may pass the cell sideways by the
+row's 8 pt inset and up or down as far as the list (a pinned section header
+floats over the rows). Every
+capture runs it. `choose` reads the pop-up back and retries,
 because SwiftUI can redraw the form while its menu is open and drop the pick.

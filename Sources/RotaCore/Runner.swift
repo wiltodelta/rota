@@ -10,14 +10,19 @@ public struct LaunchSpec: Equatable, Sendable {
     public var workingDirectory: String
     public var environment: [String: String]
     public var mode: LaunchMode
-    public var timeout: TimeInterval
+    /// nil: no limit.
+    public var timeout: TimeInterval?
     public var log: URL
     /// The session to continue with `prompt` as the next message, instead of starting one.
     public var resume: String?
+    /// The model and reasoning effort; nil leaves the CLI's default. Each runner
+    /// passes them its own way: flags for Claude and Grok, protocol fields for Codex.
+    public var model: String?
+    public var effort: String?
 
     public init(executable: String, prompt: String, arguments: [String], workingDirectory: String,
-                environment: [String: String], mode: LaunchMode, timeout: TimeInterval, log: URL,
-                resume: String? = nil) {
+                environment: [String: String], mode: LaunchMode, timeout: TimeInterval?, log: URL,
+                resume: String? = nil, model: String? = nil, effort: String? = nil) {
         self.executable = executable
         self.prompt = prompt
         self.arguments = arguments
@@ -27,6 +32,13 @@ public struct LaunchSpec: Equatable, Sendable {
         self.timeout = timeout
         self.log = log
         self.resume = resume
+        self.model = model
+        self.effort = effort
+    }
+
+    /// `--model` and the CLI's effort flag, for the values that are set.
+    func modelFlags(effortFlag: String) -> [String] {
+        [("--model", model), (effortFlag, effort)].flatMap { flag, value in value.map { [flag, $0] } ?? [] }
     }
 }
 
@@ -122,19 +134,25 @@ public final class ProcessLauncher: RoutineLaunching {
         return process
     }
 
-    /// Runs a short command to completion and returns its exit status and combined output.
-    static func capture(_ executable: String, _ arguments: [String], in directory: String) -> (Int32, String) {
+    /// Runs a short command to completion and returns its exit status and output,
+    /// stderr included unless `errors` is false. A command still running after
+    /// `timeout` is terminated, so a CLI waiting on a prompt cannot hang the caller.
+    static func capture(_ executable: String, _ arguments: [String], in directory: String,
+                        timeout: TimeInterval? = nil, errors: Bool = true) -> (Int32, String) {
         let process = loginShellProcess(executable, arguments, in: directory, environment: [:])
         let pipe = Pipe()
         process.standardOutput = pipe
-        process.standardError = pipe
+        process.standardError = errors ? pipe : FileHandle.nullDevice
         do {
             try process.run()
         } catch {
             return (-1, error.localizedDescription)
         }
+        let deadline = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        if let timeout { DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline) }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        deadline.cancel()
         return (process.terminationStatus, lossyUTF8(data))
     }
 }

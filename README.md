@@ -12,7 +12,8 @@ Desktop.
 ## Features
 
 - **One scheduler for every harness.** Pick Claude Code, Codex, Grok Build or
-  Shell per routine and switch at any time. Standard five-field cron
+  Shell per routine and switch at any time, with the model and reasoning
+  effort to run on: Rota lists the models each agent's CLI offers. Standard five-field cron
   schedules, with the next three run times shown as you type.
 - **Sessions are the main view.** The sidebar lists every routine's sessions,
   newest first, by day. A session reads as a chat: the routine's prompt, what
@@ -44,20 +45,26 @@ Desktop.
 - **Harness warnings.** Rota reads the routine's project skill and warns when
   it uses a tool the chosen harness lacks: Claude in Chrome on Grok Build, for
   example, or phone push anywhere but Claude Code.
-- **Import from Claude Desktop.** Reads the routines Claude Desktop schedules
-  (read-only) and copies the ones you pick, turned off, so nothing runs twice.
+- **Import from Claude Desktop and Codex.** Reads the routines Claude Desktop
+  schedules and the automations of the Codex app (read-only), with their
+  schedules in words, and copies the ones you pick, turned off, so nothing runs
+  twice. Codex automations keep their model and reasoning effort. Grok Build
+  has no saved schedules to import: its `/loop` tasks live in one session.
 - **Safe defaults, as in Claude Desktop.** Slots missed while the Mac slept or
   Rota was closed run once, late, marked as a catch-up, if the last one is
   under seven days old; older ones are recorded as skipped. A slot that arrives
   while the previous run is still going is skipped quietly. Skips stay in the
-  routine's history, out of the sessions list. Every run has a time limit.
+  routine's history, out of the sessions list. A run takes as long as it
+  needs; a routine can set a time limit if it should not.
 
 ## Requirements
 
 - macOS 15 (Sequoia) or later, on Apple silicon. On macOS 26 (Tahoe) the menu
   bar panel uses Liquid Glass.
 - The CLIs you want to use, installed and signed in: `claude`, `codex`,
-  `grok`. Their paths are set in Settings.
+  `grok`. Rota finds them on your login shell's PATH and in the usual install
+  folders; Settings lists every copy it found with its version, and Choose
+  Other picks any file.
 - For building from source: Xcode 26 or later.
 
 ## Install
@@ -83,15 +90,16 @@ mv Rota.app /Applications/
 
 - **Add a routine** with **+**: the project folder, the skill it runs (the
   prompt defaults to "invoke the `<skill>` skill and follow it"), a schedule,
-  the harness and a time limit. A Shell routine takes a command instead of a
+  the harness, and the model it runs on. A run takes as long as it needs
+  unless you turn on a time limit. A Shell routine takes a command instead of a
   prompt and runs it with `zsh -c` in the project folder.
-- **Import** with the download button: pick routines from Claude Desktop. Turn
-  each one off in Claude Desktop before turning it on in Rota.
+- **Import** with the download button: pick routines from Claude Desktop or
+  Codex. Turn each one off in its app before turning it on in Rota.
 - Select a session to read it and write to it. Under **Routines**, a routine
   shows its next run, the switch that pauses it, **Run Now** and its
   sessions; **Edit…** opens its settings, Delete included. A new routine runs
   on its schedule from the start.
-- Menus: File > New Routine… (Command-N) and Import from Claude Desktop…;
+- Menus: File > New Routine… (Command-N) and Import Routines…;
   Routine > Run Now (Command-R), Stop (Command-.) and Edit Routine…
   (Command-E), acting on the selected routine or the selected session's.
 - The menu bar panel lists every routine with its next run; hover a row to run
