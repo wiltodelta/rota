@@ -1,0 +1,23 @@
+# Xcode / SwiftPM
+.build/
+.swiftpm/
+*.xcodeproj/
+*.xcworkspace/
+
+# Build artifacts
+*.app/
+.DS_Store
+
+# Local Claude Code settings
+.claude/settings.local.json
+
+# Other harnesses' generated config. Claude's sync owns these; a committed copy
+# is a second source nobody reconciles.
+/.agents/
+/.codex/
+/.opencode/
+/opencode.json
+/opencode.jsonc
+
+# Release zips built by notarize.sh
+/Rota-v*-macOS.zip

@@ -1,0 +1,35 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "extended-srgb:0.17647,0.83137,0.74902,1.00000",
+      "extended-srgb:0.03137,0.42745,0.35686,1.00000"
+    ]
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "play.svg",
+          "name" : "play"
+        },
+        {
+          "image-name" : "loop.svg",
+          "name" : "loop"
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [
+      "macOS"
+    ]
+  }
+}

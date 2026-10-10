@@ -1,0 +1,26 @@
+# Rota
+
+You are a **principal Swift/macOS engineer** maintaining a menu bar app that runs scheduled agent routines on Claude Code, Codex, Grok Build or a shell, one harness per routine. SwiftPM; `RotaCore` holds the scheduler and runners, `Rota` the AppKit shell and SwiftUI views; the one dependency is Sparkle (`Updater`). Design and data flow: `docs/architecture.md`. Packaging, secrets and releases: `docs/build-and-release.md`.
+
+## How to run
+
+- `./create-app.sh` builds and signs `Rota.app` with the team's Developer ID (ad hoc without it). The app icon (`App Icon.icon`) and the menu bar template images (`MenuIcons.xcassets`) are drawn by `scripts/draw-icon.py`; edit the script and rerun it, never the SVGs. Quit a running copy first: the app quits on launch if another instance with its bundle id runs.
+- The status item often sits in a menu bar manager's hidden section on this Mac, so a scripted click does not open the panel. Development hooks: `open --env ROTA_OPEN_PANEL=1 Rota.app` shows the panel at the top of the main screen and logs its window number (`category == "app"`) for `screencapture -l`; `--env ROTA_APPEARANCE=dark|light` renders one appearance without touching the system setting; `--env ROTA_OPEN_EDIT=1` opens the edit sheet of the routine shown; `--env ROTA_OPEN_SETTINGS=1` opens Settings. Scripted clicks and keystrokes did not reach the window here; drive it with `scripts/ui-driver.swift` and use these hooks to capture. Opening the app a second time shows the main window.
+- The app logs at `.info` under `com.wiltodelta.rota`; watch live with `/usr/bin/log stream --info --predicate 'subsystem == "com.wiltodelta.rota"'`.
+
+## Test and lint
+
+- `bash maintain.sh` is the gate: SwiftLint with fixes, then strict, `swift test`, release build.
+- Seams: `Scheduler.now`, `.calendar`, `.executable`, `.notifier`, and the `RoutineLaunching` launcher (`FakeLauncher` in `SchedulerTests` drives `RunEvents` by hand). Tests never spawn an agent.
+- `ROTA_LIVE=1 swift test --filter LiveHarnessTests` runs Claude, Codex, Grok and Shell for real, sends a message mid-run, continues finished sessions, stops each harness and prints each log. It spends a little quota and leaves sessions behind: delete the `rota-live-*` Grok session folders, the Codex threads with a `rota-live-` cwd (their ids are in the first line of `~/.codex/sessions/<date>/rollout-*.jsonl`; delete each with `thread/delete` over `codex app-server` stdio, never in Codex's SQLite), and the Claude transcripts under `~/.claude/projects/*rota-live*`. Run it after touching a runner, in the background with a log: one combined run hung past ten minutes once and did not again.
+- `scripts/ui-check.sh` (add `--live` for a Codex session) is the end-to-end UI check: it drives the built app through the Accessibility API, checks each step, and saves both appearances at the minimum width to `/tmp/rota-ui-check`. Look at the screenshots; a green run does not say the screen reads well. Never fire a real routine to test the scheduler.
+- To check the scheduler live, write Shell routines into `routines.json` with a past or next-minute `nextFire` (catch-up, skip, scheduled slot) and launch the app; back up and remove that data after.
+- Notification banners are not in the Accessibility tree, so they cannot be pressed from a script; read delivery from `/usr/bin/log show --predicate 'process == "usernoted"'` ("Presenting ... as banner").
+- Render UI changes in both appearances and at the 820 pt minimum width; the layout rules that width taught are in `docs/architecture.md`.
+
+## Rules
+
+- Rota reads Claude Desktop's `scheduled-tasks.json` and stubs, never writes them: Claude Desktop rewrites that file wholesale. Imports start disabled.
+- Harness facts (Claude's stream-json events, the Codex app-server and Grok ACP messages) were read from the installed CLIs on 2026-10-09; re-read `--help`, `codex app-server generate-json-schema` and `~/.grok/docs/user-guide/15-agent-mode.md` before changing a runner.
+- Codex runs start the app-server daemon and Grok runs a leader process (`grok agent leader --no-exit-on-disconnect`); both stay up after the run, by those tools' design.
+- Public repository: no personal paths, routine names or project names in tracked files or fixtures.
