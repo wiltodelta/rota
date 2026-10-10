@@ -42,7 +42,7 @@ Desktop.
   missed slot is skipped; click one to open its session. Successes notify too if you ask for it. A routine
   whose last five scheduled runs failed pauses itself and says so.
 - **Harness warnings.** Rota reads the routine's project skill and warns when
-  it uses a tool the chosen harness lacks: Claude in Chrome on Grok, for
+  it uses a tool the chosen harness lacks: Claude in Chrome on Grok Build, for
   example, or phone push anywhere but Claude Code.
 - **Import from Claude Desktop.** Reads the routines Claude Desktop schedules
   (read-only) and copies the ones you pick, turned off, so nothing runs twice.
@@ -101,8 +101,8 @@ mv Rota.app /Applications/
   Rota again from Finder or Spotlight to get its window.
 
 Agents run unattended with approvals bypassed (`bypassPermissions` for
-Claude, `--dangerously-bypass-approvals-and-sandbox` for Codex,
-`--always-approve` for Grok), the same mode Claude Desktop routines use: nobody
+Claude Code, `--dangerously-bypass-approvals-and-sandbox` for Codex,
+`--always-approve` for Grok Build), the same mode Claude Desktop routines use: nobody
 is there to answer a prompt. Point a routine only at a project whose skill you
 trust.
 
