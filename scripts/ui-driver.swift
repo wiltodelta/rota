@@ -11,6 +11,9 @@
 //   choose <popup-id> <item>     pick an item from a pop-up button's menu
 //   window <title> <w> <h>       move a window to (100, 100) and resize it
 //   wid <title>                  print the window number of the window with that title
+//   focus <id>                   activate Rota and focus that element
+//   key return|option-return     post the key to Rota's process
+//   confirm-iterm <text>         answer iTerm2's "OK to run" for a script path containing text
 //   gate                         list elements whose frame leaves their window or their parent
 import AppKit
 import ApplicationServices
@@ -152,6 +155,8 @@ case "gate":
                 let role: String = attribute(child, kAXRoleAttribute) ?? "?"
                 let visible = rect.width > 0 && rect.height > 0 && rect.intersects(clip)
                 let scrolls = role == "AXScrollArea" || role == "AXOutline" || role == "AXTable"
+                // An open menu floats over the window by design.
+                if role == "AXMenu" { continue }
                 if visible && !windowFrame.insetBy(dx: -1, dy: -1).contains(rect.intersection(clip)) {
                     violations += 1
                     print("outside window  \(role)  \(label(child))  \(rect)")
@@ -174,6 +179,38 @@ case "gate":
         walk(window, parent: windowFrame, clip: .infinite)
     }
     print("\(violations) violations")
+case "key":
+    // Keystrokes posted to Rota's process reach its key window even when System
+    // Events keystrokes do not. Focus the target first with `focus`.
+    guard arguments.count == 2 else { fail("key return|option-return|shift-return|control-return") }
+    let modifiers: [String: CGEventFlags] = ["option-return": .maskAlternate, "shift-return": .maskShift,
+                                             "control-return": .maskControl]
+    let flags = modifiers[arguments[1]] ?? []
+    for down in [true, false] {
+        guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: down) else { fail("no event") }
+        event.flags = flags
+        event.postToPid(app.processIdentifier)
+        Thread.sleep(forTimeInterval: 0.05)
+    }
+case "focus":
+    guard arguments.count == 2, let element = find({ matches($0, arguments[1]) }) else { fail("focus <id>") }
+    app.activate()
+    let result = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    guard result == .success else { fail("focus failed: \(result.rawValue)") }
+case "confirm-iterm":
+    // iTerm2 asks "OK to run <script>?" before running an opened script; answer
+    // for scripts whose path contains the text, and leave its setting alone.
+    guard arguments.count == 2 else { fail("confirm-iterm <text in the script path>") }
+    guard let iTerm = NSRunningApplication.runningApplications(withBundleIdentifier: "com.googlecode.iterm2").first
+    else { exit(0) }
+    let iTermRoot = AXUIElementCreateApplication(iTerm.processIdentifier)
+    for window in attribute(iTermRoot, kAXWindowsAttribute) as [AXUIElement]? ?? [] {
+        let parts = children(window)
+        guard parts.contains(where: { (attribute($0, kAXValueAttribute) as String?)?.contains(arguments[1]) == true }),
+              let ok = parts.first(where: { (attribute($0, kAXTitleAttribute) as String?) == "OK" }) else { continue }
+        AXUIElementPerformAction(ok, kAXPressAction as CFString)
+        print("confirmed")
+    }
 case "wid":
     guard arguments.count == 2 else { fail("wid <title>") }
     let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
@@ -183,7 +220,7 @@ case "wid":
     }) else { fail("no window \(arguments[1])") }
     print(entry[kCGWindowNumber as String] ?? "")
 default:
-    fail("usage: tree | press | set | value | exists | select | choose | window | wid | gate")
+    fail("usage: tree | press | set | value | exists | select | choose | window | wid | gate | focus | key | confirm-iterm")
 }
 
 func frame(_ element: AXUIElement) -> CGRect? {

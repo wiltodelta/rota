@@ -31,8 +31,10 @@ private final class FakeLauncher: RoutineLaunching {
 private final class RecordingNotifier: RunNotifying {
     var outcomes: [RunOutcome] = []
     var paused: [String] = []
+    var added: [String] = []
     func runEnded(_ record: RunRecord, routine: Routine) { outcomes.append(record.outcome) }
     func routinePaused(_ routine: Routine, failures: Int) { paused.append(routine.id) }
+    func routineAdded(_ routine: Routine) { added.append(routine.id) }
 }
 
 @MainActor

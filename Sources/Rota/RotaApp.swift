@@ -33,6 +33,8 @@ struct RotaApp: App {
             RoutineCommands()
             // Chat text size, as chat apps and browsers do it.
             CommandGroup(after: .toolbar) {
+                SidebarToggleCommand()
+                Divider()
                 Button("Bigger") { AppModel.shared.chatText.bigger() }
                     .keyboardShortcut("+")
                 Button("Smaller") { AppModel.shared.chatText.smaller() }
@@ -88,6 +90,10 @@ final class AppModel {
     var presentingImport = false
     /// The routine whose settings sheet is open.
     var editingRoutineID: String?
+    /// Whether the sessions and routines list shows; kept across launches.
+    var sidebarVisible = UserDefaults.standard.object(forKey: "sidebarVisible") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(sidebarVisible, forKey: "sidebarVisible") }
+    }
 
     /// The routine the selection is about: the selected routine, or the selected session's.
     var selectedRoutine: Routine? {
@@ -125,6 +131,15 @@ final class AppModel {
         scheduler.notifier = notifier
         notifier.requestAuthorization()
         notifier.open = { [weak self] in self?.showMainWindow(selecting: $0) }
+        notifier.reply = { [weak self] session, text in self?.reply(text, to: session) }
+        let helper = AgentAccess.helper()
+        if FileManager.default.isExecutableFile(atPath: helper.path) { scheduler.commandPath = helper.path }
+    }
+
+    /// Answers a session from its notification's Reply field, as its composer would.
+    func reply(_ text: String, to session: UUID) {
+        guard let record = scheduler.current(session) else { return }
+        scheduler.message(text, to: record)
     }
 
     func showMainWindow(selecting item: SidebarItem? = nil) {
@@ -149,6 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var panel: MenuBarPanelController!
     private var mainWindow: NSWindow?
     private var settingsWindow: NSWindow?
+    private var controlServer: ControlServer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let id = Bundle.main.bundleIdentifier,
@@ -174,6 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         Updater.shared.start()
         model.scheduler.start()
+        startControlServer()
         if model.scheduler.routines.isEmpty { showMainWindow() }
         // Development hooks: open settings, or the panel, where a capture script can find them.
         if ProcessInfo.processInfo.environment["ROTA_OPEN_SETTINGS"] != nil { showSettingsWindow() }
@@ -189,6 +206,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showMainWindow()
         return false
+    }
+
+    /// Lets the `rota` command and agents' MCP sessions reach the scheduler.
+    private func startControlServer() {
+        let scheduler = model.scheduler
+        let server = ControlServer { method, params in scheduler.control(method, params) }
+        do {
+            try server.start()
+            controlServer = server
+        } catch {
+            Logger(subsystem: "com.wiltodelta.rota", category: "control")
+                .error("Control socket failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        controlServer?.stop()
     }
 
     /// A run lives in Rota's process, or is watched by it, so quitting asks first
@@ -246,13 +280,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // VoiceOver reads the image-only button by this label, not the symbol's name.
         button.setAccessibilityLabel("Rota")
         button.setAccessibilityValue(running > 0 ? "\(running) running" : nil)
-        let unread = model.scheduler.unreadCount
+        // One pass over the history, which allRecords reads from disk.
+        let records = model.scheduler.allRecords()
+        let unread = records.filter(\.isUnread).count
+        let waiting = records.filter { $0.attention != nil }.count
         var tip = running > 0 ? "Rota: \(running) running" : "Rota"
+        if waiting > 0 { tip += ", \(waiting) waiting for your reply" }
         if unread > 0 { tip += ", \(unread) unread" }
         if let version = Updater.shared.pendingVersion { tip += ". Update to \(version) available" }
         button.toolTip = tip
-        // The Dock shows the icon only while a window is open; the badge counts unread sessions.
-        NSApp.dockTile.badgeLabel = unread > 0 ? "\(unread)" : nil
+        // The Dock shows the icon only while a window is open; the badge counts sessions to look at.
+        let badge = records.filter { $0.isUnread || $0.attention != nil }.count
+        NSApp.dockTile.badgeLabel = badge > 0 ? "\(badge)" : nil
     }
 
     @objc private func statusItemClicked() {
@@ -365,9 +404,15 @@ final class AppSettings {
         didSet { defaults.set(executables, forKey: "executables") }
     }
 
+    /// The terminal app sessions open in; nil follows the macOS default terminal.
+    var terminalApp: String? {
+        didSet { defaults.set(terminalApp, forKey: "terminalApp") }
+    }
+
     init() {
         notifyOnSuccess = defaults.bool(forKey: "notifyOnSuccess")
         executables = defaults.dictionary(forKey: "executables") as? [String: String] ?? [:]
+        terminalApp = defaults.string(forKey: "terminalApp")
         refreshInstalled()
     }
 
@@ -419,5 +464,15 @@ final class AppSettings {
             guard !Task.isCancelled else { return }
             await MainActor.run { self.models = models }
         }
+    }
+}
+
+/// View > Hide Sidebar / Show Sidebar, Control-Command-S as in Finder and Mail.
+private struct SidebarToggleCommand: View {
+    @State private var model = AppModel.shared
+
+    var body: some View {
+        Button(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") { model.sidebarVisible.toggle() }
+            .keyboardShortcut("s", modifiers: [.control, .command])
     }
 }

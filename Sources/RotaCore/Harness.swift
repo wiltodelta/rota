@@ -74,7 +74,11 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
             return .native
         case (.codex, .chrome):
             return .differentTools("Codex drives Chrome through its own plugin, not mcp__claude-in-chrome__ tools.")
-        case (.codex, .push), (.grok, _), (.shell, _):
+        case (_, .push):
+            // Phone push is Claude's; Rota's own notification reaches every harness.
+            return .differentTools("Use \"$ROTA_CLI\" notify \"…\" (add --needs-reply to wait for an answer) "
+                                   + "instead: a Mac notification that opens this session.")
+        case (.grok, _), (.shell, _):
             return .missing
         }
     }

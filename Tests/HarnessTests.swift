@@ -61,9 +61,15 @@ final class HarnessTests: XCTestCase {
         let codex = SkillRequirements.gaps(both, on: .codex)
         XCTAssertEqual(codex.map(\.0), [.chrome, .push])
         if case .differentTools = codex[0].1 {} else { XCTFail("Codex has Chrome under other tool names") }
-        XCTAssertEqual(codex[1].1, .missing)
-        XCTAssertEqual(SkillRequirements.gaps(both, on: .grok).map(\.1), [.missing, .missing])
-        XCTAssertEqual(SkillRequirements.gaps(both, on: .shell).map(\.1), [.missing, .missing])
+        // Without Claude's phone push, every harness has Rota's own notification to use instead.
+        for harness in [Harness.codex, .grok, .shell] {
+            guard case .differentTools(let advice) = SkillRequirements.gaps([.push], on: harness).first?.1 else {
+                return XCTFail("\(harness) should point to rota notify")
+            }
+            XCTAssertTrue(advice.contains("notify"))
+        }
+        XCTAssertEqual(SkillRequirements.gaps([.chrome], on: .grok).map(\.1), [.missing])
+        XCTAssertEqual(SkillRequirements.gaps([.chrome], on: .shell).map(\.1), [.missing])
         XCTAssertTrue(SkillRequirements.gaps([], on: .grok).isEmpty)
     }
 
@@ -377,5 +383,13 @@ final class LoginPathTests: XCTestCase {
         XCTAssertFalse(path.isEmpty)
         XCTAssertFalse(path.contains("/rota-leaked-wrapper/bin"))
         XCTAssertTrue(path.contains("/usr/bin"))
+    }
+}
+
+final class TerminalLauncherTests: XCTestCase {
+    func testOnlyGhosttyTakesTheScriptAsAnArgument() {
+        XCTAssertEqual(KnownTerminal.ghostty.arguments(running: "/s.command"), ["-e", "/s.command"])
+        XCTAssertNil(KnownTerminal.terminal.arguments(running: "/s.command"))
+        XCTAssertNil(KnownTerminal.iTerm.arguments(running: "/s.command"))
     }
 }

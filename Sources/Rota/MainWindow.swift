@@ -20,7 +20,11 @@ struct MainWindow: View {
     var body: some View {
         @Bindable var model = model
         let records = records
-        NavigationSplitView {
+        // Dragging the divider shut hides the list too, and the binding keeps that.
+        NavigationSplitView(columnVisibility: Binding(
+            get: { model.sidebarVisible ? .all : .detailOnly },
+            set: { model.sidebarVisible = $0 != .detailOnly }
+        )) {
             List(selection: $model.selection) {
                 ForEach(DayGroup.group(records), id: \.title) { group in
                     Section(group.title) {
@@ -56,6 +60,13 @@ struct MainWindow: View {
         }
         .navigationTitle("Rota")
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button { model.sidebarVisible.toggle() } label: {
+                    Label(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.left")
+                }
+                .help("\(model.sidebarVisible ? "Hide" : "Show") the sidebar (Control-Command-S)")
+                .accessibilityIdentifier("toggleSidebar")
+            }
             ToolbarItemGroup {
                 Button { model.presentingImport = true } label: {
                     Label("Import routines", systemImage: "square.and.arrow.down")
@@ -173,7 +184,12 @@ private struct SessionRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
-            if record.isUnread {
+            if record.attention != nil {
+                Image(systemName: "exclamationmark.bubble.fill")
+                    .foregroundStyle(.orange)
+                    .help("Needs your reply")
+                    .accessibilityLabel("Needs your reply")
+            } else if record.isUnread {
                 dot(.accentColor, size: 7)
                     .accessibilityLabel("Unread")
             }

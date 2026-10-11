@@ -73,3 +73,7 @@ gh release download vX.Y.Z -R wiltodelta/rota -p "*.zip" -D /tmp/asset-check && 
   spctl -a -vv /tmp/asset-check/app/Rota.app && \
   xcrun stapler validate /tmp/asset-check/app/Rota.app
 ```
+
+Unregister the extracted copy before deleting it
+(`/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u /tmp/asset-check/app/Rota.app`):
+LaunchServices keeps a deleted copy registered under the bundle id otherwise.

@@ -6,6 +6,15 @@ public protocol RunNotifying {
     func runEnded(_ record: RunRecord, routine: Routine)
     /// The routine was turned off after failing `failures` times in a row.
     func routinePaused(_ routine: Routine, failures: Int)
+    /// Another process, such as an agent through the `rota` command, added the routine.
+    func routineAdded(_ routine: Routine)
+    /// A session (or, without one, a process outside Rota) sent the user a notification.
+    func sessionNotified(_ record: RunRecord?, routine: Routine?, title: String?, text: String, needsReply: Bool)
+}
+
+public extension RunNotifying {
+    func routineAdded(_ routine: Routine) {}
+    func sessionNotified(_ record: RunRecord?, routine: Routine?, title: String?, text: String, needsReply: Bool) {}
 }
 
 /// Owns the routines, fires them on schedule and tracks the runs in flight.
@@ -20,7 +29,7 @@ public final class Scheduler {
     static let log = Logger(subsystem: "com.wiltodelta.rota", category: "scheduler")
 
     public private(set) var routines: [Routine] = []
-    public private(set) var active: [String: RunRecord] = [:]
+    public internal(set) var active: [String: RunRecord] = [:]
     /// Bumped whenever a run record changes, so views re-read history.
     public private(set) var historyVersion = 0
     public var lastError: String?
@@ -29,6 +38,8 @@ public final class Scheduler {
     @ObservationIgnored public var calendar = Calendar.current
     @ObservationIgnored public var executable: (Harness) -> String = { $0.defaultExecutable() }
     @ObservationIgnored public var notifier: RunNotifying?
+    /// The `rota` command inside the app, handed to runs as ROTA_CLI.
+    @ObservationIgnored public var commandPath: String?
     @ObservationIgnored let store: RoutineStore
     @ObservationIgnored public let history: RunHistory
     @ObservationIgnored let launcher: RoutineLaunching
@@ -140,11 +151,12 @@ public final class Scheduler {
                                startedAt: now(), outcome: .running)
         let logURL = history.logFile(for: record)
         record.logPath = logURL.path
-        start(record, spec: spec(for: routine, harness: routine.harness, prompt: routine.prompt, log: logURL))
+        start(record, spec: spec(for: routine, record: record, harness: routine.harness, prompt: routine.prompt,
+                                 log: logURL))
     }
 
     /// How `routine` runs `prompt` on `harness`: a new session, or `resume`'s.
-    private func spec(for routine: Routine, harness: Harness, prompt: String, log: URL,
+    private func spec(for routine: Routine, record: RunRecord, harness: Harness, prompt: String, log: URL,
                       resume: String? = nil) -> LaunchSpec {
         let needs = requirements(of: routine)
         // A session started on another harness keeps that harness; the routine's model ids are not its.
@@ -152,7 +164,8 @@ public final class Scheduler {
         return LaunchSpec(
             executable: executable(harness), prompt: prompt,
             arguments: harness.arguments(needs: needs, resume: resume),
-            workingDirectory: routine.workingDirectory, environment: harness.environment(needs: needs),
+            workingDirectory: routine.workingDirectory,
+            environment: harness.environment(needs: needs).merging(sessionEnvironment(record)) { $1 },
             mode: harness.launchMode, timeout: routine.timeLimitMinutes.map { TimeInterval($0 * 60) },
             log: log, resume: resume,
             model: sameHarness ? routine.model : nil, effort: sameHarness ? routine.effort : nil)
@@ -209,6 +222,10 @@ public final class Scheduler {
     /// runs, or by continuing the finished session as a run of its own.
     public func message(_ message: String, to record: RunRecord) {
         guard canMessage(record) else { return }
+        // Answering is what the session waited for; the continued run saves this copy, so it must not carry the mark.
+        dismissAttention(record)
+        var record = record
+        record.attention = nil
         if isActive(record) {
             controls[record.routineID]?.send(message)
         } else {
@@ -234,7 +251,7 @@ public final class Scheduler {
         var record = record
         record.outcome = .running
         record.endedAt = nil
-        start(record, spec: spec(for: routine, harness: record.harness, prompt: message,
+        start(record, spec: spec(for: routine, record: record, harness: record.harness, prompt: message,
                                  log: URL(fileURLWithPath: logPath), resume: session))
     }
 
@@ -296,7 +313,7 @@ public final class Scheduler {
         if notify { notifier?.runEnded(record, routine: routine) }
     }
 
-    private func saveRecord(_ record: RunRecord) {
+    func saveRecord(_ record: RunRecord) {
         do {
             try history.upsert(record)
         } catch {

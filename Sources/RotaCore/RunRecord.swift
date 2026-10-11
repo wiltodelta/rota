@@ -53,6 +53,9 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     public var sessionID: String?
     /// When the user last looked at the session; it is unread if it ended after that.
     public var readAt: Date?
+    /// What the session asked the user through `rota notify --needs-reply`, until
+    /// the user answers in its chat or dismisses it.
+    public var attention: String?
 
     /// A slot that did not run: a note in the routine's history, not a session.
     public var isSkip: Bool {

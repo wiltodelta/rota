@@ -12,12 +12,21 @@ struct SessionView: View {
 
     private var running: Bool { model.scheduler.isActive(record) }
 
+    /// The record as the scheduler has it now, with a reply request that came after the view opened.
+    private var current: RunRecord {
+        _ = model.scheduler.historyVersion
+        return model.scheduler.current(record.id, routineID: record.routineID) ?? record
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
             Divider()
+            if let question = current.attention {
+                AttentionBanner(text: question) { model.scheduler.dismissAttention(current) }
+            }
             ChatTranscript(items: Transcript.parse(log, shell: record.harness == .shell), running: running)
             Composer(record: record)
         }
@@ -60,7 +69,8 @@ struct SessionView: View {
             }
             if model.scheduler.terminalCommand(for: record) != nil {
                 Button(running ? "Open in Terminal" : "Continue in Terminal", systemImage: "terminal") {
-                    ChatOpener.open(record, workingDirectory: routine.workingDirectory, scheduler: model.scheduler)
+                    ChatOpener.open(record, workingDirectory: routine.workingDirectory, scheduler: model.scheduler,
+                                    terminal: model.settings.terminalApp)
                 }
                 .accessibilityIdentifier("openTerminal")
             }
@@ -336,5 +346,32 @@ private struct MarkdownText: View {
     private func inline(_ text: String) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+    }
+}
+
+/// What the session asked the user, above its chat until they answer or dismiss it.
+private struct AttentionBanner: View {
+    let text: String
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Needs your reply").font(.callout.weight(.semibold))
+                    .accessibilityIdentifier("attentionBanner")
+                Text(text).font(.callout).textSelection(.enabled)
+            }
+            Spacer(minLength: 8)
+            Button("Dismiss", action: dismiss)
+                .help("Clear the mark without replying")
+                .accessibilityIdentifier("dismissAttention")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        // A card inside the column: an edge-to-edge band shows through the translucent sidebar.
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
     }
 }

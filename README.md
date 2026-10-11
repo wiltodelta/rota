@@ -30,8 +30,26 @@ Desktop.
   - Shell commands run in a detached `screen` session; **Open in Terminal**
     attaches with `screen -r`, where you can type into the command or stop it.
   A continued session runs again and appends to the same chat. Finished agent
-  sessions also open in their own CLI with **Continue in Terminal**. The last
+  sessions also open in their own CLI with **Continue in Terminal**. Sessions
+  open in the terminal app picked in Settings (Terminal, iTerm2, Ghostty or
+  any other), or in the macOS default terminal, the one that opens executables
+  (iTerm2 after "Make iTerm2 Default Term"). iTerm2 asks "OK to run" before
+  each script until you tick "Suppress this message permanently" once. The last
   50 sessions of each routine are kept.
+- **Agents manage routines.** A Claude Code, Codex or Grok Build session can
+  schedule a routine ("run this every weekday at 9"), change, run, pause or
+  delete one, and read or message its sessions, through Rota's MCP server.
+  Turn it on per agent in Settings > Routines from agents. A routine an agent
+  adds runs on its schedule and Rota notifies you. The same works from a
+  terminal with the `rota` command: `rota list`, `rota add`, `rota run`,
+  `rota log`, `rota help`.
+- **Routines can ask you.** A routine (or its skill) runs
+  `"$ROTA_CLI" notify "…"`, or an agent calls the `notify_user` tool, and Rota
+  shows a Mac notification from that session. With `--needs-reply` the session
+  is marked "Needs your reply" in the list, the menu bar and the Dock until you
+  answer in its chat, from the notification's Reply field, or dismiss it. Click
+  the notification to open the session. This replaces phone push for routines
+  on every agent.
 - **An inbox.** A session that finished since you last opened it is unread:
   bold in the list with a blue dot, counted on the Dock icon and in the menu
   bar panel.
@@ -99,6 +117,8 @@ mv Rota.app /Applications/
   shows its next run, the switch that pauses it, **Run Now** and its
   sessions; **Edit…** opens its settings, Delete included. A new routine runs
   on its schedule from the start.
+- The sidebar folds away with the button beside the title, View > Hide
+  Sidebar or Control-Command-S, and stays as you left it.
 - Menus: File > New Routine… (Command-N) and Import Routines…;
   Routine > Run Now (Command-R), Stop (Command-.) and Edit Routine…
   (Command-E), acting on the selected routine or the selected session's.

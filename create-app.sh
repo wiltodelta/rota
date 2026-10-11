@@ -45,6 +45,11 @@ rm -rf "$APP_DIR/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices" \
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents/MacOS/$BIN"
 cp ".build/artifacts/sparkle/Sparkle/LICENSE" "$APP_DIR/Contents/Resources/Sparkle LICENSE.txt"
 
+# The `rota` command (and `rota mcp`), which agents and terminals use to manage
+# routines through the running app. Settings link it into ~/.local/bin.
+mkdir -p "$APP_DIR/Contents/Helpers"
+cp "$BIN_DIR/RotaCLI" "$APP_DIR/Contents/Helpers/rota"
+
 # The Icon Composer icon ("App Icon", Assets.car for macOS 26+ and a flat .icns
 # for older releases) and the menu bar template images, in one Assets.car. Both
 # are drawn by scripts/draw-icon.py. Needs Xcode 26+ on a macOS 26 host.
@@ -140,6 +145,7 @@ SPARKLE="$APP_DIR/Contents/Frameworks/Sparkle.framework"
 "${SIGN[@]}" "$SPARKLE/Versions/B/Autoupdate"
 "${SIGN[@]}" "$SPARKLE/Versions/B/Updater.app"
 "${SIGN[@]}" "$SPARKLE"
+"${SIGN[@]}" --identifier com.wiltodelta.rota.cli "$APP_DIR/Contents/Helpers/rota"
 "${SIGN[@]}" "$APP_DIR"
 
 echo "Done: $PWD/$APP_DIR"

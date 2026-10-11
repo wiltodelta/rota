@@ -11,7 +11,8 @@ let package = Package(
         .macOS(deploymentTarget)
     ],
     products: [
-        .executable(name: "Rota", targets: ["Rota"])
+        .executable(name: "Rota", targets: ["Rota"]),
+        .executable(name: "RotaCLI", targets: ["RotaCLI"])
     ],
     dependencies: [
         // In-place updates from the appcast published with each release;
@@ -34,6 +35,14 @@ let package = Package(
                 .unsafeFlags(["-Xlinker", "-platform_version", "-Xlinker", "macos",
                               "-Xlinker", deploymentTarget, "-Xlinker", "26.0"])
             ]
+        ),
+        // The `rota` command and `rota mcp`; create-app.sh copies it to
+        // Contents/Helpers/rota (a binary named rota would collide with Rota on a
+        // case-insensitive disk).
+        .executableTarget(
+            name: "RotaCLI",
+            dependencies: ["RotaCore"],
+            path: "Sources/RotaCLI"
         ),
         .testTarget(
             name: "RotaTests",

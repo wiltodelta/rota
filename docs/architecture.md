@@ -50,6 +50,26 @@ flowchart LR
   be picked. Grok Build has nothing to import: its scheduler holds one
   session's `/loop` tasks for at most seven days. `ScheduleText.describe` puts
   common cron shapes in words for the import list and the schedule field.
+- Other processes reach the scheduler through `ControlServer`, a Unix socket
+  at `Application Support/Rota/rota.sock` (0600, one JSON request and reply
+  per line), whose methods are `Scheduler.control` in `ControlCommands.swift`:
+  routines list/get/create/update/setEnabled/run/stop/delete and sessions
+  list/read/message, all through the scheduler, the routines file's only
+  writer. The `RotaCLI` target, bundled as `Contents/Helpers/rota`, is the
+  `rota` command and, as `rota mcp`, an MCP stdio server whose tools map one
+  to one onto those methods; it starts Rota in the background when the socket
+  does not answer. `AgentAccess` links it into `~/.local/bin` and runs each
+  agent CLI's own `mcp add`/`mcp remove` (Claude Code and Grok Build at user
+  scope) when the user asks in Settings. A routine created over the socket is
+  on, like one made in the window, and `RunNotifying.routineAdded` says so.
+- Each run gets `ROTA_SESSION` (its `RunRecord` id), `ROTA_ROUTINE` and
+  `ROTA_CLI` (the bundled `rota`) in its environment, so `rota notify` and the
+  `notify_user` MCP tool know their session without arguments. The `notify`
+  control method posts through `RunNotifying.sessionNotified`; with
+  `needsReply` it sets `RunRecord.attention`, kept on the active copy too (the
+  run's finish saves that copy), and `Scheduler.message` clears it before a
+  continued run saves the record. The notification carries the session id for
+  the click and a text-input Reply action that answers like the composer.
 - `ProcessLauncher` runs every CLI through `zsh -lc 'exec "$0" "$@"'`, so a
   routine sees the PATH a login terminal sees.
 - `ExecutableDiscovery` lists each agent CLI's installed copies: the PATH of a
@@ -143,8 +163,12 @@ File menu holds New Routine and Import, the Routine menu Run Now, Stop and
 Edit Routine for `AppModel.selectedRoutine`; sheets open from `AppModel`
 flags so menus and buttons share them. `ChatTextSettings` holds the chat's font family, monospaced family and size in
 UserDefaults; only the chat and its composer follow them, the sidebar and
-forms keep the system's sizes. `ChatOpener` writes a `.command` file and opens
-it, which needs no Automation permission.
+forms keep the system's sizes. `ChatOpener` writes a `.command` file, which needs no Automation permission,
+and `TerminalLauncher` opens it in the terminal picked in Settings: Terminal,
+iTerm2 or another app as a document, Ghostty as a new instance with `-e`
+(it does not run a script handed to it), or in the macOS default terminal:
+the app that opens Unix executables, which "Make iTerm2 Default Term"
+changes while `.command` files stay with Terminal, then the `.command` handler. A live test checks `TERM_PROGRAM` in each installed one.
 
 Layout rules learned while measuring the narrowest window (820 pt):
 
@@ -164,8 +188,10 @@ Layout rules learned while measuring the narrowest window (820 pt):
 ## Checking the UI
 
 `scripts/ui-check.sh` builds the app and drives it through the Accessibility
-API with `scripts/ui-driver.swift` (synthetic clicks and keystrokes do not
-reach the windows here; `AXPress` and `AXValue` do). Controls it needs carry
+API with `scripts/ui-driver.swift` (System Events clicks and keystrokes do not
+reach the windows here; `AXPress`, `AXValue` and a key event posted to Rota's
+pid do). `--live` types Option-Return and Return into a running Codex
+session's composer and checks the line break, the send and the reply. Controls it needs carry
 `accessibilityIdentifier`s. Its `gate` command lists elements whose frame
 leaves the window or its parent; inside a scroll area only what is scrolled
 into view counts, and a list cell's content may pass the cell sideways by the

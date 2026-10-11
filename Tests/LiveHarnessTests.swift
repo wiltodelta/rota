@@ -1,4 +1,5 @@
 @testable import RotaCore
+import AppKit
 import XCTest
 
 /// Real runs against the installed CLIs, skipped unless ROTA_LIVE=1: each starts
@@ -134,6 +135,55 @@ final class LiveHarnessTests: XCTestCase {
             XCTAssertTrue(header.contains(expected), "\(harness.rawValue) header: \(header)")
         }
         XCTAssertEqual(grokDefault(), before, "a routine's model must not change Grok's default")
+    }
+
+    /// Each installed terminal Rota knows, and the default, runs the session
+    /// script itself; `TERM_PROGRAM` says which one did.
+    func testEachInstalledTerminalRunsTheScript() throws {
+        let expected: [KnownTerminal: String] = [.terminal: "Apple_Terminal", .iTerm: "iTerm.app", .ghostty: "ghostty"]
+        let choices: [KnownTerminal?] = [nil] + TerminalLauncher.installed()
+        for terminal in choices {
+            let marker = folder.appendingPathComponent("terminal-\(terminal?.rawValue ?? "default")")
+            let script = folder.appendingPathComponent("\(terminal?.rawValue ?? "default").command")
+            try "#!/bin/zsh\nprint -rn -- \"$TERM_PROGRAM\" > \(shellQuote(marker.path))\nexit 0\n"
+                .write(to: script, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+            let opened = expectation(description: "opened")
+            TerminalLauncher.open(script, in: terminal?.url) { error in
+                XCTAssertNil(error)
+                opened.fulfill()
+            }
+            wait(for: [opened], timeout: 15)
+            let deadline = Date().addingTimeInterval(20)
+            while !FileManager.default.fileExists(atPath: marker.path), Date() < deadline {
+                // iTerm2 asks "OK to run <script>?" unless told to stop asking; answer
+                // for this script only, and leave its setting alone.
+                Self.confirmITermPrompt(for: script.lastPathComponent)
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+            let ran = try String(contentsOf: marker, encoding: .utf8)
+            let handler = try XCTUnwrap(TerminalLauncher.defaultTerminal().flatMap { Bundle(url: $0)?.bundleIdentifier })
+            let want = expected[terminal ?? KnownTerminal(rawValue: handler) ?? .terminal]
+            print("\(terminal?.title ?? "default") ran the script in \(ran)")
+            XCTAssertEqual(ran, want, terminal?.title ?? "default")
+        }
+    }
+
+    private static func confirmITermPrompt(for name: String) {
+        guard let iTerm = NSRunningApplication.runningApplications(withBundleIdentifier: KnownTerminal.iTerm.rawValue)
+            .first else { return }
+        func value(_ element: AXUIElement, _ key: String) -> AnyObject? {
+            var result: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, key as CFString, &result)
+            return result
+        }
+        let root = AXUIElementCreateApplication(iTerm.processIdentifier)
+        for window in value(root, kAXWindowsAttribute) as? [AXUIElement] ?? [] {
+            let parts = value(window, kAXChildrenAttribute) as? [AXUIElement] ?? []
+            guard parts.contains(where: { (value($0, kAXValueAttribute) as? String)?.contains(name) == true }),
+                  let ok = parts.first(where: { value($0, kAXTitleAttribute) as? String == "OK" }) else { continue }
+            AXUIElementPerformAction(ok, kAXPressAction as CFString)
+        }
     }
 
     /// A command that ends at once used to race the poll and read as interrupted.

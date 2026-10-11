@@ -35,7 +35,24 @@ struct MenuBarContent: View {
                     rows
                 }
             }
-            let unread = model.scheduler.allRecords().filter(\.isUnread)
+            let records = model.scheduler.allRecords()
+            let waiting = records.filter { $0.attention != nil }
+            if let newest = waiting.first {
+                Divider()
+                Button {
+                    model.showMainWindow(selecting: .session(newest.id))
+                } label: {
+                    let count = waiting.count == 1 ? "1 session needs" : "\(waiting.count) sessions need"
+                    Label("\(count) your reply", systemImage: "exclamationmark.bubble.fill")
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.borderless)
+                .padding(10)
+                .help("Open the newest session waiting for you")
+                .accessibilityIdentifier("panelNeedsReply")
+            }
+            let unread = records.filter(\.isUnread)
             if let newest = unread.first {
                 Divider()
                 Button {
