@@ -57,6 +57,34 @@ final class ControlCommandTests: XCTestCase {
         XCTAssertEqual(create().failure?.message.contains("exists"), true)
     }
 
+    /// The window's sheets ask the same question, so what the API refuses never saves from the window.
+    func testTheWindowSharesTheValidation() throws {
+        var routine = Routine(id: "", name: "", workingDirectory: directory.path, schedule: "0 9 * * *",
+                              harness: .shell, prompt: "echo hi")
+        XCTAssertEqual(routine.problem(), "Give the routine an id, such as weekly-report.")
+        routine.id = "Imported Task"
+        XCTAssertEqual(routine.problem()?.contains("lowercase"), true)
+        XCTAssertNil(routine.problem(checkingID: false), "an existing routine keeps the id it came with")
+        routine.id = "backup"
+        XCTAssertNil(routine.problem())
+        routine.prompt = " "
+        XCTAssertEqual(routine.problem(), "Give the command.")
+        routine.prompt = "echo hi"
+        routine.workingDirectory = ""
+        XCTAssertEqual(routine.problem(), "Choose the project folder.")
+        routine.workingDirectory = directory.appendingPathComponent("missing").path
+        XCTAssertEqual(routine.problem()?.contains("does not exist"), true)
+        XCTAssertFalse(Routine.isValidID("caf\u{E9}"), "an id is ASCII: it names a file")
+    }
+
+    func testUpdateKeepsAnImportedID() throws {
+        let imported = Routine(id: "Imported Task", name: "Imported", workingDirectory: directory.path,
+                               schedule: "0 9 * * *", harness: .shell, enabled: false, prompt: "echo hi")
+        scheduler.save(imported)
+        _ = try call("routines.update", ["id": "Imported Task", "schedule": "0 10 * * *"]).get()
+        XCTAssertEqual(scheduler.routine("Imported Task")?.schedule, "0 10 * * *")
+    }
+
     func testCreateCanStartOffAndTakeASkill() throws {
         _ = try create(["enabled": false, "prompt": NSNull(), "skill": "weekly-seo"]).get()
         let routine = try XCTUnwrap(scheduler.routine("digest"))
@@ -79,6 +107,30 @@ final class ControlCommandTests: XCTestCase {
         XCTAssertNil(routine.effort)
         XCTAssertNil(routine.timeLimitMinutes)
         XCTAssertEqual(call("routines.update", ["id": "nope"]).failure?.message, "No routine nope.")
+    }
+
+    /// Claude runs interactively where the setting is on and Claude Code trusts the folder, else as claude -p.
+    func testClaudeRunsInteractivelyOnlyInATrustedFolder() throws {
+        _ = try create(["harness": "claude"]).get()
+        scheduler.claudeInteractive = { true }
+        scheduler.claudeSettings = { ClaudeUserSettings(trustedProjects: [self.directory.path]) }
+        _ = try call("routines.run", ["id": "digest"]).get()
+        XCTAssertEqual(launcher.specs.last?.mode, .claudeInteractive)
+        XCTAssertNil(launcher.specs.last?.notice)
+        _ = try call("routines.stop", ["id": "digest"]).get()
+        launcher.events.last?.finished(.cancelled)
+
+        scheduler.claudeSettings = { ClaudeUserSettings() }
+        _ = try call("routines.run", ["id": "digest"]).get()
+        XCTAssertEqual(launcher.specs.last?.mode, .claudeStream)
+        XCTAssertEqual(launcher.specs.last?.notice?.contains("not been trusted"), true)
+        launcher.events.last?.finished(.succeeded)
+
+        scheduler.claudeInteractive = { false }
+        scheduler.claudeSettings = { ClaudeUserSettings(trustedProjects: [self.directory.path]) }
+        _ = try call("routines.run", ["id": "digest"]).get()
+        XCTAssertEqual(launcher.specs.last?.mode, .claudeStream)
+        XCTAssertNil(launcher.specs.last?.notice)
     }
 
     func testRunStopEnableAndDelete() throws {

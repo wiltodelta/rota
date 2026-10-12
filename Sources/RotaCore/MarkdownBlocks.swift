@@ -7,13 +7,15 @@ public enum MarkdownBlock: Equatable, Sendable {
     case heading(level: Int, text: String)
     /// `marker` is "•" for an unordered item or the number with its dot.
     case listItem(marker: String, text: String, indent: Int)
-    case code(String)
+    /// `language` is the fence's info word ("swift", "bash"), nil when it has none.
+    case code(String, language: String? = nil)
     case paragraph(String)
 
     public static func parse(_ text: String) -> [MarkdownBlock] {
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []
         var code: [String]?
+        var language: String?
 
         func flush() {
             if !paragraph.isEmpty { blocks.append(.paragraph(paragraph.joined(separator: "\n"))) }
@@ -24,11 +26,13 @@ public enum MarkdownBlock: Equatable, Sendable {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("```") {
                 if let open = code {
-                    blocks.append(.code(open.joined(separator: "\n")))
+                    blocks.append(.code(open.joined(separator: "\n"), language: language))
                     code = nil
                 } else {
                     flush()
                     code = []
+                    let info = trimmed.dropFirst(3).split(separator: " ").first.map(String.init) ?? ""
+                    language = info.isEmpty ? nil : info
                 }
                 continue
             }
@@ -49,7 +53,7 @@ public enum MarkdownBlock: Equatable, Sendable {
             }
         }
         // An unclosed fence still shows its code.
-        if let open = code { blocks.append(.code(open.joined(separator: "\n"))) }
+        if let open = code { blocks.append(.code(open.joined(separator: "\n"), language: language)) }
         flush()
         return blocks
     }

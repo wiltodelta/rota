@@ -48,12 +48,12 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
 
     private func connect() {
         let (status, output) = ProcessLauncher.capture(spec.executable, ["app-server", "daemon", "start"],
-                                                       in: spec.workingDirectory)
+                                                       in: ProcessLauncher.helperDirectory)
         guard status == 0 else {
             return journal.finish(.launchFailed("codex app-server daemon start: \(output.prefix(200))"))
         }
         let process = ProcessLauncher.loginShellProcess(spec.executable, ["app-server", "proxy"],
-                                                        in: spec.workingDirectory, environment: spec.environment)
+                                                        in: ProcessLauncher.helperDirectory, environment: [:])
         let stdin = Pipe()
         let stdout = Pipe()
         process.standardInput = stdin
@@ -84,12 +84,23 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         var params: [String: Any] = ["cwd": spec.workingDirectory, "approvalPolicy": "never",
                                      "sandbox": "danger-full-access"]
         if let model = spec.model { params["model"] = model }
+        // The daemon's commands inherit the daemon's environment, not this run's, so the
+        // run's variables reach them as a per-thread config override.
+        params["config"] = Self.configOverrides(spec.environment)
         // A continued session loads its thread back onto the daemon and takes the next turn.
         let method = spec.resume == nil ? "thread/start" : "thread/resume"
         if let thread = spec.resume { params["threadId"] = thread }
         peer?.request(method, params) { [weak self] result in
             self?.queue.async { self?.threadStarted(result) }
         }
+    }
+
+    /// `shell_environment_policy.set.<NAME>` for each of the run's variables: dotted keys,
+    /// so they add to the user's own `set` table rather than replace it.
+    static func configOverrides(_ environment: [String: String]) -> [String: Any] {
+        Dictionary(uniqueKeysWithValues: ProcessLauncher.sessionVariables(environment).map {
+            ("shell_environment_policy.set.\($0.key)", $0.value as Any)
+        })
     }
 
     private func threadStarted(_ result: Result<Any, JSONRPCError>) {
@@ -124,6 +135,11 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         case "item/completed":
             let item = params["item"] as? [String: Any]
             if item?["type"] as? String == "agentMessage", let text = item?["text"] as? String { journal.line(text) }
+        case "turn/plan/updated":
+            let steps = (params["plan"] as? [[String: Any]] ?? []).map {
+                PlanStep(status: $0["status"] as? String, text: $0["step"] as? String ?? "")
+            }
+            if !steps.isEmpty { journal.line(PlanStep.lines(steps)) }
         case "turn/completed":
             turnCompleted(params["turn"] as? [String: Any])
         default:

@@ -3,18 +3,32 @@ import XCTest
 
 final class HarnessTests: XCTestCase {
     func testClaudeStreamArguments() {
-        let plain = Harness.claude.arguments(needs: [])
+        let plain = Harness.claude.arguments(settings: ClaudeUserSettings())
         XCTAssertEqual(plain, ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                                "--permission-mode", "bypassPermissions"])
-        XCTAssertTrue(Harness.claude.environment(needs: []).isEmpty)
-        XCTAssertEqual(Harness.claude.arguments(needs: [.chrome]).last, "--chrome")
-        XCTAssertEqual(Array(Harness.claude.arguments(needs: [], resume: "s1").suffix(2)), ["--resume", "s1"])
-        XCTAssertEqual(Harness.claude.environment(needs: [.chrome]), ["CLAUDE_CODE_ENABLE_CFC": "1"])
+        XCTAssertEqual(Array(Harness.claude.arguments(settings: ClaudeUserSettings(), resume: "s1").suffix(2)),
+                       ["--resume", "s1"])
+    }
+
+    /// Chrome follows the user's default in ~/.claude.json, as an interactive session would; nothing else is added.
+    func testClaudeGetsChromeExactlyWhenTheUsersSettingsTurnItOn() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let on = folder.appendingPathComponent("on.json")
+        try JSONSerialization.data(withJSONObject: ["claudeInChromeDefaultEnabled": true]).write(to: on)
+        let off = folder.appendingPathComponent("off.json")
+        try JSONSerialization.data(withJSONObject: ["claudeInChromeDefaultEnabled": false]).write(to: off)
+        XCTAssertEqual(Harness.claude.arguments(settings: .read(on)).last, "--chrome")
+        XCTAssertFalse(Harness.claude.arguments(settings: .read(off)).contains("--chrome"))
+        XCTAssertFalse(Harness.claude.arguments(settings: .read(folder.appendingPathComponent("none")))
+            .contains("--chrome"), "no settings file turns nothing on")
+        XCTAssertTrue(Harness.codex.arguments(settings: .read(on)).isEmpty)
     }
 
     func testOnlyClaudeTakesCommandLineArguments() {
         for harness in [Harness.codex, .grok, .shell] {
-            XCTAssertTrue(harness.arguments(needs: [.chrome]).isEmpty)
+            XCTAssertTrue(harness.arguments(settings: ClaudeUserSettings(chromeByDefault: true)).isEmpty)
         }
         XCTAssertEqual(Harness.allCases.map(\.launchMode), [.claudeStream, .codexDaemon, .grokACP, .screen])
     }
@@ -55,6 +69,38 @@ final class HarnessTests: XCTestCase {
         XCTAssertEqual(SkillRequirements.scan("read the repo with Playwright"), [])
     }
 
+    /// Codex's daemon and Grok's leader outlive a run, so a run's variables go over the protocol.
+    func testTheRunsVariablesReachSharedHarnessesOverTheProtocol() throws {
+        let environment = ["ROTA_SESSION": "S1", "ROTA_ROUTINE": "digest", "ROTA_CLI": "/x/rota",
+                           "CLAUDE_CODE_ENABLE_CFC": "1"]
+        let overrides = CodexDaemonRun.configOverrides(environment)
+        XCTAssertEqual(overrides as? [String: String], ["shell_environment_policy.set.ROTA_SESSION": "S1",
+                                                        "shell_environment_policy.set.ROTA_ROUTINE": "digest",
+                                                        "shell_environment_policy.set.ROTA_CLI": "/x/rota"])
+        let rule = try XCTUnwrap(GrokACPRun.sessionRule(environment))
+        XCTAssertTrue(rule.contains("'/x/rota' notify --session S1"), rule)
+        XCTAssertTrue(rule.contains("routine digest"), rule)
+        XCTAssertNil(GrokACPRun.sessionRule([:]))
+        XCTAssertEqual(ProcessLauncher.helperDirectory, FileManager.default.homeDirectoryForCurrentUser.path)
+    }
+
+    /// A run starts from the account's variables, whatever started Rota, and its login shell adds the rest.
+    func testARunDoesNotInheritTheSessionThatStartedRota() {
+        let inherited = ["HOME": "/Users/u", "USER": "u", "TMPDIR": "/tmp/u/", "CLAUDECODE": "1",
+                         "ANTHROPIC_BASE_URL": "http://proxy", "SUPERCONDUCTOR_ENV": "release",
+                         "PATH": "/agent/shims:/usr/bin", "ROTA_DATA_DIR": "/tmp/data"]
+        let base = ProcessLauncher.baseEnvironment(inherited)
+        XCTAssertEqual(base["HOME"], "/Users/u")
+        XCTAssertEqual(base["ROTA_DATA_DIR"], "/tmp/data", "a dev build's command must reach the dev build")
+        XCTAssertNil(base["CLAUDECODE"])
+        XCTAssertNil(base["ANTHROPIC_BASE_URL"])
+        XCTAssertNil(base["SUPERCONDUCTOR_ENV"])
+        XCTAssertEqual(base["PATH"], "/usr/bin:/bin:/usr/sbin:/sbin")
+        let process = ProcessLauncher.loginShellProcess("/bin/echo", [], in: "/", environment: ["ROTA_SESSION": "S"])
+        XCTAssertEqual(process.environment?["ROTA_SESSION"], "S")
+        XCTAssertNil(process.environment?["CLAUDECODE"])
+    }
+
     func testGapsPerHarness() {
         let both: Set<Capability> = [.chrome, .push]
         XCTAssertTrue(SkillRequirements.gaps(both, on: .claude).isEmpty)
@@ -68,7 +114,9 @@ final class HarnessTests: XCTestCase {
             }
             XCTAssertTrue(advice.contains("notify"))
         }
-        XCTAssertEqual(SkillRequirements.gaps([.chrome], on: .grok).map(\.1), [.missing])
+        if case .differentTools = SkillRequirements.gaps([.chrome], on: .grok).first?.1 {} else {
+            XCTFail("Grok reaches Chrome through playwright")
+        }
         XCTAssertEqual(SkillRequirements.gaps([.chrome], on: .shell).map(\.1), [.missing])
         XCTAssertTrue(SkillRequirements.gaps([], on: .grok).isEmpty)
     }
@@ -107,16 +155,16 @@ final class TranscriptTests: XCTestCase {
         XCTAssertEqual(items.map(\.kind), [.user, .agent, .tool, .agent, .agent, .status, .error])
         XCTAssertEqual(items[0].text, "Run the weekly check.\nThen report.")
         XCTAssertEqual(items[3].text, "Found three files.\nThey look fine.")
-        XCTAssertEqual(items[5].text, "Succeeded after 20 s")
+        XCTAssertEqual(items[5].text, "Succeeded after 20s")
         XCTAssertEqual(items.map(\.id), Array(0..<7))
     }
 
     func testDurationsReadInMinutes() {
-        XCTAssertEqual(Transcript.readableDurations("Succeeded after 412 s"), "Succeeded after 6 min 52 s")
-        XCTAssertEqual(Transcript.readableDurations("Succeeded after 120 s"), "Succeeded after 2 min")
-        XCTAssertEqual(Transcript.readableDurations("Succeeded after 3700 s"), "Succeeded after 1 h 1 min")
-        XCTAssertEqual(Transcript.readableDurations("Succeeded after 9 s"), "Succeeded after 9 s")
-        XCTAssertEqual(Transcript.parse("[result: success, 4 s, 2 turns]").first?.text, "success, 4 s, 2 turns")
+        XCTAssertEqual(Transcript.readableDurations("Succeeded after 412 s"), "Succeeded after 6m 52s")
+        XCTAssertEqual(Transcript.readableDurations("Succeeded after 120 s"), "Succeeded after 2m 0s")
+        XCTAssertEqual(Transcript.readableDurations("Succeeded after 3700 s"), "Succeeded after 1h 1m")
+        XCTAssertEqual(Transcript.readableDurations("Succeeded after 9 s"), "Succeeded after 9s")
+        XCTAssertEqual(Transcript.parse("[result: success, 4 s, 2 turns]").first?.text, "success, 4s, 2 turns")
     }
 
     func testUserLinesRoundTrip() {
@@ -206,7 +254,7 @@ final class ModelChoiceTests: XCTestCase {
                        ["--reasoning-effort", "low"])
         XCTAssertEqual(spec(model: nil, effort: nil).modelFlags(effortFlag: "--effort"), [])
         // The routine's choice travels in the spec, not in the harness's arguments.
-        XCTAssertFalse(Harness.claude.arguments(needs: []).contains("--model"))
+        XCTAssertFalse(Harness.claude.arguments(settings: ClaudeUserSettings()).contains("--model"))
     }
 
     func testGrokModelsAreParsed() {
@@ -258,6 +306,13 @@ final class ModelChoiceTests: XCTestCase {
 }
 
 final class ScheduleTextTests: XCTestCase {
+    /// The form's menu titles each preset by its description, so none may lack one.
+    func testEveryPresetReadsAsWords() {
+        for cron in ScheduleText.presets {
+            XCTAssertNotNil(ScheduleText.describe(cron, locale: Locale(identifier: "en_US")), cron)
+        }
+    }
+
     private let english = Locale(identifier: "en_US")
 
     func testCommonShapesReadAsWords() {
@@ -391,5 +446,97 @@ final class TerminalLauncherTests: XCTestCase {
         XCTAssertEqual(KnownTerminal.ghostty.arguments(running: "/s.command"), ["-e", "/s.command"])
         XCTAssertNil(KnownTerminal.terminal.arguments(running: "/s.command"))
         XCTAssertNil(KnownTerminal.iTerm.arguments(running: "/s.command"))
+    }
+}
+
+final class TranscriptTurnTests: XCTestCase {
+    func testWorkUpToTheLastToolThenTheAnswer() {
+        let log = """
+            [you] Check the site
+            Looking at the pages.
+            -> Bash curl -I https://example.com
+            -> Read index.html
+
+            All three pages answer 200.
+            [result: succeeded after 12 s]
+            [you] Thanks
+            You're welcome.
+            """
+        let turns = TranscriptTurn.group(Transcript.parse(log))
+        XCTAssertEqual(turns.count, 2)
+        XCTAssertEqual(turns[0].prompt?.text, "Check the site")
+        XCTAssertEqual(turns[0].work.map(\.kind), [.agent, .tool, .tool])
+        XCTAssertEqual(turns[0].toolCount, 2)
+        XCTAssertEqual(turns[0].answer.map(\.text), ["All three pages answer 200."])
+        XCTAssertEqual(turns[0].notes.map(\.kind), [.status])
+        XCTAssertEqual(turns[1].work, [])
+        XCTAssertEqual(turns[1].answer.map(\.text), ["You're welcome."])
+    }
+
+    func testAShellRunIsItsOutput() {
+        let turns = TranscriptTurn.group(Transcript.parse("[you] echo hi\nhi\n[result: succeeded after 1 s]", shell: true))
+        XCTAssertEqual(turns.count, 1)
+        XCTAssertEqual(turns[0].answer.map(\.kind), [.output])
+        XCTAssertEqual(turns[0].work, [])
+    }
+}
+
+final class ToolStepTests: XCTestCase {
+    func testKindsAcrossHarnesses() {
+        XCTAssertEqual(ToolStep.kind(of: "Bash ls -la"), .execute)
+        XCTAssertEqual(ToolStep.kind(of: "$ /bin/zsh -lc 'echo hi'"), .execute, "Codex")
+        XCTAssertEqual(ToolStep.kind(of: "run_terminal_command"), .execute, "Grok")
+        XCTAssertEqual(ToolStep.kind(of: "Read /p/a.swift"), .read)
+        XCTAssertEqual(ToolStep.kind(of: "Edit /p/a.swift"), .edit)
+        XCTAssertEqual(ToolStep.kind(of: "edit files"), .edit, "Codex file change")
+        XCTAssertEqual(ToolStep.kind(of: "Grep pattern"), .search)
+        XCTAssertEqual(ToolStep.kind(of: "WebFetch https://example.com"), .fetch)
+        XCTAssertEqual(ToolStep.kind(of: "mcp__computer-use__screenshot"), .other)
+    }
+
+    func testARunIsSummedUpByWhatItDid() {
+        let run = ["Bash a", "Bash b", "Read x", "Edit y", "Edit z", "Edit w", "mcp__rota__list_routines"]
+        XCTAssertEqual(ToolStep.summary(run), "read 1 file, ran 2 commands, edited 3 files, used 1 tool")
+        XCTAssertEqual(ToolStep.dominant(run), .edit)
+        XCTAssertEqual(ToolStep.dominant(["Bash a", "Read b"]), .execute, "a tie goes to the kind that changes more")
+        XCTAssertEqual(ToolStep.summary(["Grep a"]), "1 search")
+    }
+}
+
+final class PlanTests: XCTestCase {
+    func testPlansFromEachHarnessReadAsTheLatestPerTurn() {
+        let first = PlanStep.lines([PlanStep(status: "completed", text: "Read the config"),
+                                    PlanStep(status: "in_progress", text: "Check each page"),
+                                    PlanStep(status: "pending", text: "Report")])
+        let second = PlanStep.lines([PlanStep(status: "completed", text: "Read the config"),
+                                     PlanStep(status: "inProgress", text: "Check each page"),
+                                     PlanStep(status: nil, text: "Report")])
+        let turns = TranscriptTurn.group(Transcript.parse("[you] Go\n\(first)\n\(second)\nDone."))
+        XCTAssertEqual(turns.count, 1)
+        let steps = PlanStep.parse(turns[0].plan?.text ?? "")
+        XCTAssertEqual(steps.map(\.status), [.completed, .inProgress, .pending], "two updates in a row stay two plans")
+        XCTAssertEqual(steps.map(\.text), ["Read the config", "Check each page", "Report"])
+        XCTAssertEqual(turns[0].answer.map(\.text), ["Done."])
+    }
+
+    func testClaudeTodoWriteBecomesAPlan() {
+        let event = #"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"Fix the link","status":"in_progress","activeForm":"Fixing"}]}}]}}"#
+        let lines = StreamJSONFormatter.format(event) ?? ""
+        let item = Transcript.parse(lines).first
+        XCTAssertEqual(item?.kind, .plan)
+        XCTAssertEqual(PlanStep.parse(item?.text ?? ""), [PlanStep(status: .inProgress, text: "Fix the link")])
+    }
+}
+
+final class OutgoingTests: XCTestCase {
+    func testAMessageShowsAsSendingUntilTheLogHasIt() {
+        let before = Transcript.parse("[you] Check it\nLooking.")
+        let message = Outgoing(text: "Also say EXTRA", seen: Outgoing.count("Also say EXTRA", in: before))
+        XCTAssertFalse(message.delivered(in: before))
+        XCTAssertTrue(message.delivered(in: Transcript.parse("[you] Check it\nLooking.\n[you] Also say EXTRA")))
+        // The same words sent twice wait for the second copy.
+        let again = Outgoing(text: "ok", seen: 1)
+        XCTAssertFalse(again.delivered(in: Transcript.parse("[you] ok\nfine")))
+        XCTAssertTrue(again.delivered(in: Transcript.parse("[you] ok\nfine\n[you] ok")))
     }
 }

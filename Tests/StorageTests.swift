@@ -94,4 +94,14 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(ClaudeDesktopImport.stripFrontmatter("plain body\n"), "plain body")
         XCTAssertNil(ClaudeDesktopImport.stripFrontmatter("---\na: b\n---\n  \n"))
     }
+
+    /// Checks give the build under test its own folder, so it never opens the installed app's routines.
+    func testADataFolderInTheEnvironmentReplacesTheStandardOne() {
+        let original = ProcessInfo.processInfo.environment["ROTA_DATA_DIR"]
+        setenv("ROTA_DATA_DIR", "/tmp/rota-data-check", 1)
+        defer { if let original { setenv("ROTA_DATA_DIR", original, 1) } else { unsetenv("ROTA_DATA_DIR") } }
+        XCTAssertEqual(StorageLocation.standard.root.path, "/tmp/rota-data-check")
+        XCTAssertEqual(StorageLocation.standard.logs.path, "/tmp/rota-data-check/Logs")
+        XCTAssertEqual(ControlServer.standardSocket.path, "/tmp/rota-data-check/rota.sock")
+    }
 }

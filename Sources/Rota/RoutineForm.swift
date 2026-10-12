@@ -12,10 +12,12 @@ struct RoutineForm: View {
     var body: some View {
         Form {
             if let skillTaken {
-                TextField("Skill", text: $draft.id, prompt: Text("the project skill this routine runs"))
+                // An agent routine is named after the project skill it runs; a command just needs an id.
+                TextField(draft.harness.isAgent ? "Skill" : "ID", text: $draft.id,
+                          prompt: Text(draft.harness.isAgent ? "the project skill this routine runs" : "weekly-backup"))
                     .accessibilityIdentifier("routineSkill")
                 if skillTaken {
-                    Text("A routine for this skill already exists.").foregroundStyle(.red)
+                    Text("A routine with this id already exists.").foregroundStyle(Color.errorText)
                 }
             }
             TextField("Name", text: $draft.name)
@@ -31,7 +33,7 @@ struct RoutineForm: View {
             }
             if !draft.workingDirectory.isEmpty && !FileManager.default.fileExists(atPath: draft.workingDirectory) {
                 Label("No folder at this path.", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Color.errorText)
                     .font(.callout)
             }
             ScheduleField(schedule: $draft.schedule)
@@ -84,11 +86,27 @@ private struct ScheduleField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             LabeledContent("Schedule") {
-                TextField("Schedule", text: $schedule, prompt: Text("minute hour day month weekday"))
-                    .accessibilityIdentifier("routineSchedule")
-                    .labelsHidden()
-                    .font(.body.monospaced())
-                    .multilineTextAlignment(.trailing)
+                HStack(spacing: 8) {
+                    TextField("Schedule", text: $schedule, prompt: Text("minute hour day month weekday"))
+                        .accessibilityIdentifier("routineSchedule")
+                        .labelsHidden()
+                        .font(.body.monospaced())
+                        .multilineTextAlignment(.trailing)
+                    // Common schedules, so a first routine needs no cron.
+                    Menu {
+                        ForEach(ScheduleText.presets, id: \.self) { cron in
+                            Button(ScheduleText.describe(cron) ?? cron) { schedule = cron }
+                        }
+                    } label: {
+                        Image(systemName: "clock")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Common schedules")
+                    .accessibilityLabel("Common schedules")
+                    .accessibilityIdentifier("schedulePresets")
+                }
             }
             Group {
                 switch Result(catching: { try CronSchedule(schedule) }) {
@@ -99,7 +117,7 @@ private struct ScheduleField: View {
                             .joined(separator: ", ")
                     Text([ScheduleText.describe(schedule), next].compactMap { $0 }.joined(separator: ". "))
                 case .failure(let error):
-                    Text(error.localizedDescription).foregroundStyle(.red)
+                    Text(error.localizedDescription).foregroundStyle(Color.errorText)
                 }
             }
             .font(.caption)
@@ -121,7 +139,7 @@ struct HarnessWarnings: View {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(gaps, id: \.0) { capability, support in
                     Label(message(capability, support), systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(support == .missing ? .red : .orange)
+                        .foregroundStyle(support == .missing ? Color.errorText : Color.warningText)
                 }
             }
             .font(.callout)

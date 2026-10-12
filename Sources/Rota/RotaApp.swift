@@ -127,6 +127,7 @@ final class AppModel {
         scheduler = Scheduler(location: .standard, launcher: ProcessLauncher())
         let settings = settings
         scheduler.executable = { settings.executable(for: $0) }
+        scheduler.claudeInteractive = { settings.claudeInteractive }
         notifier.notifyOnSuccess = { settings.notifyOnSuccess }
         scheduler.notifier = notifier
         notifier.requestAuthorization()
@@ -164,6 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var panel: MenuBarPanelController!
     private var mainWindow: NSWindow?
     private var settingsWindow: NSWindow?
+    private var macState: MacState?
     private var controlServer: ControlServer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -181,6 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.action = #selector(statusItemClicked)
             button.target = self
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            addShowMenuAction(to: button)
         }
         panel = MenuBarPanelController(rootView: MenuBarContent().environment(model),
                                        size: NSSize(width: 340, height: 300))
@@ -189,6 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         observeStatus()
 
         Updater.shared.start()
+        macState = MacState(scheduler: model.scheduler)
         model.scheduler.start()
         startControlServer()
         if model.scheduler.routines.isEmpty { showMainWindow() }
@@ -230,7 +234,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// stopped and can be continued later.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let running = model.scheduler.active.count
-        guard running > 0 else { return .terminateNow }
+        // A shutdown never waits on Rota: its open runs continue when Rota starts again.
+        guard running > 0, macState?.poweringOff != true else { return .terminateNow }
         let alert = NSAlert()
         if running == 1 {
             alert.messageText = "Stop the running routine and quit?"
@@ -317,9 +322,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                           action: #selector(checkForUpdates)))
         menu.addItem(.separator())
         // The standard selector lets macOS 26+ give the item its system icon.
-        menu.addItem(NSMenuItem(title: "Quit Rota", action: #selector(NSApplication.terminate(_:)),
-                                keyEquivalent: "q"))
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button)
+        let quit = NSMenuItem(title: "Quit Rota", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        showsImage(quit)
+        menu.addItem(quit)
+        // System appearance, under the icon (popUp opened clipped above the menu bar).
+        menu.appearance = NSApp.effectiveAppearance
+        statusItem.menu = menu
+        button.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    // macOS 27 hides item images unless asked (1 = visible; runtime, as CI has an older SDK).
+    private func showsImage(_ item: NSMenuItem) {
+        guard item.responds(to: NSSelectorFromString("setPreferredImageVisibility:")) else { return }
+        item.setValue(1, forKey: "preferredImageVisibility")
+    }
+
+    /// The right-click menu needs a real right click; VoiceOver gets this action instead.
+    private func addShowMenuAction(to button: NSStatusBarButton) {
+        button.setAccessibilityCustomActions([
+            NSAccessibilityCustomAction(name: "Show Menu") { [weak self] in
+                self?.showQuickMenu()
+                return true
+            }
+        ])
     }
 
     private func item(_ title: String, symbol: String, action: Selector, key: String = "") -> NSMenuItem {
@@ -328,6 +354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if #available(macOS 26.0, *) {
             item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         }
+        showsImage(item)
         return item
     }
 
@@ -361,9 +388,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func showSettingsWindow() {
         panel.close()
         if settingsWindow == nil {
-            let hosting = NSHostingController(rootView: SettingsView().environment(model))
-            let window = NSWindow(contentViewController: hosting)
-            window.title = "Rota Settings"
+            let window = NSWindow(contentViewController: SettingsTabController(model: model))
             window.styleMask = [.titled, .closable]
             window.isReleasedWhenClosed = false
             window.delegate = self
@@ -387,83 +412,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if closing === settingsWindow { settingsWindow = nil }
         let others = [mainWindow, settingsWindow].compactMap { $0 }.filter { $0 !== closing && $0.isVisible }
         if others.isEmpty { NSApp.setActivationPolicy(.accessory) }
-    }
-}
-
-/// User preferences kept in UserDefaults.
-@MainActor
-@Observable
-final class AppSettings {
-    private let defaults = UserDefaults.standard
-
-    var notifyOnSuccess: Bool {
-        didSet { defaults.set(notifyOnSuccess, forKey: "notifyOnSuccess") }
-    }
-
-    private var executables: [String: String] {
-        didSet { defaults.set(executables, forKey: "executables") }
-    }
-
-    /// The terminal app sessions open in; nil follows the macOS default terminal.
-    var terminalApp: String? {
-        didSet { defaults.set(terminalApp, forKey: "terminalApp") }
-    }
-
-    init() {
-        notifyOnSuccess = defaults.bool(forKey: "notifyOnSuccess")
-        executables = defaults.dictionary(forKey: "executables") as? [String: String] ?? [:]
-        terminalApp = defaults.string(forKey: "terminalApp")
-        refreshInstalled()
-    }
-
-    /// The installed copies of each agent CLI, found at launch and when Settings open.
-    private(set) var installed: [Harness: [InstalledExecutable]] = [:]
-    /// The models each agent offers, read from its CLI with the copies.
-    private(set) var models: [Harness: [ModelOption]] = [:]
-
-    /// The path runs use: the one picked in Settings, else the first installed
-    /// copy, else where the CLI's installer puts it. The shell is always zsh.
-    func executable(for harness: Harness) -> String {
-        harness == .shell ? harness.defaultExecutable()
-            : Self.resolve(harness, chosen: chosenExecutable(for: harness), installed: installed[harness] ?? [])
-    }
-
-    private nonisolated static func resolve(_ harness: Harness, chosen: String?,
-                                            installed: [InstalledExecutable]) -> String {
-        chosen ?? installed.first?.path ?? harness.defaultExecutable()
-    }
-
-    /// The path picked in Settings; nil means automatic.
-    func chosenExecutable(for harness: Harness) -> String? {
-        executables[harness.rawValue].flatMap { $0.isEmpty ? nil : $0 }
-    }
-
-    func setExecutable(_ path: String?, for harness: Harness) {
-        executables[harness.rawValue] = path
-    }
-
-    @ObservationIgnored private var refreshing: Task<Void, Never>?
-
-    /// Finds the installed copies, then each agent's models, all agents at once.
-    /// A newer call replaces one still running, so the latest choices win.
-    func refreshInstalled() {
-        let chosen = Dictionary(uniqueKeysWithValues: Harness.agents.map { ($0, chosenExecutable(for: $0)) })
-        refreshing?.cancel()
-        refreshing = Task.detached(priority: .utility) {
-            let found = ExecutableDiscovery.installedAgents()
-            guard !Task.isCancelled else { return }
-            await MainActor.run { self.installed = found }
-            let models = await withTaskGroup(of: (Harness, [ModelOption]).self) { group in
-                for harness in Harness.agents {
-                    let executable = Self.resolve(harness, chosen: chosen[harness] ?? nil,
-                                                  installed: found[harness] ?? [])
-                    group.addTask { (harness, ModelCatalog.models(for: harness, executable: executable)) }
-                }
-                return await group.reduce(into: [:]) { $0[$1.0] = $1.1 }
-            }
-            guard !Task.isCancelled else { return }
-            await MainActor.run { self.models = models }
-        }
     }
 }
 

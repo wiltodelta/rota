@@ -4,7 +4,8 @@
 flowchart LR
     Tick[Scheduler.tick every 30 s] -->|slot due| Run[Scheduler.run]
     Run --> Launcher[ProcessLauncher]
-    Launcher -->|Claude| ClaudeRun[ClaudeStreamRun: claude -p, stream-json in and out]
+    Launcher -->|Claude| ClaudeTUI[ClaudeInteractiveRun: interactive claude in screen, transcript read back]
+    Launcher -->|Claude, untrusted folder| ClaudeRun[ClaudeStreamRun: claude -p, stream-json in and out]
     Launcher -->|Codex| CodexRun[CodexDaemonRun: JSON-RPC over WebSocket to the app-server daemon]
     Launcher -->|Grok| GrokRun[GrokACPRun: ACP over stdio through the shared leader]
     Launcher -->|Shell| ScreenRun[ScreenRun: detached screen, tee to the log, exit file]
@@ -62,6 +63,10 @@ flowchart LR
   agent CLI's own `mcp add`/`mcp remove` (Claude Code and Grok Build at user
   scope) when the user asks in Settings. A routine created over the socket is
   on, like one made in the window, and `RunNotifying.routineAdded` says so.
+  `Routine.problem(checkingID:)` is the one rule for what may be saved: the
+  control methods refuse with its sentence, and the New and Edit sheets keep
+  Add and Save off with it beside the buttons. An update skips the id check,
+  so a routine keeps the id it was imported with.
 - Each run gets `ROTA_SESSION` (its `RunRecord` id), `ROTA_ROUTINE` and
   `ROTA_CLI` (the bundled `rota`) in its environment, so `rota notify` and the
   `notify_user` MCP tool know their session without arguments. The `notify`
@@ -70,8 +75,37 @@ flowchart LR
   run's finish saves that copy), and `Scheduler.message` clears it before a
   continued run saves the record. The notification carries the session id for
   the click and a text-input Reply action that answers like the composer.
-- `ProcessLauncher` runs every CLI through `zsh -lc 'exec "$0" "$@"'`, so a
-  routine sees the PATH a login terminal sees.
+- `ProcessLauncher` runs every CLI through `zsh -lc 'exec "$0" "$@"'` from
+  `baseEnvironment` (the account's own variables only), so a routine sees what
+  a new Terminal window sees, whatever started Rota: started by `rota` inside
+  an agent session, Rota had passed that session's `CLAUDECODE`,
+  `ANTHROPIC_BASE_URL` and super.engineering variables to every run. The
+  interactive run's once-a-second `screen` calls skip the login shell
+  (`capture(..., loginShell: false)`, 0.04 s against 0.17 s a call).
+- Codex's app-server daemon and Grok's leader outlive the run that starts them
+  and keep its folder and environment, so they start in the home folder with
+  no run variables (`ProcessLauncher.helperDirectory`). A leader started in a
+  routine's temporary folder that was later deleted failed every `npx` MCP
+  server for every Grok session (Node's `uv_cwd`), playwright included, from
+  2026-10-10 until it was restarted. Each session gets its folder over the
+  protocol, and its `ROTA_*` variables as a Codex thread `config` override
+  (`shell_environment_policy.set.*`, verified live in the command's
+  environment) or, for Grok, whose commands have no per-session environment,
+  as a `_meta.rules` sentence naming the session and the `rota notify` command.
+- What a run can reach, checked live 2026-10-11 through Rota on each harness
+  (`GLOBAL`/`CHROME`/`COMPUTER` self-report, Claude's `system/init` tool list,
+  Codex `mcpServerStatus/list`, Grok session `events.jsonl`): all three load
+  the global instructions; Claude has 22 `mcp__claude-in-chrome__` tools from
+  `env.CLAUDE_CODE_ENABLE_CFC` in the user's settings, and Rota passes
+  `--chrome` when `claudeInChromeDefaultEnabled` in `~/.claude.json` is on
+  (`ClaudeUserSettings`: a run follows the user's settings, never a guess from
+  the prompt); in print mode it has no built-in computer use, which Claude Code
+  adds only to an interactive session, hence `ClaudeInteractiveRun`, where an
+  interactive run in a computer-use project listed 27 `mcp__computer-use__`
+  tools and answered `list_granted_applications`; Codex has its `computer-use`, `cua_repl` and
+  `node_repl` plugins (Chrome through them); Grok has `playwright` from
+  Claude's user config. Claude and Grok reach native apps through the
+  `cua-driver` skill, whose grants belong to CuaDriver.app, not Rota.
 - `ExecutableDiscovery` lists each agent CLI's installed copies: the PATH of a
   login shell started from an empty environment (an app opened from a terminal
   inherits that terminal's PATH, which put another tool's agent wrappers first
@@ -87,6 +121,25 @@ flowchart LR
   run and closing stdin lets Claude exit and save the session; the `system`
   `init` event carries the session id, and `--resume <id>` continues it. `-p`
   asks no folder-trust question. The session lives in Rota's process.
+- `ClaudeInteractiveRun` is the default for Claude (Settings > Agents), because
+  only an interactive session loads computer use (`ClaudeUserSettings`). It
+  runs `claude --session-id <id> --settings <hooks> --permission-mode
+  bypassPermissions -- <prompt>` (`--resume <id>` to continue) in a detached
+  `screen` session, which gives it a terminal and lets Open in Terminal
+  attach. The chat is Claude's transcript, `~/.claude/projects/*/<id>.jsonl`,
+  read from where it ended: assistant entries have the stream-json shape, a
+  message typed mid-turn appears as a `queued_command` attachment, and
+  `system`/`turn_duration` ends a turn (`ClaudeTranscript`, shapes from Claude
+  Code 2.1.296 on 2026-10-11). Messages are typed in as a bracketed paste
+  (`screen -X stuff` passes `^`, `\`, `$` through as typed); once the last turn
+  ended with nothing typed since, the run types `/exit`. A `Notification` hook
+  (permission or app-access prompt) marks the session needs-reply through
+  `$ROTA_CLI notify`. Claude shows a folder-trust dialog nobody could answer,
+  so a folder without `hasTrustDialogAccepted` (itself or its repository) runs
+  in print mode with a note; Rota never answers that dialog or sets the flag.
+  macOS attributes computer use to Rota (`responsible=com.wiltodelta.rota` in
+  tccd's log), so Settings shows Rota's Accessibility and Screen Recording
+  grants and asks for them.
 - Every run stays reachable while it works, which is the point of each runner
   (verified live 2026-10-09 with `ROTA_LIVE=1 swift test --filter LiveHarnessTests`):
   - `CodexDaemonRun` runs `codex app-server daemon start`, then speaks JSON-RPC
@@ -122,8 +175,11 @@ flowchart LR
   Verified live 2026-10-09 by the `*Continues*` tests in `LiveHarnessTests`.
 - Runners write the log as chat lines (`Transcript`): `[you] ` before every
   line of user text, `-> ` for a tool, `[rota: …]` for status, `[error] `;
-  everything else is the agent's text. `Transcript.parse` turns it into the
-  items `SessionView` draws.
+  everything else is the agent's text. `Transcript.parse` turns it into
+  items and `TranscriptTurn.group` into turns, split at each user message:
+  what comes up to a turn's last tool call is its work, folded behind one rule
+  in `ChatTranscript` (open while the turn runs), and the text after it is the
+  answer. The layout follows super.engineering's chat.
 - Agent text renders through `MarkdownBlock` (headings, list items, fenced
   code, paragraphs; inline Markdown inside each), because SwiftUI `Text` draws
   inline Markdown only. `Transcript.parse` keeps a fenced block with blank
@@ -134,6 +190,24 @@ flowchart LR
   in the routine's history and out of `allRecords()`, the sessions list.
   Five failed scheduled runs in a row (`failuresBeforePause`; skips and manual
   runs do not count) turn the routine off and notify once.
+- `Resilience.swift`: the Mac cuts runs off, and Rota picks them up. `tick`
+  starts nothing while `isOnline` is false (`MacState` watches `NWPathMonitor`),
+  so a slot due on waking waits for the network. A run going when the Mac
+  slept (`systemWillSleep`) that then fails or is interrupted, one that
+  fails while offline or whose log ends on a network error (`NetworkFailure`),
+  and every agent run `closeOrphans` finds still open at launch (a shutdown, a
+  crash), is queued in `pendingResumes`; an agent run that failed that way
+  before it had a session goes to `pendingReruns` and runs again whole (twice
+  at most in a row). Neither starts until `ServiceProbe` gets any HTTP answer
+  from the agent's API host (the Mac can report a network before DNS or a
+  captive portal lets anything through); otherwise it asks again after
+  `retryDelay` (60 s). A resume is continued in
+  its session with `resumeMessage` ("Continue.", kept out of the chat by
+  `LaunchSpec.quietPrompt`) once online, at most `resumeLimit` (2) times
+  per run (`RunRecord.resumes`). An interactive Claude whose screen session is
+  still up (Rota crashed, Claude did not) is left alone, and shell commands are
+  never rerun. On `willPowerOff` the app quits without its confirmation, so
+  the system is not held up and the open runs are orphans for the next launch.
 - A finished session is unread until `markRead`, which `SessionView` calls
   when it shows a finished session (`RunRecord.readAt`, `isUnread`); the
   sidebar, the panel and the Dock badge read `unreadCount`.

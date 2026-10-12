@@ -28,7 +28,8 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         return run
     }
 
-    /// The `claude` arguments for a run: `resume` continues that session.
+    /// The `claude` arguments for a run: `resume` continues that session, and
+    /// `chrome` passes on the user's Chrome default, which print mode would not apply.
     static func arguments(chrome: Bool, resume: String?) -> [String] {
         var arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                          "--permission-mode", "bypassPermissions"]

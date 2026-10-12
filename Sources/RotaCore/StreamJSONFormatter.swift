@@ -31,6 +31,12 @@ public enum StreamJSONFormatter {
             case "text":
                 return item["text"] as? String
             case "tool_use":
+                if item["name"] as? String == "TodoWrite",
+                   let todos = (item["input"] as? [String: Any])?["todos"] as? [[String: Any]] {
+                    return PlanStep.lines(todos.map {
+                        PlanStep(status: $0["status"] as? String, text: $0["content"] as? String ?? "")
+                    })
+                }
                 return "-> \(item["name"] as? String ?? "tool")\(toolDetail(item["input"]))"
             default:
                 return nil

@@ -14,15 +14,27 @@ Desktop.
 - **One scheduler for every harness.** Pick Claude Code, Codex, Grok Build or
   Shell per routine and switch at any time, with the model and reasoning
   effort to run on: Rota lists the models each agent's CLI offers. Standard five-field cron
-  schedules, with the next three run times shown as you type.
+  schedules, with common ones a click away and the next three run times shown
+  as you type.
 - **Sessions are the main view.** The sidebar lists every routine's sessions,
-  newest first, by day. A session reads as a chat: the routine's prompt, what
-  the agent said, the tools it called, your messages.
+  newest first, by day. A session reads as a chat laid out like
+  super.engineering's: your prompt and messages in bubbles, the agent's answer
+  as plain text under the agent's own logo and model, the tool calls that led
+  there folded into one "Worked for …" line you can open, and a footer with
+  the time and a copy button. While a session works the line reads "Working
+  for 12s", calls in a row read as what they did ("ran 2 commands, read 1
+  file"), the agent's plan shows with each step's state, the field shows the
+  clock and turns its button into Stop, and the chat follows the session
+  unless you scroll up. Code blocks name their language and copy in one click.
 - **Keep talking to a session, on every agent, while it works or after.** The
   field under the chat sends your message:
-  - Claude Code runs as Claude Desktop runs it, `claude -p` with stream-json
-    in and out: a message joins the current turn. Afterwards the session
-    continues with `--resume`.
+  - Claude Code runs interactively, as in a terminal, inside a detached
+    `screen` session: it gets computer use where you turned it on, a message
+    is typed in and joins the current turn, and **Open in Terminal** shows the
+    live session. Afterwards the session continues with `--resume`. A folder
+    Claude Code has not been trusted in, or Settings > Agents with the switch
+    off, runs `claude -p` with stream-json instead. Computer use acts as Rota,
+    so Settings asks macOS to allow Rota Accessibility and Screen Recording.
   - Codex runs on its local app-server daemon: a message joins the current
     turn (`turn/steer`). Afterwards the thread continues (`thread/resume`).
   - Grok Build runs through its shared leader: a message is answered right
@@ -74,6 +86,13 @@ Desktop.
   while the previous run is still going is skipped quietly. Skips stay in the
   routine's history, out of the sessions list. A run takes as long as it
   needs; a routine can set a time limit if it should not.
+- **Sleep, shutdown and lost Wi-Fi do not lose work.** A due slot waits for
+  the network rather than failing on a Mac that just woke. An agent run cut
+  off by sleep or a network error, or still open when the Mac shut down,
+  simply continues in the same session once its agent's service answers again
+  (twice at most per run); one that failed on the network before it started
+  working runs again. A shutdown quits Rota without
+  asking. Shell commands are never run again on their own.
 
 ## Requirements
 
@@ -114,7 +133,7 @@ mv Rota.app /Applications/
 - **Import** with the download button: pick routines from Claude Desktop or
   Codex. Turn each one off in its app before turning it on in Rota.
 - Select a session to read it and write to it. Under **Routines**, a routine
-  shows its next run, the switch that pauses it, **Run Now** and its
+  shows its schedule and next run, the switch that pauses it, **Run Now** and its
   sessions; **Edit…** opens its settings, Delete included. A new routine runs
   on its schedule from the start.
 - The sidebar folds away with the button beside the title, View > Hide
@@ -123,7 +142,7 @@ mv Rota.app /Applications/
   Routine > Run Now (Command-R), Stop (Command-.) and Edit Routine…
   (Command-E), acting on the selected routine or the selected session's.
 - The menu bar panel lists every routine with its next run; hover a row to run
-  or stop it, click it to open its latest session. Right-click the icon for Settings,
+  or stop it (VoiceOver offers both as actions), click it to open its latest session. Right-click the icon for Settings,
   updates and Quit.
 - If the icon is hidden (behind the notch, or by a menu bar manager), open
   Rota again from Finder or Spotlight to get its window.
@@ -135,7 +154,8 @@ is there to answer a prompt. Point a routine only at a project whose skill you
 trust.
 
 Rota runs routines only while it is open; turn on **Open at login** in
-Settings. Quitting while routines run asks first and stops them; their
+Settings, so runs cut off by a shutdown continue after the Mac starts.
+Quitting Rota yourself while routines run asks first and stops them; their
 sessions can be continued later.
 
 ## Updates
@@ -150,11 +170,12 @@ window opens when you choose it or check from Settings.
 - `./create-app.sh` builds and signs `Rota.app` (Developer ID when the
   maintainer's identity is in the keychain, ad hoc otherwise).
 - `RELEASE=1 ./create-app.sh && ./notarize.sh` notarizes and zips a release.
-- `bash maintain.sh` runs SwiftLint, the tests and a release build.
+- `bash maintain.sh` runs SwiftLint, the tests and `create-app.sh`.
 - `scripts/ui-check.sh` drives the built app through the Accessibility API
   (`scripts/ui-driver.swift`): it makes and runs a routine in both appearances
   at the minimum window size, checks each step and saves screenshots; `--live`
-  also messages a running Codex session. It backs up and restores Rota's data.
+  also messages a running Codex session. It runs the development build on its
+  own data folder, beside an installed Rota it never touches.
 
 Pushing an annotated `vX.Y.Z` tag builds, notarizes and publishes a release
 with the Sparkle appcast. Details: [`docs/build-and-release.md`](docs/build-and-release.md).

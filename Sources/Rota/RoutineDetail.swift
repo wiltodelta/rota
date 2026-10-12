@@ -27,9 +27,16 @@ struct RoutineDetail: View {
                 } label: {
                     HStack {
                         Text(record.startedAt.formatted(date: .abbreviated, time: .shortened))
+                            .fontWeight(record.isUnread ? .semibold : .regular)
                         Spacer()
+                        if record.attention != nil {
+                            Image(systemName: "exclamationmark.bubble.fill")
+                                .foregroundStyle(.orange)
+                                .help("Needs your reply")
+                                .accessibilityLabel("Needs your reply")
+                        }
                         Text(record.outcome.title)
-                            .foregroundStyle(record.outcome.isFailure && !record.isSkip ? .red : .secondary)
+                            .foregroundStyle(record.outcome.isFailure && !record.isSkip ? Color.errorText : .secondary)
                     }
                     .contentShape(Rectangle())
                 }
@@ -54,12 +61,15 @@ struct RoutineDetail: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(summary).font(.callout)
-                Text(routine.workingDirectory)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                Text(ScheduleText.describe(routine.schedule) ?? routine.schedule).font(.callout)
+                // Only the folder gives way when the line is short of room.
+                HStack(spacing: 0) {
+                    Text("\(state) \u{00B7} \(harness) \u{00B7} ").layoutPriority(1)
+                    Text(routine.workingDirectory).truncationMode(.middle)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
             Spacer(minLength: 12)
             Toggle("On", isOn: Binding(
@@ -86,13 +96,16 @@ struct RoutineDetail: View {
         }
     }
 
-    /// "Codex gpt-6-sol high, next run Mon, Oct 12, 10:15 AM", or why it will not run.
-    private var summary: String {
-        let harness = ([routine.harness.title] + [routine.model, routine.effort].compactMap { $0 })
-            .joined(separator: " ")
-        guard routine.enabled else { return "\(harness), paused" }
-        guard let next = routine.nextFire else { return "\(harness), no upcoming run" }
-        return "\(harness), next run \(NextRunFormat.string(next))"
+    /// "Codex gpt-6-sol high": where and on what it runs.
+    private var harness: String {
+        ([routine.harness.title] + [routine.model, routine.effort].compactMap { $0 }).joined(separator: " ")
+    }
+
+    /// "Next run Mon, Oct 12, 9:00 AM", or why it will not run.
+    private var state: String {
+        guard routine.enabled else { return "Paused" }
+        guard let next = routine.nextFire else { return "No upcoming run" }
+        return "Next run \(NextRunFormat.string(next))"
     }
 }
 
@@ -110,11 +123,20 @@ struct EditRoutineSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        let problem = draft.problem(checkingID: false)
+        VStack(alignment: .leading, spacing: 0) {
+            SheetTitle(text: "Edit Routine")
             RoutineForm(draft: $draft)
             HStack {
                 Button("Delete Routine\u{2026}", role: .destructive) { confirmingDelete = true }
-                Spacer()
+                Spacer(minLength: 12)
+                if let problem {
+                    Text(problem)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .accessibilityIdentifier("sheetProblem")
+                }
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button("Save") {
@@ -123,7 +145,7 @@ struct EditRoutineSheet: View {
                 }
                 .accessibilityIdentifier("saveRoutine")
                 .keyboardShortcut(.defaultAction)
-                .disabled(draft == routine || (try? CronSchedule(draft.schedule)) == nil)
+                .disabled(draft == routine || problem != nil)
             }
             .padding(16)
         }

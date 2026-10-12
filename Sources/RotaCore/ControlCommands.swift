@@ -90,7 +90,7 @@ extension Scheduler {
             routine.model = nil
             routine.effort = nil
         }
-        try validate(routine)
+        try validate(routine, checkingID: false)
         save(routine)
         return self.routine(routine.id) ?? routine
     }
@@ -124,25 +124,8 @@ extension Scheduler {
         if let enabled = try optional(params, "enabled", as: Bool.self) { routine.enabled = enabled }
     }
 
-    private func validate(_ routine: Routine) throws {
-        let allowed = CharacterSet.lowercaseLetters.union(.decimalDigits).union(CharacterSet(charactersIn: "-_"))
-        guard !routine.id.isEmpty, routine.id.unicodeScalars.allSatisfy(allowed.contains) else {
-            throw ControlError("An id is lowercase letters, digits, - and _, such as weekly-report.")
-        }
-        var isFolder: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: routine.workingDirectory, isDirectory: &isFolder),
-              isFolder.boolValue else {
-            throw ControlError("The project folder \(routine.workingDirectory) does not exist.")
-        }
-        do { _ = try CronSchedule(routine.schedule) } catch {
-            throw ControlError("The schedule \"\(routine.schedule)\": \(error.localizedDescription)")
-        }
-        guard !routine.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw ControlError(routine.harness.isAgent ? "Give a prompt or a skill." : "Give the command as prompt.")
-        }
-        if let limit = routine.timeLimitMinutes, !(1...1440).contains(limit) {
-            throw ControlError("A time limit is 1 to 1440 minutes, or null for none.")
-        }
+    private func validate(_ routine: Routine, checkingID: Bool = true) throws {
+        if let problem = routine.problem(checkingID: checkingID) { throw ControlError(problem) }
     }
 
     private func enable(_ params: [String: Any]) throws -> Routine {

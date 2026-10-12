@@ -1,9 +1,10 @@
 #!/bin/bash
 # End-to-end UI check of the built Rota.app through the Accessibility API
-# (scripts/ui-driver.swift): create a routine in the New routine sheet, run it,
+# (scripts/ui-driver.swift): create a routine in the New Routine sheet, run it,
 # follow its session, and capture every main surface in both appearances at the
-# 820 pt minimum width. Rota's data and defaults are backed up first and put back
-# at the end. Needs Accessibility and Screen Recording for the terminal.
+# 820 pt minimum width. It runs the development build (com.wiltodelta.rota.dev)
+# on a fresh data folder and its own defaults, beside the installed Rota, which it
+# never quits or reads. Needs Accessibility and Screen Recording for the terminal.
 #   scripts/ui-check.sh           shell routine only, no agent quota spent
 #   scripts/ui-check.sh --live    also message a running Codex session
 set -euo pipefail
@@ -11,9 +12,12 @@ cd "$(dirname "$0")/.."
 
 OUT="${ROTA_UI_OUT:-/tmp/rota-ui-check}"
 WORK="$(mktemp -d /tmp/rota-ui-work.XXXXXX)"
-SUPPORT="$HOME/Library/Application Support/Rota"
-LOGS="$HOME/Library/Logs/Rota"
-BACKUP="$(mktemp -d /tmp/rota-ui-backup.XXXXXX)"
+# The build under test keeps everything here; the command inside it follows ROTA_DATA_DIR too.
+export ROTA_DATA_DIR="$WORK/data"
+SUPPORT="$ROTA_DATA_DIR"
+LOGS="$ROTA_DATA_DIR/Logs"
+DOMAIN="com.wiltodelta.rota.dev"
+APP="$PWD/Rota.app"
 DRIVER="$WORK/driver"
 LIVE="${1:-}"
 FAILURES=0
@@ -22,27 +26,22 @@ pass() { echo "ok    $1"; }
 fail() { echo "FAIL  $1"; FAILURES=$((FAILURES + 1)); }
 check() { if "$@" >/dev/null 2>&1; then pass "${*: -1}"; else fail "${*: -1}"; fi; }
 
+# Only the build under test, by its full path: never the installed app.
 quit_rota() {
-    pkill -f "Rota.app/Contents/MacOS/Rota" || true
-    while pgrep -f "Rota.app/Contents/MacOS/Rota" >/dev/null; do sleep 0.5; done
+    pkill -f "$APP/Contents/MacOS/Rota" || true
+    while pgrep -f "$APP/Contents/MacOS/Rota" >/dev/null; do sleep 0.5; done
 }
 
-restore() {
+cleanup() {
     quit_rota
-    rm -rf "$SUPPORT" "$LOGS"
-    [[ -d "$BACKUP/support" ]] && mv "$BACKUP/support" "$SUPPORT"
-    [[ -d "$BACKUP/logs" ]] && mv "$BACKUP/logs" "$LOGS"
-    if [[ -f "$BACKUP/defaults.plist" ]]; then
-        defaults import com.wiltodelta.rota "$BACKUP/defaults.plist"
-    else
-        defaults delete com.wiltodelta.rota >/dev/null 2>&1 || true
-    fi
-    rm -rf "$WORK" "$BACKUP"
+    defaults delete "$DOMAIN" >/dev/null 2>&1 || true
+    rm -rf "$WORK"
 }
 
 # LaunchServices can refuse to open an app that has just quit (error -600), so try again.
+# The data folder goes along, since an app opened by LaunchServices does not inherit the shell's environment.
 open_rota() {
-    for _ in 1 2 3; do open "$@" Rota.app && return 0; sleep 2; done
+    for _ in 1 2 3; do open --env "ROTA_DATA_DIR=$ROTA_DATA_DIR" "$@" "$APP" && return 0; sleep 2; done
     return 1
 }
 
@@ -73,11 +72,8 @@ session_value() {
 swiftc -O scripts/ui-driver.swift -o "$DRIVER"
 mkdir -p "$OUT" "$WORK/project"
 quit_rota
-[[ -d "$SUPPORT" ]] && mv "$SUPPORT" "$BACKUP/support"
-[[ -d "$LOGS" ]] && mv "$LOGS" "$BACKUP/logs"
-defaults export com.wiltodelta.rota "$BACKUP/defaults.plist" 2>/dev/null || rm -f "$BACKUP/defaults.plist"
-defaults delete com.wiltodelta.rota >/dev/null 2>&1 || true
-trap restore EXIT
+defaults delete "$DOMAIN" >/dev/null 2>&1 || true
+trap cleanup EXIT
 
 # The terminal a process runs in: the app among its ancestors.
 terminal_of() {
@@ -97,9 +93,9 @@ for appearance in light dark; do
     # The light pass opens sessions in Terminal, the dark one in iTerm2 when it is
     # installed; LiveHarnessTests covers the default, which follows macOS.
     if [[ "$appearance" == dark && -n "$ITERM" ]]; then
-        defaults write com.wiltodelta.rota terminalApp "$ITERM"; expected=iTerm
+        defaults write "$DOMAIN" terminalApp "$ITERM"; expected=iTerm
     else
-        defaults write com.wiltodelta.rota terminalApp /System/Applications/Utilities/Terminal.app; expected=Terminal
+        defaults write "$DOMAIN" terminalApp /System/Applications/Utilities/Terminal.app; expected=Terminal
     fi
     launch "$appearance"
     check "$DRIVER" exists newRoutine
@@ -111,8 +107,14 @@ for appearance in light dark; do
     capture "Rota" "$appearance-import"
     "$DRIVER" press Cancel; sleep 1
 
-    # A routine made the way a person makes one: the New routine sheet.
+    # A routine made the way a person makes one: the New Routine sheet.
     "$DRIVER" press newRoutine; sleep 1.5
+    # Add stays off with the reason beside it, by the rule the rota command and MCP refuse with.
+    [[ "$("$DRIVER" value sheetProblem)" == "Give the routine an id"* ]] && pass "new sheet says what is missing" \
+        || fail "new sheet says what is missing: $("$DRIVER" value sheetProblem)"
+    "$DRIVER" set routineSkill "Bad Id"; sleep 0.5
+    [[ "$("$DRIVER" value sheetProblem)" == *lowercase* ]] && pass "new sheet refuses a bad id" \
+        || fail "new sheet refuses a bad id: $("$DRIVER" value sheetProblem)"
     "$DRIVER" set routineSkill "ui-shell-$appearance"
     "$DRIVER" set routineName "UI check $appearance"
     "$DRIVER" set routineFolder "$WORK/project"
@@ -125,6 +127,7 @@ for appearance in light dark; do
     capture "Rota" "$appearance-new"
     "$DRIVER" choose routineHarness Shell
     check "$DRIVER" choose routineHarness Shell
+    "$DRIVER" exists sheetProblem && fail "a complete routine can be added" || pass "a complete routine can be added"
     "$DRIVER" press addRoutine; sleep 1
     grep -q '"harness" : "shell"' "$SUPPORT/routines.json" && pass "saved as a shell routine" || fail "saved as a shell routine"
     check "$DRIVER" exists runNow
@@ -156,7 +159,9 @@ for appearance in light dark; do
     Rota.app/Contents/Helpers/rota notify --session "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[0]["id"])' "$SUPPORT/runs/ui-shell-$appearance.json")" \
         --needs-reply "Approve the weekly report?" >/dev/null && pass "notify needs reply" || fail "notify needs reply"
     sleep 1.5
-    check "$DRIVER" exists attentionBanner
+    # A command takes no reply, so the banner asks for a look and a Done.
+    [[ "$("$DRIVER" value attentionBanner)" == "Needs your attention" ]] && pass "shell banner asks for attention" \
+        || fail "shell banner asks for attention: $("$DRIVER" value attentionBanner)"
     capture "UI check $appearance" "$appearance-needs-reply"
     "$DRIVER" press dismissAttention; sleep 1
     "$DRIVER" exists attentionBanner && fail "dismiss clears the mark" || pass "dismiss clears the mark"
@@ -165,7 +170,7 @@ for appearance in light dark; do
     check "$DRIVER" exists toggleSidebar
     "$DRIVER" press toggleSidebar; sleep 1
     "$DRIVER" exists Routines && fail "sidebar hides" || pass "sidebar hides"
-    [[ "$(defaults read com.wiltodelta.rota sidebarVisible 2>/dev/null)" == 0 ]] && pass "hidden sidebar is kept" \
+    [[ "$(defaults read "$DOMAIN" sidebarVisible 2>/dev/null)" == 0 ]] && pass "hidden sidebar is kept" \
         || fail "hidden sidebar is kept"
     capture "UI check $appearance" "$appearance-sidebar-hidden"
     "$DRIVER" press toggleSidebar; sleep 1
@@ -186,13 +191,35 @@ for appearance in light dark; do
     "$DRIVER" press Cancel; sleep 0.5
     quit_rota
 
+    # The menu bar panel: each routine is a button that opens its latest session.
+    open_rota --env "ROTA_APPEARANCE=$appearance" --env ROTA_OPEN_PANEL=1
+    sleep 4
+    panel_id="$(/usr/bin/log show --last 10s --info --predicate 'subsystem == "com.wiltodelta.rota" && category == "app"' \
+        | grep -io 'window [0-9]*' | tail -1 | awk '{print $2}')"
+    [[ -n "$panel_id" ]] && screencapture -x -o -l "$panel_id" "$OUT/$appearance-panel.png" \
+        && pass "captured $appearance-panel" || fail "captured $appearance-panel"
+    "$DRIVER" tree | grep -q "AXButton  UI check $appearance | Shell" && pass "panel row is a button" \
+        || fail "panel row is a button"
+    "$DRIVER" press "UI check $appearance"; sleep 2
+    "$DRIVER" tree | grep -q "AXWindow  UI check $appearance" && pass "panel row opens its session" \
+        || fail "panel row opens its session"
+    quit_rota
+
     # Settings, with each agent's installed copies and versions; the light pass
     # shows the terminal picker on its default, which names the macOS default terminal.
-    [[ "$appearance" == light ]] && { defaults delete com.wiltodelta.rota terminalApp >/dev/null 2>&1 || true; }
+    [[ "$appearance" == light ]] && { defaults delete "$DOMAIN" terminalApp >/dev/null 2>&1 || true; }
+    defaults write "$DOMAIN" settingsTab -int 0
     open_rota --env "ROTA_APPEARANCE=$appearance" --env ROTA_OPEN_SETTINGS=1
     sleep 8
-    settings_id="$("$DRIVER" wid "Rota Settings")" && screencapture -x -o -l "$settings_id" "$OUT/$appearance-settings.png" \
-        && pass "captured $appearance-settings" || fail "captured $appearance-settings"
+    # Settings are toolbar tabs; the window takes each tab's title and height.
+    for tab in General Chat Agents; do
+        [[ "$tab" == General ]] || { "$DRIVER" press "$tab"; sleep 2; }
+        settings_id="$("$DRIVER" wid "$tab")" \
+            && screencapture -x -o -l "$settings_id" "$OUT/$appearance-settings-$(echo "$tab" | tr A-Z a-z).png" \
+            && pass "captured $appearance-settings-$tab" || fail "captured $appearance-settings-$tab"
+        violations="$("$DRIVER" gate | tail -1)"
+        [[ "$violations" == "0 violations" ]] && pass "layout settings $tab" || fail "layout settings $tab: $violations"
+    done
     quit_rota
 done
 

@@ -4,7 +4,8 @@ import RotaCore
 import ServiceManagement
 import SwiftUI
 
-struct SettingsView: View {
+/// The General tab: when Rota runs, what it tells you, updates and the terminal.
+struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
@@ -16,11 +17,16 @@ struct SettingsView: View {
                 Toggle("Open at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, on in setLaunchAtLogin(on) }
                 if let loginError {
-                    Text(loginError).foregroundStyle(.red).font(.caption)
+                    Text(loginError).foregroundStyle(Color.errorText).font(.caption)
                 }
                 Toggle("Notify when a run succeeds", isOn: $settings.notifyOnSuccess)
             } footer: {
                 Text("Rota runs routines only while it is open. Failed and skipped runs always notify.")
+            }
+            Section {
+                TerminalPicker()
+            } footer: {
+                Text("Open in Terminal and Continue in Terminal use it.")
             }
             Section {
                 Toggle("Check for updates automatically", isOn: Binding(
@@ -31,27 +37,8 @@ struct SettingsView: View {
                     Button("Check for Updates\u{2026}") { Updater.shared.checkForUpdates() }
                 }
             }
-            ChatTextSection()
-            AgentAccessSection()
-            Section {
-                TerminalPicker()
-            } footer: {
-                Text("Open in Terminal and Continue in Terminal use it.")
-            }
-            Section {
-                ForEach(Harness.agents) { harness in
-                    ExecutablePicker(harness: harness)
-                }
-            } header: {
-                Text("Agents")
-            } footer: {
-                Text("Rota lists the copies it finds on your login shell's PATH and in the usual install folders.")
-            }
         }
-        .formStyle(.grouped)
-        .frame(width: 520)
-        .fixedSize(horizontal: false, vertical: true)
-        .onAppear { model.settings.refreshInstalled() }
+        .settingsPane()
     }
 
     private func setLaunchAtLogin(_ on: Bool) {
@@ -64,6 +51,94 @@ struct SettingsView: View {
                 .error("Login item change failed: \(error.localizedDescription, privacy: .public)")
         }
         launchAtLogin = SMAppService.mainApp.status == .enabled
+    }
+}
+
+/// The Chat tab: the chat's fonts and size.
+struct ChatSettings: View {
+    var body: some View {
+        Form { ChatTextSection() }.settingsPane()
+    }
+}
+
+/// The Agents tab: which copy of each agent CLI runs, and agents' access to routines.
+struct AgentSettings: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(Harness.agents) { harness in
+                    ExecutablePicker(harness: harness)
+                }
+            } header: {
+                Text("Agent CLIs")
+            } footer: {
+                Text("Rota lists the copies it finds on your login shell's PATH and in the usual install folders.")
+            }
+            ClaudeModeSection()
+            AgentAccessSection()
+        }
+        .settingsPane()
+        .onAppear { model.settings.refreshInstalled() }
+    }
+}
+
+/// How Claude routines run: interactively, as in a terminal, or as `claude -p`,
+/// and whether macOS lets them use the computer.
+private struct ClaudeModeSection: View {
+    @Environment(AppModel.self) private var model
+    @State private var access = ComputerUseAccess.current()
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        Section {
+            Toggle("Run Claude Code interactively", isOn: $settings.claudeInteractive)
+                .accessibilityIdentifier("claudeInteractive")
+            if settings.claudeInteractive {
+                PermissionRow(title: "Accessibility", granted: access.accessibility) {
+                    ComputerUseAccess.requestAccessibility()
+                }
+                PermissionRow(title: "Screen Recording", granted: access.screenRecording) {
+                    ComputerUseAccess.requestScreenRecording()
+                }
+            }
+        } header: {
+            Text("Claude Code")
+        } footer: {
+            Text("As in a terminal: computer use where you turned it on in Claude Code, and Open in Terminal "
+                 + "shows the live session. Computer use acts as Rota, so macOS asks Rota for these two. "
+                 + "Folders Claude Code has not been trusted in run with claude -p.")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            access = ComputerUseAccess.current()
+        }
+    }
+}
+
+private struct PermissionRow: View {
+    let title: String
+    let granted: Bool
+    let request: () -> Void
+
+    var body: some View {
+        LabeledContent(title) {
+            if granted {
+                Label("Allowed", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            } else {
+                Button("Allow\u{2026}", action: request)
+            }
+        }
+    }
+}
+
+extension View {
+    /// A settings tab's form: grouped, the window's width, as tall as its content.
+    func settingsPane() -> some View {
+        formStyle(.grouped)
+            .frame(width: 520)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -105,7 +180,7 @@ private struct ExecutablePicker: View {
         if !FileManager.default.isExecutableFile(atPath: effective) {
             Label("Not installed. Install \(harness.commandName) or choose its file.",
                   systemImage: "xmark.circle.fill")
-                .foregroundStyle(.red)
+                .foregroundStyle(Color.errorText)
                 .font(.caption)
         } else if let version = installed.first(where: { $0.path == effective })?.version {
             Label(version, systemImage: "checkmark.circle.fill")
@@ -170,7 +245,7 @@ private struct AgentAccessSection: View {
                 }
             }
             if let problem {
-                Text(problem).font(.caption).foregroundStyle(.red)
+                Text(problem).font(.caption).foregroundStyle(Color.errorText)
             }
         } header: {
             Text("Routines from agents")

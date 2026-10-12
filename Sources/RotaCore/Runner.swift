@@ -19,6 +19,10 @@ public struct LaunchSpec: Equatable, Sendable {
     /// passes them its own way: flags for Claude and Grok, protocol fields for Codex.
     public var model: String?
     public var effort: String?
+    /// A note the log opens with, such as why a Claude run is not interactive.
+    public var notice: String?
+    /// The prompt is Rota's own nudge, kept out of the chat: a cut-off session's "Continue."
+    public var quietPrompt = false
 
     public init(executable: String, prompt: String, arguments: [String], workingDirectory: String,
                 environment: [String: String], mode: LaunchMode, timeout: TimeInterval?, log: URL,
@@ -46,10 +50,13 @@ public protocol RunControl: AnyObject {
     func stop()
     /// Delivers a message from the user into the running session, where the harness allows it.
     func send(_ message: String)
+    /// The command that shows the running session in a terminal, when it runs in one.
+    var attachCommand: [String]? { get }
 }
 
 public extension RunControl {
     func send(_ message: String) {}
+    var attachCommand: [String]? { nil }
 }
 
 /// Callbacks of one run, all delivered on the main queue.
@@ -107,12 +114,15 @@ public final class ProcessLauncher: RoutineLaunching {
         }
         let output = try FileHandle(forWritingTo: spec.log)
         output.seekToEndOfFile()
-        output.write(Data((Transcript.userLines(spec.prompt) + "\n").utf8))
+        if !spec.quietPrompt { output.write(Data((Transcript.userLines(spec.prompt) + "\n").utf8)) }
         Self.log.info("Starting \(spec.executable, privacy: .public) in \(spec.workingDirectory, privacy: .public)")
         let journal = RunJournal(output: output, events: events)
         switch spec.mode {
         case .claudeStream:
+            if let notice = spec.notice { journal.line("[rota: \(notice)]") }
             return try ClaudeStreamRun.start(spec, journal: journal)
+        case .claudeInteractive:
+            return try ClaudeInteractiveRun.start(spec, journal: journal)
         case .codexDaemon:
             return CodexDaemonRun.start(spec, journal: journal)
         case .grokACP:
@@ -122,6 +132,19 @@ public final class ProcessLauncher: RoutineLaunching {
         }
     }
 
+    /// Where a shared helper starts: Codex's app-server daemon and Grok's leader
+    /// outlive the run that starts them and take its folder and environment for
+    /// good. Started in a routine's folder, a leader whose folder was later
+    /// deleted could not start an `npx` MCP server for any session (Node's
+    /// `uv_cwd` fails), so they start in the home folder with Rota's own
+    /// environment, and each session gets its folder and variables over the protocol.
+    static var helperDirectory: String { FileManager.default.homeDirectoryForCurrentUser.path }
+
+    /// The run's own variables (`ROTA_SESSION`, `ROTA_ROUTINE`, `ROTA_CLI`).
+    static func sessionVariables(_ environment: [String: String]) -> [String: String] {
+        environment.filter { $0.key.hasPrefix("ROTA_") }
+    }
+
     /// A `Process` that runs `executable arguments` inside `zsh -l`.
     static func loginShellProcess(_ executable: String, _ arguments: [String], in directory: String,
                                   environment: [String: String]) -> Process {
@@ -129,17 +152,45 @@ public final class ProcessLauncher: RoutineLaunching {
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-lc", "exec \"$0\" \"$@\"", executable] + arguments
         process.currentDirectoryURL = URL(fileURLWithPath: directory)
-        process.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }
+        process.environment = baseEnvironment().merging(environment) { $1 }
         process.standardInput = FileHandle.nullDevice
         return process
+    }
+
+    /// What a run starts from before its login shell reads the user's profile: the
+    /// account's own variables, never those of whatever started Rota. Started by
+    /// `rota` from inside an agent session, Rota inherited that session's
+    /// `CLAUDECODE`, `ANTHROPIC_BASE_URL` and super.engineering variables, and every
+    /// routine ran inside them; a run now sees what a new Terminal window sees.
+    static func baseEnvironment(_ inherited: [String: String] = ProcessInfo.processInfo.environment)
+        -> [String: String] {
+        let kept: Set<String> = ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
+                                 "SSH_AUTH_SOCK", "__CF_USER_TEXT_ENCODING"]
+        var base = inherited.filter { kept.contains($0.key) || $0.key == "ROTA_DATA_DIR" }
+        base["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        return base
     }
 
     /// Runs a short command to completion and returns its exit status and output,
     /// stderr included unless `errors` is false. A command still running after
     /// `timeout` is terminated, so a CLI waiting on a prompt cannot hang the caller.
+    /// `loginShell: false` runs an absolute-path system tool directly: a login
+    /// shell costs about 0.17 s against 0.04 s, which a once-a-second poll pays
+    /// for the whole run.
     static func capture(_ executable: String, _ arguments: [String], in directory: String,
-                        timeout: TimeInterval? = nil, errors: Bool = true) -> (Int32, String) {
-        let process = loginShellProcess(executable, arguments, in: directory, environment: [:])
+                        timeout: TimeInterval? = nil, errors: Bool = true,
+                        loginShell: Bool = true) -> (Int32, String) {
+        let process: Process
+        if loginShell {
+            process = loginShellProcess(executable, arguments, in: directory, environment: [:])
+        } else {
+            process = Process()
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = arguments
+            process.currentDirectoryURL = URL(fileURLWithPath: directory)
+            process.environment = baseEnvironment()
+            process.standardInput = FileHandle.nullDevice
+        }
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = errors ? pipe : FileHandle.nullDevice

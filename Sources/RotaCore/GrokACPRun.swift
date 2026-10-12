@@ -53,7 +53,7 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         let arguments = ["agent", "--leader", "--always-approve"]
             + spec.modelFlags(effortFlag: "--reasoning-effort") + ["stdio"]
         let process = ProcessLauncher.loginShellProcess(spec.executable, arguments,
-                                                        in: spec.workingDirectory, environment: spec.environment)
+                                                        in: ProcessLauncher.helperDirectory, environment: [:])
         let stdin = Pipe()
         let stdout = Pipe()
         process.standardInput = stdin
@@ -80,9 +80,26 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         }
     }
 
+    /// The rule that tells a Grok session its Rota session and how to notify the user from it.
+    static func sessionRule(_ environment: [String: String]) -> String? {
+        let variables = ProcessLauncher.sessionVariables(environment)
+        guard let session = variables["ROTA_SESSION"], let routine = variables["ROTA_ROUTINE"] else { return nil }
+        var rule = "This session is a run of the Rota routine \(routine), Rota session \(session). "
+            + "The environment variables ROTA_SESSION, ROTA_ROUTINE and ROTA_CLI are not set in your commands"
+        if let cli = variables["ROTA_CLI"] {
+            rule += "; to show the user a Mac notification that opens this session, run "
+                + "'\(cli)' notify --session \(session) \"message\", adding --needs-reply when they must answer "
+                + "or confirm something"
+        }
+        return rule + "."
+    }
+
     private func initialized(_ result: Result<Any, JSONRPCError>) {
         guard case .success = result else { return fail(result, "initialize") }
         var params: [String: Any] = ["cwd": spec.workingDirectory, "mcpServers": [Any]()]
+        // Grok's commands run under its shared leader, which has no per-session
+        // environment; the session learns who it is from a rule instead.
+        if let rule = Self.sessionRule(spec.environment) { params["_meta"] = ["rules": rule] }
         if let session = spec.resume {
             // Loading replays the session as updates; they are already in the log.
             params["sessionId"] = session
@@ -147,6 +164,11 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
             if let text = (update["content"] as? [String: Any])?["text"] as? String { journal.text(text) }
         case "tool_call":
             journal.line("-> \(update["title"] as? String ?? "tool")")
+        case "plan":
+            let steps = (update["entries"] as? [[String: Any]] ?? []).map {
+                PlanStep(status: $0["status"] as? String, text: $0["content"] as? String ?? "")
+            }
+            if !steps.isEmpty { journal.line(PlanStep.lines(steps)) }
         default:
             break
         }

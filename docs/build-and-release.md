@@ -36,7 +36,8 @@ profile, `RELEASE=1 ./create-app.sh`, `./notarize.sh`, then the Sparkle
 `appcast.xml` (this release only, EdDSA-signed, with the tag body embedded as
 Markdown release notes), and the GitHub Release with the zip, the appcast, the
 tag's first line as its title and its body as the notes. CI refuses a
-lightweight tag or one without a body. Branch and pull request builds are
+lightweight tag, one without a body, and one that is not `vX.Y.Z` or not above
+every earlier tag: Sparkle offers only a higher version. Branch and pull request builds are
 signed ad hoc and uploaded as a workflow artifact.
 
 The repository secrets it reads are `DEVELOPER_ID_P12_BASE64`,
@@ -63,7 +64,11 @@ it. `SUFeedURL` points at the latest release's `appcast.xml`.
 ## Bundle identifier
 
 `com.wiltodelta.rota`. Keep it: the settings, notification permission and login
-item are keyed to it.
+item are keyed to it. Only `RELEASE=1 ./create-app.sh` uses it; a development
+build is `com.wiltodelta.rota.dev` with update checks off, keeps its data in
+`~/Library/Application Support/Rota Dev` (or `ROTA_DATA_DIR`, which its `rota`
+command passes on when it starts the app), and so runs beside the installed
+Rota without reading or quitting it.
 
 ## Verify a release
 

@@ -2,11 +2,19 @@
 # Build Rota and assemble its signed .app bundle.
 #   ./create-app.sh              everyday build (Developer ID when available, no timestamp)
 #   RELEASE=1 ./create-app.sh    release build: Developer ID with a secure timestamp
+# Only a release build is com.wiltodelta.rota. Every other build is
+# com.wiltodelta.rota.dev, a separate app with its own data ("Rota Dev"),
+# defaults and notifications that runs beside the installed Rota, so building
+# and checking never touch the copy someone relies on.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="Rota"
-BUNDLE_ID="com.wiltodelta.rota"
+if [[ "${RELEASE:-}" == 1 ]]; then
+    BUNDLE_ID="com.wiltodelta.rota"; UPDATE_CHECKS="true"
+else
+    BUNDLE_ID="com.wiltodelta.rota.dev"; UPDATE_CHECKS="false"
+fi
 APP_DIR="$APP_NAME.app"
 BIN="Rota"
 
@@ -55,7 +63,7 @@ cp "$BIN_DIR/RotaCLI" "$APP_DIR/Contents/Helpers/rota"
 # are drawn by scripts/draw-icon.py. Needs Xcode 26+ on a macOS 26 host.
 # Absolute paths: actool resolves relative ones against its long-lived agent's
 # working directory, not this script's.
-xcrun actool "$PWD/App Icon.icon" "$PWD/MenuIcons.xcassets" --compile "$PWD/$APP_DIR/Contents/Resources" \
+xcrun actool "$PWD/App Icon.icon" "$PWD/MenuIcons.xcassets" "$PWD/HarnessLogos.xcassets" --compile "$PWD/$APP_DIR/Contents/Resources" \
     --platform macosx --minimum-deployment-target "$MACOS_MIN" --app-icon "App Icon" \
     --output-partial-info-plist "$(mktemp -t rota-icon)" >/dev/null
 ICON_PLIST="	<key>CFBundleIconFile</key>
@@ -102,7 +110,7 @@ ${ICON_PLIST:+$ICON_PLIST
 	<key>SUPublicEDKey</key>
 	<string>hqKKidqlpRpssnvj1i6i1qY+jYdPjjDKIZHFyOxyGhc=</string>
 	<key>SUEnableAutomaticChecks</key>
-	<true/>
+	<$UPDATE_CHECKS/>
 	<key>SURequireSignedFeed</key>
 	<true/>
 	<key>SUVerifyUpdateBeforeExtraction</key>

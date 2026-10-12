@@ -69,14 +69,14 @@ struct MainWindow: View {
             }
             ToolbarItemGroup {
                 Button { model.presentingImport = true } label: {
-                    Label("Import routines", systemImage: "square.and.arrow.down")
+                    Label("Import Routines", systemImage: "square.and.arrow.down")
                 }
                 .help("Import routines from Claude Desktop or Codex")
                 .accessibilityIdentifier("import")
                 Button { model.presentingNew = true } label: {
-                    Label("New routine", systemImage: "plus")
+                    Label("New Routine", systemImage: "plus")
                 }
-                .help("New routine")
+                .help("New Routine")
                 .accessibilityIdentifier("newRoutine")
             }
         }
@@ -123,7 +123,8 @@ struct MainWindow: View {
                 ContentUnavailableView {
                     Label("No sessions yet", systemImage: "bubble.left.and.text.bubble.right")
                 } description: {
-                    Text("Add a routine with + or import one from Claude Desktop. Each run becomes a session here.")
+                    Text("Add a routine with + or import one from Claude Desktop or Codex. "
+                         + "Each run becomes a session here.")
                 }
             } else if model.scheduler.allRecords().isEmpty {
                 ContentUnavailableView {
@@ -172,8 +173,16 @@ private struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            dot(color, size: 8)
-                .accessibilityLabel(record.outcome.title)
+            Group {
+                if record.outcome == .running {
+                    // A working session spins, as in super.engineering's list.
+                    ProgressView().controlSize(.mini).frame(width: 8, height: 8)
+                } else {
+                    dot(color, size: 8)
+                }
+            }
+            .accessibilityElement()
+            .accessibilityLabel(record.outcome.title)
             VStack(alignment: .leading, spacing: 1) {
                 Text(model.scheduler.routine(record.routineID)?.name ?? record.routineID)
                     .fontWeight(record.isUnread ? .semibold : .regular)

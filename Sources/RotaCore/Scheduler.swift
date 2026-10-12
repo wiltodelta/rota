@@ -37,6 +37,25 @@ public final class Scheduler {
     @ObservationIgnored public var now: () -> Date = Date.init
     @ObservationIgnored public var calendar = Calendar.current
     @ObservationIgnored public var executable: (Harness) -> String = { $0.defaultExecutable() }
+    /// What the user's `~/.claude.json` turns on for Claude runs; read at each run, as Claude would.
+    @ObservationIgnored public var claudeSettings: () -> ClaudeUserSettings = { ClaudeUserSettings.read() }
+    /// Whether the Mac is online; while it is not, scheduled runs and resumes wait.
+    @ObservationIgnored public var isOnline: () -> Bool = { true }
+    /// Whether a screen session is still up; a seam so tests never run `screen`.
+    @ObservationIgnored public var sessionAlive: (String) -> Bool = { ClaudeInteractiveRun.alive($0) }
+    /// Routines whose run was going when the Mac went to sleep.
+    @ObservationIgnored var sleptThrough: Set<String> = []
+    /// Sessions cut off by sleep, shutdown or a lost network, to continue once online: record id to routine id.
+    @ObservationIgnored var pendingResumes: [UUID: String] = [:]
+    /// Agent runs that failed on the network before they had a session, to run again: routine id to trigger.
+    @ObservationIgnored var pendingReruns: [String: RunTrigger] = [:]
+    /// Reruns in a row per routine, reset by a run that gets a session.
+    @ObservationIgnored var reruns: [String: Int] = [:]
+    @ObservationIgnored var retryScheduled = false
+    /// Asks the harness's service whether it answers (`ServiceProbe`); a seam so tests never use the network.
+    @ObservationIgnored public var probe: (Harness, @escaping @MainActor (Bool) -> Void) -> Void = ServiceProbe.check
+    /// Whether Claude routines run as an interactive `claude` (Settings), else `claude -p`.
+    @ObservationIgnored public var claudeInteractive: () -> Bool = { false }
     @ObservationIgnored public var notifier: RunNotifying?
     /// The `rota` command inside the app, handed to runs as ROTA_CLI.
     @ObservationIgnored public var commandPath: String?
@@ -44,6 +63,8 @@ public final class Scheduler {
     @ObservationIgnored public let history: RunHistory
     @ObservationIgnored let launcher: RoutineLaunching
     @ObservationIgnored private var controls: [String: RunControl] = [:]
+    /// When each routine's current run started, a continued session included.
+    @ObservationIgnored private var runStarts: [String: Date] = [:]
     @ObservationIgnored private var timer: Timer?
 
     public init(location: StorageLocation, launcher: RoutineLaunching) {
@@ -60,8 +81,13 @@ public final class Scheduler {
 
     /// Closes runs a previous launch left open and starts the 30-second tick.
     public func start() {
-        history.closeOrphans(routineIDs: routines.map(\.id), now: now())
+        // Runs the last launch left open were cut off: the Mac shut down, or Rota stopped.
+        for record in history.closeOrphans(routineIDs: routines.map(\.id), now: now())
+        where resumable(record) && !stillRunning(record) {
+            pendingResumes[record.id] = record.routineID
+        }
         tick()
+        resumePending()
         let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -70,6 +96,8 @@ public final class Scheduler {
     }
 
     public func tick() {
+        // Offline (just woken, no Wi-Fi yet), a due slot waits rather than failing; it runs once online.
+        guard isOnline() else { return }
         let current = now()
         var changed = false
         for index in routines.indices where routines[index].enabled {
@@ -158,17 +186,27 @@ public final class Scheduler {
     /// How `routine` runs `prompt` on `harness`: a new session, or `resume`'s.
     private func spec(for routine: Routine, record: RunRecord, harness: Harness, prompt: String, log: URL,
                       resume: String? = nil) -> LaunchSpec {
-        let needs = requirements(of: routine)
         // A session started on another harness keeps that harness; the routine's model ids are not its.
         let sameHarness = harness == routine.harness
-        return LaunchSpec(
+        // Only Claude reads ~/.claude.json, a file of hundreds of KB on a busy Mac.
+        let settings = harness == .claude ? claudeSettings() : ClaudeUserSettings()
+        var spec = LaunchSpec(
             executable: executable(harness), prompt: prompt,
-            arguments: harness.arguments(needs: needs, resume: resume),
+            arguments: harness.arguments(settings: settings, resume: resume),
             workingDirectory: routine.workingDirectory,
-            environment: harness.environment(needs: needs).merging(sessionEnvironment(record)) { $1 },
+            environment: sessionEnvironment(record),
             mode: harness.launchMode, timeout: routine.timeLimitMinutes.map { TimeInterval($0 * 60) },
             log: log, resume: resume,
             model: sameHarness ? routine.model : nil, effort: sameHarness ? routine.effort : nil)
+        if harness == .claude, claudeInteractive() {
+            if settings.trusts(routine.workingDirectory) {
+                spec.mode = .claudeInteractive
+            } else {
+                spec.notice = "ran with claude -p: Claude Code has not been trusted in this folder; "
+                    + "open Claude Code there once and trust it to run interactively, with computer use"
+            }
+        }
+        return spec
     }
 
     /// Launches `spec` as `record`, which becomes the routine's active run.
@@ -180,6 +218,7 @@ public final class Scheduler {
             finished: { [weak self] outcome in self?.finish(id, outcome: outcome) })
         do {
             active[id] = record
+            runStarts[id] = now()
             controls[id] = try launcher.launch(spec, events: events)
             // The launch may already have reported the session (a runner that waits
             // on a process spins the run loop), so save what is active, not the copy.
@@ -233,26 +272,36 @@ public final class Scheduler {
         }
     }
 
+    /// When `record`'s run started, while it runs: a continued session's run, not the session's first.
+    public func runStartedAt(_ record: RunRecord) -> Date? {
+        isActive(record) ? runStarts[record.routineID] : nil
+    }
+
     public func isActive(_ record: RunRecord) -> Bool {
         active[record.routineID]?.id == record.id
     }
 
     /// The terminal command for `record`'s session, with the harness's executable filled in.
     public func terminalCommand(for record: RunRecord) -> (executable: String, arguments: [String])? {
+        if isActive(record), let command = controls[record.routineID]?.attachCommand, let program = command.first {
+            return (program, Array(command.dropFirst()))
+        }
         guard let session = record.sessionID,
               let (program, arguments) = record.harness.terminal(session: session, running: isActive(record))
         else { return nil }
         return (program ?? executable(record.harness), arguments)
     }
 
-    private func continueSession(_ record: RunRecord, with message: String) {
+    func continueSession(_ record: RunRecord, with message: String, quietly: Bool = false) {
         guard let routine = routine(record.routineID), let session = record.sessionID,
               let logPath = record.logPath else { return }
         var record = record
         record.outcome = .running
         record.endedAt = nil
-        start(record, spec: spec(for: routine, record: record, harness: record.harness, prompt: message,
-                                 log: URL(fileURLWithPath: logPath), resume: session))
+        var spec = spec(for: routine, record: record, harness: record.harness, prompt: message,
+                        log: URL(fileURLWithPath: logPath), resume: session)
+        spec.quietPrompt = quietly
+        start(record, spec: spec)
     }
 
     private func attachSession(_ session: String, to routineID: String) {
@@ -268,7 +317,9 @@ public final class Scheduler {
         record.endedAt = now()
         active[routineID] = nil
         controls[routineID] = nil
+        runStarts[routineID] = nil
         saveRecord(record)
+        recover(record, sleptThrough: self.sleptThrough.remove(routineID) != nil)
         Self.log.info("\(routineID, privacy: .public) ended: \(outcome.title, privacy: .public)")
         if let routine = routine(routineID) { notifier?.runEnded(record, routine: routine) }
         pauseAfterRepeatedFailures(routineID)

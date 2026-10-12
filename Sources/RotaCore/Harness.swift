@@ -25,6 +25,8 @@ public enum CapabilitySupport: Equatable, Sendable {
 public enum LaunchMode: Equatable, Sendable {
     /// `claude -p` with stream-json in and out; Rota writes into the session.
     case claudeStream
+    /// An interactive `claude` in a detached `screen`; Rota reads its transcript and types into it.
+    case claudeInteractive
     /// A thread on Codex's shared app-server daemon; Rota steers it with `turn/steer`.
     case codexDaemon
     /// A session on Grok's shared leader over ACP; Rota sends it prompts.
@@ -74,6 +76,13 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
             return .native
         case (.codex, .chrome):
             return .differentTools("Codex drives Chrome through its own plugin, not mcp__claude-in-chrome__ tools.")
+        case (.grok, .chrome):
+            return .differentTools("Grok drives Chrome through the playwright MCP server it loads from Claude's "
+                                   + "user config, not mcp__claude-in-chrome__ tools.")
+        case (.grok, .push):
+            // Grok's commands run under its shared leader, so the session's rule names the command.
+            return .differentTools("Use the rota notify command the session's rules name (add --needs-reply "
+                                   + "to wait for an answer) instead: a Mac notification that opens this session.")
         case (_, .push):
             // Phone push is Claude's; Rota's own notification reaches every harness.
             return .differentTools("Use \"$ROTA_CLI\" notify \"…\" (add --needs-reply to wait for an answer) "
@@ -96,15 +105,11 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
     /// and take none. Every agent runs with approvals bypassed, the
     /// `bypassPermissions` mode Claude Desktop routines use: nobody is there to
     /// answer a prompt. The prompt itself goes in on stdin.
-    public func arguments(needs: Set<Capability>, resume: String? = nil) -> [String] {
+    /// Claude gets Chrome exactly when the user's settings turn it on by default,
+    /// as an interactive session would.
+    public func arguments(settings: ClaudeUserSettings, resume: String? = nil) -> [String] {
         guard self == .claude else { return [] }
-        return ClaudeStreamRun.arguments(chrome: needs.contains(.chrome), resume: resume)
-    }
-
-    /// `claude` ignores the Chrome default in settings when started from a script;
-    /// this variable turns it on.
-    public func environment(needs: Set<Capability>) -> [String: String] {
-        self == .claude && needs.contains(.chrome) ? ["CLAUDE_CODE_ENABLE_CFC": "1"] : [:]
+        return ClaudeStreamRun.arguments(chrome: settings.chromeByDefault, resume: resume)
     }
 
     /// The terminal command that opens session `session`, if the harness has one

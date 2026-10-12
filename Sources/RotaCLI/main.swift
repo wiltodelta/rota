@@ -81,6 +81,10 @@ func launchRota() throws {
     guard let app else { throw ControlError("Rota is not running and its app was not found.") }
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.activates = false
+    // A data folder given to this command is the app's too, or it would open its usual one.
+    if let directory = ProcessInfo.processInfo.environment["ROTA_DATA_DIR"] {
+        configuration.environment = ["ROTA_DATA_DIR": directory]
+    }
     let opened = DispatchSemaphore(value: 0)
     NSWorkspace.shared.openApplication(at: app, configuration: configuration) { _, _ in opened.signal() }
     _ = opened.wait(timeout: .now() + 20)
@@ -107,6 +111,20 @@ func line(_ routine: [String: Any]) -> String {
     let parts = [routine["id"] as? String ?? "?", state, routine["harness"] as? String ?? "",
                  routine["scheduleText"] as? String ?? "", routine["model"] as? String]
     return parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "  ")
+}
+
+/// The control API's UTC timestamp in this Mac's time zone, as people read it.
+func localTime(_ value: Any?) -> String {
+    guard let text = value as? String, let date = ISO8601DateFormatter().date(from: text) else { return "" }
+    return date.formatted(date: .abbreviated, time: .shortened)
+}
+
+/// "weekly-report  Running  Oct 11, 2026 at 2:31 PM  session 1E61…": a run started, stopped or messaged.
+func sessionLine(_ session: [String: Any]) -> String {
+    var parts = [session["routine"] as? String ?? "?", session["outcome"] as? String ?? "",
+                 localTime(session["startedAt"]), "session \(session["session"] ?? "")"]
+    if let question = session["needsReply"] as? String { parts.append("needs reply: \(question)") }
+    return parts.filter { !$0.isEmpty }.joined(separator: "  ")
 }
 
 func printJSON(_ value: Any) {
@@ -169,12 +187,17 @@ func show(_ result: Any, for command: String) {
     case let routines as [[String: Any]] where command == "list":
         print(routines.isEmpty ? "No routines." : routines.map(line).joined(separator: "\n"))
     case let sessions as [[String: Any]]:
-        print(sessions.map { "\($0["session"] ?? "")  \($0["startedAt"] ?? "")  \($0["outcome"] ?? "")" }
+        print(sessions.map { "\($0["session"] ?? "")  \(localTime($0["startedAt"]))  \($0["outcome"] ?? "")" }
             .joined(separator: "\n"))
     case let session as [String: Any] where command == "log":
         print(session["log"] as? String ?? "")
     case let routine as [String: Any] where routine["schedule"] != nil:
         print(line(routine))
+    case let session as [String: Any] where session["session"] != nil && command != "notify":
+        print(sessionLine(session))
+    case let answer as [String: String] where answer.count == 1:
+        // {"stopping": id} and {"deleted": id}.
+        print(answer.map { "\($0.key.capitalized) \($0.value)" }[0])
     default:
         printJSON(result)
     }
@@ -182,7 +205,9 @@ func show(_ result: Any, for command: String) {
 
 func run(_ raw: [String]) throws {
     let arguments = try Arguments(raw)
-    guard let command = arguments.positional.first, !arguments.flags.contains("help") else { return print(usage) }
+    guard let command = arguments.positional.first, command != "help", !arguments.flags.contains("help") else {
+        return print(usage)
+    }
     if command == "mcp" { return MCPServer().serve() }
     let (method, params) = try requestFor(command, arguments)
     let result = try request(method, params)

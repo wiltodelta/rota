@@ -9,6 +9,8 @@ struct SessionView: View {
     let record: RunRecord
     let routine: Routine
     @State private var log = ""
+    /// Messages sent from this view that the session has not shown yet.
+    @State private var outbox: [Outgoing] = []
 
     private var running: Bool { model.scheduler.isActive(record) }
 
@@ -25,10 +27,16 @@ struct SessionView: View {
                 .padding(.vertical, 12)
             Divider()
             if let question = current.attention {
-                AttentionBanner(text: question) { model.scheduler.dismissAttention(current) }
+                AttentionBanner(text: question, canReply: model.scheduler.canMessage(current)) {
+                    model.scheduler.dismissAttention(current)
+                }
             }
-            ChatTranscript(items: Transcript.parse(log, shell: record.harness == .shell), running: running)
-            Composer(record: record)
+            let items = Transcript.parse(log, shell: record.harness == .shell)
+            ChatTranscript(items: items, running: running, record: record, routine: routine,
+                           sending: outbox.filter { !$0.delivered(in: items) }.map(\.text))
+            Composer(record: record, routine: routine) { text in
+                outbox.append(Outgoing(text: text, seen: Outgoing.count(text, in: items)))
+            }
         }
         .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(routine.name)
@@ -57,7 +65,7 @@ struct SessionView: View {
                 Text([record.harness.title, record.trigger == .catchUp ? "missed slot, run late" : nil,
                       record.outcome.title].compactMap { $0 }.joined(separator: " \u{00B7} "))
                     .font(.caption)
-                    .foregroundStyle(record.outcome.isFailure ? .red : .secondary)
+                    .foregroundStyle(record.outcome.isFailure ? Color.errorText : .secondary)
             }
             Spacer()
             if let path = record.logPath {
@@ -74,7 +82,8 @@ struct SessionView: View {
                 }
                 .accessibilityIdentifier("openTerminal")
             }
-            if running {
+            // A session that takes messages has Stop beside its field.
+            if running && !model.scheduler.canMessage(record) {
                 Button("Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }
                     .accessibilityIdentifier("stopSession")
             }
@@ -92,92 +101,17 @@ struct SessionView: View {
     }
 }
 
-private struct ChatTranscript: View {
-    @Environment(AppModel.self) private var model
-    let items: [TranscriptItem]
-    let running: Bool
-
-    var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(items) { item in
-                        ChatItemView(item: item)
-                    }
-                    if running {
-                        HStack(spacing: 6) {
-                            ProgressView().controlSize(.small)
-                            Text("Working").foregroundStyle(.secondary)
-                        }
-                        .font(model.chatText.small)
-                    }
-                    Color.clear.frame(height: 1).id("end")
-                }
-                .padding(20)
-                .frame(maxWidth: 820)
-                .frame(maxWidth: .infinity)
-            }
-            .onChange(of: items.count) { proxy.scrollTo("end", anchor: .bottom) }
-            .onAppear { proxy.scrollTo("end", anchor: .bottom) }
-        }
-        .background(Color(nsColor: .textBackgroundColor))
-    }
-}
-
-private struct ChatItemView: View {
-    @Environment(AppModel.self) private var model
-    let item: TranscriptItem
-
-    var body: some View {
-        let text = model.chatText
-        switch item.kind {
-        case .user:
-            HStack {
-                Spacer(minLength: 60)
-                Text(item.text)
-                    .font(text.body)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
-            }
-        case .agent:
-            MarkdownText(source: item.text)
-        case .tool:
-            Label(item.text, systemImage: "wrench.and.screwdriver")
-                .font(text.smallCode)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .truncationMode(.tail)
-                // Two lines keep the chat readable; the whole call is a hover away.
-                .help(item.text)
-        case .status:
-            Text(item.text)
-                .font(text.small)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-        case .error:
-            Label(item.text, systemImage: "exclamationmark.triangle.fill")
-                .font(text.body)
-                .foregroundStyle(.red)
-        case .output:
-            Text(item.text)
-                .font(text.code)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-        }
-    }
-}
-
-/// The field under the chat: one rounded box holding the message, Stop while
-/// the session runs, and Send. Return sends, Option-Return starts a new line.
-/// It talks to the live session where the harness allows it, continues a
-/// finished session otherwise, and says where to go when neither works.
+/// The field under the chat, as super.engineering draws it: one rounded gray
+/// box holding the message and, under it, what the session runs on, Stop while
+/// it runs, and Send. Return sends, Option-Return starts a new line. It talks to
+/// the live session where the harness allows it, continues a finished session
+/// otherwise, and says where to go when neither works.
 private struct Composer: View {
     @Environment(AppModel.self) private var model
     let record: RunRecord
+    let routine: Routine
+    /// Called with each message sent, so the chat can show it until the session does.
+    let sent: (String) -> Void
     @State private var text = ""
     @FocusState private var focused: Bool
 
@@ -187,18 +121,7 @@ private struct Composer: View {
     var body: some View {
         Group {
             if model.scheduler.canMessage(record) {
-                VStack(alignment: .leading, spacing: 6) {
-                    field
-                    HStack {
-                        Text(effect)
-                        Spacer(minLength: 12)
-                        Text("Return to send, Option-Return for a new line")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .padding(.horizontal, 4)
-                }
+                box
             } else if let note {
                 Text(note)
                     .font(.callout)
@@ -206,56 +129,82 @@ private struct Composer: View {
                     .frame(maxWidth: .infinity)
             }
         }
-        // The chat's column, so the field lines up with the messages above it.
-        .padding(.horizontal, 20)
-        .padding(.top, 8)
-        .padding(.bottom, 14)
-        .frame(maxWidth: 820)
+        // The chat's column, so the box lines up with the messages above it.
+        .padding(.horizontal, 24)
+        .padding(.top, 6)
+        .padding(.bottom, 16)
+        .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)
-        // The chat's own background, so the field floats on it rather than on a band.
         .background(Color(nsColor: .textBackgroundColor))
         .task(id: record.id) { focused = true }
     }
 
-    private var field: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+    private var box: some View {
+        VStack(alignment: .leading, spacing: 10) {
             TextField(placeholder, text: $text, axis: .vertical)
                 .font(model.chatText.body)
-                .lineLimit(1...8)
+                .lineLimit(2...8)
                 .textFieldStyle(.plain)
                 .focused($focused)
                 .onSubmit(send)
-                .padding(.vertical, 5)
+                .help("\(effect) Return sends, Option-Return starts a new line.")
                 .accessibilityIdentifier("composer")
-            if running {
-                RoundButton(symbol: "stop.fill", fill: Color.secondary.opacity(0.18), foreground: .primary) {
-                    model.scheduler.stop(record.routineID)
+            HStack(spacing: 8) {
+                HStack(spacing: 5) {
+                    HarnessLogo(harness: record.harness)
+                    Text(ModelLabel.name(harness: record.harness, routine: routine, models: model.settings.models))
+                    if record.harness == routine.harness, let effort = routine.effort {
+                        Text(effort.capitalized).foregroundStyle(.tertiary)
+                    }
                 }
-                .help("Stop the session")
-                .accessibilityLabel("Stop")
-                .accessibilityIdentifier("composerStop")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                Spacer(minLength: 8)
+                // As super.engineering's: while the session works, its clock, and Stop in Send's
+                // place until there is something to send.
+                if running, let since = model.scheduler.runStartedAt(record) {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(Self.clock(context.date.timeIntervalSince(since)))
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if running && !canSend {
+                    StopRingButton { model.scheduler.stop(record.routineID) }
+                        .help("Stop the session")
+                        .accessibilityLabel("Stop")
+                        .accessibilityIdentifier("composerStop")
+                } else {
+                    RoundButton(symbol: "arrow.up", filled: canSend, fill: Color.accentColor,
+                                foreground: canSend ? .white : .secondary, action: send)
+                        .disabled(!canSend)
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .help("Send (Return)")
+                        .accessibilityLabel("Send")
+                        .accessibilityIdentifier("send")
+                }
             }
-            RoundButton(symbol: "arrow.up",
-                        fill: canSend ? Color.accentColor : Color.secondary.opacity(0.25),
-                        foreground: canSend ? .white : .secondary, action: send)
-                .disabled(!canSend)
-                .keyboardShortcut(.return, modifiers: .command)
-                .help("Send (Return)")
-                .accessibilityLabel("Send")
-                .accessibilityIdentifier("send")
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 6)
-        .padding(.vertical, 6)
-        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 18))
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 20))
         .overlay {
-            RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(focused ? Color.accentColor.opacity(0.6) : Color(nsColor: .separatorColor),
+            RoundedRectangle(cornerRadius: 20)
+                .strokeBorder(focused ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.08),
                               lineWidth: focused ? 1.5 : 1)
         }
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
-        .contentShape(RoundedRectangle(cornerRadius: 18))
+        .contentShape(RoundedRectangle(cornerRadius: 20))
         .onTapGesture { focused = true }
+    }
+
+    /// "0:21", "12:05", "1:02:05".
+    static func clock(_ interval: TimeInterval) -> String {
+        let seconds = max(0, Int(interval))
+        let minutes = String(format: "%02d", seconds / 60 % 60)
+        let rest = String(format: "%02d", seconds % 60)
+        return seconds >= 3600 ? "\(seconds / 3600):\(minutes):\(rest)" : "\(seconds / 60):\(rest)"
     }
 
     private var placeholder: String {
@@ -282,14 +231,43 @@ private struct Composer: View {
     private func send() {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty else { return }
+        sent(message)
         model.scheduler.message(message, to: record)
         text = ""
     }
 }
 
-/// A 28 pt circular icon button, as the composer's Send and Stop.
+/// Stop while the session works: a square in a circle, an arc running round it.
+private struct StopRingButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            TimelineView(.animation) { context in
+                let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2
+                ZStack {
+                    Circle().fill(Color.primary.opacity(0.08))
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Color.errorText)
+                    Circle()
+                        .trim(from: 0, to: 0.28)
+                        .stroke(Color.orange, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .rotationEffect(.degrees(turn * 360))
+                        .padding(1)
+                }
+                .frame(width: 28, height: 28)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// A 28 pt circular icon button, as the composer's Send and Stop: filled when
+/// it acts, an outlined circle when it waits, as super.engineering's Send does.
 private struct RoundButton: View {
     let symbol: String
+    let filled: Bool
     let fill: Color
     let foreground: Color
     let action: () -> Void
@@ -300,78 +278,42 @@ private struct RoundButton: View {
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(foreground)
                 .frame(width: 28, height: 28)
-                .background(fill, in: Circle())
+                .background(filled ? fill : .clear, in: Circle())
+                .overlay { if !filled { Circle().strokeBorder(Color.secondary.opacity(0.5)) } }
         }
         .buttonStyle(.plain)
     }
 }
 
-/// An agent message drawn block by block: headings, lists and code as such,
-/// inline Markdown (bold, code spans, links) inside each.
-private struct MarkdownText: View {
-    @Environment(AppModel.self) private var model
-    let source: String
-
-    var body: some View {
-        let text = model.chatText
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(MarkdownBlock.parse(source).enumerated()), id: \.offset) { _, block in
-                switch block {
-                case .heading(let level, let content):
-                    Text(inline(content))
-                        .font(text.heading(level: level))
-                        .padding(.top, 4)
-                case .listItem(let marker, let content, let indent):
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(marker).foregroundStyle(.secondary)
-                        Text(inline(content))
-                    }
-                    .font(text.body)
-                    .padding(.leading, CGFloat(indent) * 16)
-                case .code(let content):
-                    Text(content)
-                        .font(text.code)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                case .paragraph(let content):
-                    Text(inline(content)).font(text.body)
-                }
-            }
-        }
-        .textSelection(.enabled)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func inline(_ text: String) -> AttributedString {
-        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
-    }
-}
-
 /// What the session asked the user, above its chat until they answer or dismiss it.
+/// A session that takes no message (a command, or one whose routine runs again)
+/// cannot be answered here, so the banner asks for a look and a Done instead.
 private struct AttentionBanner: View {
     let text: String
+    let canReply: Bool
     let dismiss: () -> Void
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Needs your reply").font(.callout.weight(.semibold))
+                Text(canReply ? "Needs your reply" : "Needs your attention").font(.callout.weight(.semibold))
                     .accessibilityIdentifier("attentionBanner")
                 Text(text).font(.callout).textSelection(.enabled)
             }
             Spacer(minLength: 8)
-            Button("Dismiss", action: dismiss)
-                .help("Clear the mark without replying")
+            Button(canReply ? "Dismiss" : "Done", action: dismiss)
+                .help(canReply ? "Clear the mark without replying" : "Clear the mark")
                 .accessibilityIdentifier("dismissAttention")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         // A card inside the column: an edge-to-edge band shows through the translucent sidebar.
         .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-        .padding(.horizontal, 20)
+        // The chat's column, so the card lines up with the messages under it.
+        .padding(.horizontal, 24)
         .padding(.top, 12)
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
     }
 }

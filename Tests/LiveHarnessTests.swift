@@ -23,9 +23,10 @@ final class LiveHarnessTests: XCTestCase {
                      stopAfter: TimeInterval? = nil, model: String? = nil,
                      effort: String? = nil) throws -> (RunOutcome, String, String?) {
         let log = folder.appendingPathComponent("\(harness.rawValue).log")
+        let workingDirectory = directory ?? folder.path
         let spec = LaunchSpec(executable: harness.defaultExecutable(), prompt: prompt,
-                              arguments: harness.arguments(needs: [], resume: resume),
-                              workingDirectory: directory ?? folder.path, environment: [:], mode: harness.launchMode,
+                              arguments: harness.arguments(settings: ClaudeUserSettings(), resume: resume),
+                              workingDirectory: workingDirectory, environment: [:], mode: harness.launchMode,
                               timeout: timeout, log: log, resume: resume, model: model, effort: effort)
         let ended = expectation(description: "run ended")
         var outcome: RunOutcome?

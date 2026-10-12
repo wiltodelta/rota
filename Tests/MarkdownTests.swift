@@ -23,7 +23,7 @@ final class MarkdownTests: XCTestCase {
             .listItem(marker: "\u{2022}", text: "`/pricing` (-41)", indent: 0),
             .listItem(marker: "\u{2022}", text: "nested", indent: 1),
             .listItem(marker: "2.", text: "second", indent: 0),
-            .code("let a = 1\n\nlet b = 2"),
+            .code("let a = 1\n\nlet b = 2", language: "swift"),
             .paragraph("Done.")
         ])
     }
@@ -45,5 +45,13 @@ final class MarkdownTests: XCTestCase {
                              outcome: .skipped("previous run"))
         XCTAssertTrue(skip.isSkip)
         XCTAssertFalse(skip.isUnread)
+    }
+}
+
+final class CodeFenceLanguageTests: XCTestCase {
+    func testTheFenceNamesTheLanguage() {
+        XCTAssertEqual(MarkdownBlock.parse("```swift\nlet a = 1\n```"), [.code("let a = 1", language: "swift")])
+        XCTAssertEqual(MarkdownBlock.parse("```bash title\nls\n```"), [.code("ls", language: "bash")])
+        XCTAssertEqual(MarkdownBlock.parse("```\nls\n```"), [.code("ls", language: nil)])
     }
 }

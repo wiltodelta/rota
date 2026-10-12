@@ -5,6 +5,9 @@ import Foundation
 public enum ScheduleText {
     private static let dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 
+    /// Common schedules the routine form offers, each with a description.
+    public static let presets = ["0 * * * *", "0 9 * * *", "0 9 * * 1-5", "0 9 * * 1", "0 9 1 * *"]
+
     /// The common shapes in words; nil for anything else, which reads better as cron.
     public static func describe(_ expression: String, locale: Locale = .current) -> String? {
         guard let cron = try? CronSchedule(expression) else { return nil }

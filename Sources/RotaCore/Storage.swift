@@ -10,12 +10,33 @@ public struct StorageLocation: Sendable {
         self.logs = logs
     }
 
+    /// The app's data: `ROTA_DATA_DIR` when set (checks give each run a fresh one),
+    /// else "Rota", or "Rota Dev" for a development build (bundle id
+    /// com.wiltodelta.rota.dev), so a build under test never reads or writes the
+    /// installed app's routines. The `rota` command inside a bundle follows its app.
     public static var standard: StorageLocation {
+        if let directory = ProcessInfo.processInfo.environment["ROTA_DATA_DIR"], !directory.isEmpty {
+            let root = URL(fileURLWithPath: (directory as NSString).expandingTildeInPath)
+            return StorageLocation(root: root, logs: root.appendingPathComponent("Logs"))
+        }
         let files = FileManager.default
         let support = files.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let library = files.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-        return StorageLocation(root: support.appendingPathComponent("Rota"),
-                               logs: library.appendingPathComponent("Logs/Rota"))
+        let name = appBundleIdentifier?.hasSuffix(".dev") == true ? "Rota Dev" : "Rota"
+        return StorageLocation(root: support.appendingPathComponent(name),
+                               logs: library.appendingPathComponent("Logs/\(name)"))
+    }
+
+    /// This process's app: its own bundle, or for a helper such as
+    /// Contents/Helpers/rota the app it sits in.
+    static var appBundleIdentifier: String? {
+        if let id = Bundle.main.bundleIdentifier { return id }
+        var url = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        while url.path != "/" {
+            url.deleteLastPathComponent()
+            if url.pathExtension == "app" { return Bundle(url: url)?.bundleIdentifier }
+        }
+        return nil
     }
 
     var routinesFile: URL { root.appendingPathComponent("routines.json") }
@@ -96,15 +117,19 @@ public struct RunHistory: Sendable {
         try JSONFile.write(Array(records.prefix(Self.limit)), to: file(for: record.routineID))
     }
 
-    /// Marks runs left `running` by a previous launch as interrupted.
-    public func closeOrphans(routineIDs: [String], now: Date) {
+    /// Marks runs left `running` by a previous launch as interrupted and returns them.
+    @discardableResult
+    public func closeOrphans(routineIDs: [String], now: Date) -> [RunRecord] {
+        var closed: [RunRecord] = []
         for routineID in routineIDs {
             for var record in records(for: routineID) where record.outcome == .running {
                 record.outcome = .interrupted
                 record.endedAt = now
                 try? upsert(record)
+                closed.append(record)
             }
         }
+        return closed
     }
 
     public func removeAll(for routineID: String) {

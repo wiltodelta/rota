@@ -70,6 +70,38 @@ public struct Routine: Codable, Identifiable, Equatable, Sendable {
         URL(fileURLWithPath: workingDirectory)
             .appendingPathComponent(".claude/skills/\(id)/SKILL.md")
     }
+
+    /// Lowercase letters, digits, - and _: an id names a file and a skill folder.
+    public static func isValidID(_ id: String) -> Bool {
+        let allowed = CharacterSet.lowercaseLetters.union(.decimalDigits).union(CharacterSet(charactersIn: "-_"))
+        return !id.isEmpty && id.unicodeScalars.allSatisfy { $0.isASCII && allowed.contains($0) }
+    }
+
+    /// Why the routine cannot be saved, or nil. The window, the `rota` command
+    /// and the MCP tools share it; `checkingID` is off for an existing routine,
+    /// which keeps the id it was imported with.
+    public func problem(checkingID: Bool = true) -> String? {
+        if checkingID, id.isEmpty { return "Give the routine an id, such as weekly-report." }
+        if checkingID, !Self.isValidID(id) {
+            return "An id is lowercase letters, digits, - and _, such as weekly-report."
+        }
+        var isFolder: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: workingDirectory, isDirectory: &isFolder), isFolder.boolValue
+        else {
+            return workingDirectory.isEmpty ? "Choose the project folder."
+                : "The project folder \(workingDirectory) does not exist."
+        }
+        do { _ = try CronSchedule(schedule) } catch {
+            return "The schedule \"\(schedule)\": \(error.localizedDescription)"
+        }
+        guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return harness.isAgent ? "Give a prompt or a skill." : "Give the command."
+        }
+        if let limit = timeLimitMinutes, !(1...1440).contains(limit) {
+            return "A time limit is 1 to 1440 minutes, or none."
+        }
+        return nil
+    }
 }
 
 /// What a routine's skill depends on, read from the skill text.

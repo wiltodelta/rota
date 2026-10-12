@@ -18,14 +18,18 @@
 import AppKit
 import ApplicationServices
 
-let bundleID = "com.wiltodelta.rota"
+// The development build by default; ROTA_BUNDLE_ID=com.wiltodelta.rota drives an installed release.
+let bundleID = ProcessInfo.processInfo.environment["ROTA_BUNDLE_ID"] ?? "com.wiltodelta.rota.dev"
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))
     exit(1)
 }
 
-guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else {
+// The newest live instance: right after a relaunch the list can still hold the one that just quit.
+guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+    .filter({ !$0.isTerminated })
+    .max(by: { ($0.launchDate ?? .distantPast) < ($1.launchDate ?? .distantPast) }) else {
     fail("Rota is not running")
 }
 let root = AXUIElementCreateApplication(app.processIdentifier)

@@ -13,7 +13,7 @@ struct ImportSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Import routines").font(.headline)
+            Text("Import Routines").font(.headline)
             Text("Rota copies the routines you pick from other apps, turned off.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -50,12 +50,13 @@ struct ImportSheet: View {
                         + "them on here, or both apps will run them.",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.callout)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Color.warningText)
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
                 Button(chosen.isEmpty ? "Import" : "Import \(chosen.count) Routine\(chosen.count == 1 ? "" : "s")") {
                     importChosen()
                 }
@@ -132,14 +133,14 @@ private struct ImportRow: View {
                     Text(candidate.routine.name)
                     Text(detail).font(.caption).foregroundStyle(.secondary)
                     if let reason = candidate.unsupported {
-                        Text(reason).font(.caption).foregroundStyle(.red)
+                        Text(reason).font(.caption).foregroundStyle(Color.errorText)
                     }
                 }
                 Spacer(minLength: 8)
                 if inRota {
                     Tag(text: "In Rota", color: .secondary)
                 } else if candidate.onInSource {
-                    Tag(text: "On in \(candidate.source.title)", color: .orange)
+                    Tag(text: "On in \(candidate.source.title)", color: Color.warningText)
                 }
             }
         }
@@ -181,23 +182,24 @@ struct NewRoutineSheet: View {
     private var identifierTaken: Bool { model.scheduler.routine(draft.id) != nil }
 
     var body: some View {
+        // A taken id is said under its field.
+        let problem = draft.problem()
         VStack(alignment: .leading, spacing: 0) {
+            SheetTitle(text: "New Routine")
             RoutineForm(draft: $draft, skillTaken: identifierTaken)
-            HStack {
-                Spacer()
+            SheetButtons(problem: problem) {
                 Button("Cancel", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
                 Button("Add") {
                     if draft.name.isEmpty { draft.name = draft.id }
                     model.scheduler.save(draft)
                     model.selection = .routine(draft.id)
                     dismiss()
                 }
-                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .accessibilityIdentifier("addRoutine")
-                .disabled(draft.id.isEmpty || identifierTaken || draft.workingDirectory.isEmpty
-                          || draft.prompt.isEmpty || (try? CronSchedule(draft.schedule)) == nil)
+                .disabled(problem != nil || identifierTaken)
             }
-            .padding(16)
         }
         // Fits the window at its minimum height; the form scrolls inside.
         .frame(width: 560)
@@ -214,5 +216,38 @@ struct NewRoutineSheet: View {
               !draft.id.isEmpty, !draft.workingDirectory.isEmpty else { return }
         generatedPrompt = Routine.defaultPrompt(skill: draft.id, workingDirectory: draft.workingDirectory)
         draft.prompt = generatedPrompt
+    }
+}
+
+/// A sheet's title above its form, as the import sheet has.
+struct SheetTitle: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.headline)
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
+    }
+}
+
+/// A sheet's button row, with what still keeps it from saving on the left.
+struct SheetButtons<Buttons: View>: View {
+    let problem: String?
+    @ViewBuilder let buttons: Buttons
+
+    var body: some View {
+        HStack {
+            if let problem {
+                Text(problem)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("sheetProblem")
+            }
+            Spacer(minLength: 12)
+            buttons
+        }
+        .padding(16)
     }
 }

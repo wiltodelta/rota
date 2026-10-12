@@ -1,3 +1,4 @@
+import AppKit
 import RotaCore
 import SwiftUI
 
@@ -43,9 +44,13 @@ struct MenuBarContent: View {
                     model.showMainWindow(selecting: .session(newest.id))
                 } label: {
                     let count = waiting.count == 1 ? "1 session needs" : "\(waiting.count) sessions need"
-                    Label("\(count) your reply", systemImage: "exclamationmark.bubble.fill")
-                        .foregroundStyle(.orange)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    // Orange marks it; the text stays primary, since orange text is unreadable on light glass.
+                    Label {
+                        Text("\(count) your reply").fontWeight(.medium)
+                    } icon: {
+                        Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(.orange)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.borderless)
                 .padding(10)
@@ -98,6 +103,13 @@ private struct MenuRoutineRow: View {
 
     var body: some View {
         let running = model.scheduler.active[routine.id] != nil
+        let toggleRun = {
+            if running {
+                model.scheduler.stop(routine.id)
+            } else {
+                model.scheduler.run(routine, trigger: .manual)
+            }
+        }
         HStack(spacing: 8) {
             StatusDot(routine: routine)
             VStack(alignment: .leading, spacing: 1) {
@@ -109,13 +121,7 @@ private struct MenuRoutineRow: View {
             }
             Spacer(minLength: 4)
             if hovering {
-                Button {
-                    if running {
-                        model.scheduler.stop(routine.id)
-                    } else {
-                        model.scheduler.run(routine, trigger: .manual)
-                    }
-                } label: {
+                Button(action: toggleRun) {
                     Image(systemName: running ? "stop.fill" : "play.fill")
                 }
                 .buttonStyle(.borderless)
@@ -128,6 +134,21 @@ private struct MenuRoutineRow: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture(perform: open)
+        // Hover shows Run and Stop to a pointer; VoiceOver and Full Keyboard Access get them as actions.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(routine.name)
+        .accessibilityValue(spokenState(running: running))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Opens its latest session")
+        .accessibilityAction(.default, open)
+        .accessibilityAction(named: running ? "Stop" : "Run Now", toggleRun)
+    }
+
+    /// The subtitle and the dot's state, the state once when the subtitle already says it.
+    private func spokenState(running: Bool) -> String {
+        let text = subtitle(running: running)
+        let status = StatusDot.status(of: routine, in: model.scheduler)
+        return text.localizedCaseInsensitiveContains(status) ? text : "\(text), \(status)"
     }
 
     private func subtitle(running: Bool) -> String {
@@ -143,26 +164,33 @@ struct StatusDot: View {
     let routine: Routine
 
     var body: some View {
+        // One history read for both the colour and the spoken state.
+        let last = Self.lastRun(of: routine, in: model.scheduler)
         Circle()
-            .fill(color)
+            .fill(color(last))
             .frame(width: 8, height: 8)
-            .accessibilityLabel(label)
+            .accessibilityLabel(Self.status(of: routine, in: model.scheduler, last: last))
     }
 
-    private var last: RunRecord? {
-        _ = model.scheduler.historyVersion
-        // A skipped slot says nothing about how the routine is doing.
-        return model.scheduler.history.records(for: routine.id).first { !$0.isSkip }
+    /// The latest run that is not a skip: a skipped slot says nothing about how the
+    /// routine is doing. Reads the routine's history file.
+    static func lastRun(of routine: Routine, in scheduler: Scheduler) -> RunRecord? {
+        _ = scheduler.historyVersion
+        return scheduler.history.records(for: routine.id).first { !$0.isSkip }
     }
 
-    private var color: Color {
+    private func color(_ last: RunRecord?) -> Color {
         if model.scheduler.active[routine.id] != nil { return .blue }
         if last?.outcome.isFailure == true { return .red }
         return routine.enabled ? .green : .secondary.opacity(0.5)
     }
 
-    private var label: String {
-        if model.scheduler.active[routine.id] != nil { return "Running" }
+    static func status(of routine: Routine, in scheduler: Scheduler) -> String {
+        status(of: routine, in: scheduler, last: lastRun(of: routine, in: scheduler))
+    }
+
+    private static func status(of routine: Routine, in scheduler: Scheduler, last: RunRecord?) -> String {
+        if scheduler.active[routine.id] != nil { return "Running" }
         if let last, last.outcome.isFailure { return "Last run: \(last.outcome.title)" }
         return routine.enabled ? "On schedule" : "Paused"
     }
@@ -173,6 +201,21 @@ extension Color {
     /// 4.5:1 on Liquid Glass in watch-me-sleep's identical panel; this keeps the
     /// softer look at a readable contrast.
     static let panelSecondary = Color.primary.opacity(0.66)
+
+    /// Warning and error text. The system orange and red measure 2.3:1 and
+    /// 3.6:1 on a light window, under the 4.5:1 text needs; these are Apple's
+    /// increased-contrast shades in light mode and the system colors in dark,
+    /// where those already pass.
+    static let warningText = adaptive(light: NSColor(srgbRed: 201 / 255, green: 52 / 255, blue: 0, alpha: 1),
+                                      dark: .systemOrange)
+    static let errorText = adaptive(light: NSColor(srgbRed: 215 / 255, green: 0, blue: 21 / 255, alpha: 1),
+                                    dark: .systemRed)
+
+    private static func adaptive(light: NSColor, dark: NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+        })
+    }
 }
 
 /// When a routine runs next: relative within a day ("in 3 hours"), else a short
