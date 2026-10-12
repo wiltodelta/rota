@@ -306,7 +306,9 @@ private struct TerminalPicker: View {
 
     var body: some View {
         let chosen = model.settings.terminalApp
-        Picker("Terminal", selection: Binding(get: { chosen ?? "" }, set: choose)) {
+        // A closure, not `set: choose`: Swift 6.3.3 (Xcode 26.6) crashed in IRGen on the
+        // method reference's @isolated(any) thunk.
+        Picker("Terminal", selection: Binding(get: { chosen ?? "" }, set: { choose($0) })) {
             Text(handler.map { "Default (\(Self.name($0.path)))" } ?? "Default").tag("")
             Divider()
             ForEach(installed, id: \.self) { terminal in
