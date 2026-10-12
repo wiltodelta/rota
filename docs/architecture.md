@@ -246,6 +246,16 @@ changes while `.command` files stay with Terminal, then the `.command` handler. 
 
 Layout rules learned while measuring the narrowest window (820 pt):
 
+- Settings uses toolbar tabs: General, Chat, Agents and Integrations. CLI
+  selection and Claude's interactive mode belong to Agents; the rota command
+  and MCP registration belong to Integrations. Forms cap their height at the
+  screen's visible height minus 100 pt and scroll on shorter screens. The
+  settings window clamps every resize, including tab-switch animation frames,
+  above the Dock. Restore the saved tab before recording selection changes,
+  and clear focus when opening or switching tabs.
+- The UI layout gate checks standard windows against the screen's visible
+  frame as well as controls against their parents. A window can pass the
+  control checks while its bottom is hidden by the Dock.
 - Sessions are the main view: the sidebar lists them by day above the
   routines, and `SessionView` is the chat with its composer. A routine's view
   is its header and sessions; the settings form, used rarely, is a sheet

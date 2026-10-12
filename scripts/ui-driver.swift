@@ -14,7 +14,7 @@
 //   focus <id>                   activate Rota and focus that element
 //   key return|option-return     post the key to Rota's process
 //   confirm-iterm <text>         answer iTerm2's "OK to run" for a script path containing text
-//   gate                         list elements whose frame leaves their window or their parent
+//   gate                         list offscreen windows and clipped or overflowing elements
 import AppKit
 import ApplicationServices
 
@@ -151,6 +151,20 @@ case "gate":
     var violations = 0
     for window in windows() {
         guard let windowFrame = frame(window) else { continue }
+        let subrole: String = attribute(window, kAXSubroleAttribute) ?? ""
+        if subrole == kAXStandardWindowSubrole {
+            // AX uses top-left coordinates, AppKit uses bottom-left on the primary screen.
+            let desktopTop = NSScreen.screens.first?.frame.maxY ?? 0
+            let visibleFrames = NSScreen.screens.map { screen in
+                let visible = screen.visibleFrame
+                return CGRect(x: visible.minX, y: desktopTop - visible.maxY,
+                              width: visible.width, height: visible.height)
+            }
+            if !visibleFrames.contains(where: { $0.insetBy(dx: -1, dy: -1).contains(windowFrame) }) {
+                violations += 1
+                print("outside screen  \(label(window))  \(windowFrame)")
+            }
+        }
         // `clip` is the visible part of the nearest scroll area: content scrolled
         // out of it is not on screen, so it is neither outside the window nor clipped.
         func walk(_ element: AXUIElement, parent: CGRect, clip: CGRect) {

@@ -388,10 +388,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func showSettingsWindow() {
         panel.close()
         if settingsWindow == nil {
-            let window = NSWindow(contentViewController: SettingsTabController(model: model))
+            let tabs = SettingsTabController(model: model)
+            let window = SettingsWindow(contentViewController: tabs)
             window.styleMask = [.titled, .closable]
+            window.toolbarStyle = .preference
             window.isReleasedWhenClosed = false
             window.delegate = self
+            let size = tabs.tabViewItems[tabs.selectedTabViewItemIndex].viewController?.preferredContentSize
+            window.setContentSize(size ?? NSSize(width: 520, height: 400))
             window.center()
             settingsWindow = window
         }

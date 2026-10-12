@@ -51,7 +51,7 @@ Desktop.
 - **Agents manage routines.** A Claude Code, Codex or Grok Build session can
   schedule a routine ("run this every weekday at 9"), change, run, pause or
   delete one, and read or message its sessions, through Rota's MCP server.
-  Turn it on per agent in Settings > Routines from agents. A routine an agent
+  Turn it on per agent in Settings > Integrations > Routines from agents. A routine an agent
   adds runs on its schedule and Rota notifies you. The same works from a
   terminal with the `rota` command: `rota list`, `rota add`, `rota run`,
   `rota log`, `rota help`.

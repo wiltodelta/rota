@@ -212,7 +212,7 @@ for appearance in light dark; do
     open_rota --env "ROTA_APPEARANCE=$appearance" --env ROTA_OPEN_SETTINGS=1
     sleep 8
     # Settings are toolbar tabs; the window takes each tab's title and height.
-    for tab in General Chat Agents; do
+    for tab in General Chat Agents Integrations; do
         [[ "$tab" == General ]] || { "$DRIVER" press "$tab"; sleep 2; }
         settings_id="$("$DRIVER" wid "$tab")" \
             && screencapture -x -o -l "$settings_id" "$OUT/$appearance-settings-$(echo "$tab" | tr A-Z a-z).png" \

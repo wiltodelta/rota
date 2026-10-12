@@ -73,7 +73,7 @@ struct ChatSettings: View {
     }
 }
 
-/// The Agents tab: which copy of each agent CLI runs, and agents' access to routines.
+/// The Agents tab: which copy of each agent CLI runs, and how Claude runs.
 struct AgentSettings: View {
     @Environment(AppModel.self) private var model
 
@@ -90,10 +90,16 @@ struct AgentSettings: View {
                     .foregroundStyle(Color.secondaryText)
             }
             ClaudeModeSection()
-            AgentAccessSection()
         }
         .settingsPane()
         .onAppear { model.settings.refreshInstalled() }
+    }
+}
+
+/// The Integrations tab: the rota command and agents' MCP access to routines.
+struct IntegrationSettings: View {
+    var body: some View {
+        Form { AgentAccessSection() }.settingsPane()
     }
 }
 
@@ -148,10 +154,12 @@ private struct PermissionRow: View {
 }
 
 extension View {
-    /// A settings tab's form: grouped, the window's width, as tall as its content.
+    /// A grouped form sized to its content, scrolling when a short screen requires it.
     func settingsPane() -> some View {
         formStyle(.grouped)
             .frame(width: 520)
+            // Reserve space for the title bar, toolbar and a margin above the Dock.
+            .frame(maxHeight: (NSScreen.main?.visibleFrame.height ?? 800) - 100)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
