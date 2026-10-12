@@ -16,14 +16,14 @@ struct ImportSheet: View {
             Text("Import Routines").font(.headline)
             Text("Rota copies the routines you pick from other apps, turned off.")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.secondaryText)
             if let scans {
                 List {
                     ForEach(scans, id: \.source) { scan in
                         Section {
                             if scan.candidates.isEmpty {
                                 Text(scan.problem ?? "No routines scheduled there.")
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(Color.secondaryText)
                             }
                             ForEach(scan.candidates) { ImportRow(candidate: $0, chosen: $chosen) }
                         } header: {
@@ -131,14 +131,14 @@ private struct ImportRow: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(candidate.routine.name)
-                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                    Text(detail).font(.caption).foregroundStyle(Color.secondaryText)
                     if let reason = candidate.unsupported {
                         Text(reason).font(.caption).foregroundStyle(Color.errorText)
                     }
                 }
                 Spacer(minLength: 8)
                 if inRota {
-                    Tag(text: "In Rota", color: .secondary)
+                    Tag(text: "In Rota", color: Color.secondaryText)
                 } else if candidate.onInSource {
                     Tag(text: "On in \(candidate.source.title)", color: Color.warningText)
                 }
@@ -241,7 +241,7 @@ struct SheetButtons<Buttons: View>: View {
             if let problem {
                 Text(problem)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.secondaryText)
                     .lineLimit(2)
                     .accessibilityIdentifier("sheetProblem")
             }

@@ -36,14 +36,15 @@ struct RoutineDetail: View {
                                 .accessibilityLabel("Needs your reply")
                         }
                         Text(record.outcome.title)
-                            .foregroundStyle(record.outcome.isFailure && !record.isSkip ? Color.errorText : .secondary)
+                            .foregroundStyle(record.outcome.isFailure && !record.isSkip
+                                ? Color.errorText : Color.secondaryText)
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
             .overlay {
-                if records.isEmpty { Text("No sessions yet").foregroundStyle(.secondary) }
+                if records.isEmpty { Text("No sessions yet").foregroundStyle(Color.secondaryText) }
             }
         }
         .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
@@ -68,7 +69,7 @@ struct RoutineDetail: View {
                     Text(routine.workingDirectory).truncationMode(.middle)
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.secondaryText)
                 .lineLimit(1)
             }
             Spacer(minLength: 12)
@@ -133,7 +134,7 @@ struct EditRoutineSheet: View {
                 if let problem {
                     Text(problem)
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.secondaryText)
                         .lineLimit(2)
                         .accessibilityIdentifier("sheetProblem")
                 }

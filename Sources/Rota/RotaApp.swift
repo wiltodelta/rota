@@ -292,7 +292,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         var tip = running > 0 ? "Rota: \(running) running" : "Rota"
         if waiting > 0 { tip += ", \(waiting) waiting for your reply" }
         if unread > 0 { tip += ", \(unread) unread" }
-        if let version = Updater.shared.pendingVersion { tip += ". Update to \(version) available" }
+        if let version = Updater.shared.pendingVersion { tip += ". Version \(version) is available" }
         button.toolTip = tip
         // The Dock shows the icon only while a window is open; the badge counts sessions to look at.
         let badge = records.filter { $0.isUnread || $0.attention != nil }.count
@@ -318,7 +318,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let menu = NSMenu()
         menu.addItem(item("Open Rota", symbol: "macwindow", action: #selector(openMainFromMenu)))
         menu.addItem(item("Settings\u{2026}", symbol: "gearshape", action: #selector(showSettingsWindow), key: ","))
-        menu.addItem(item("Check for Updates\u{2026}", symbol: "arrow.down.circle",
+        menu.addItem(item("Check for Updates\u{2026}", symbol: "arrow.triangle.2.circlepath",
                           action: #selector(checkForUpdates)))
         menu.addItem(.separator())
         // The standard selector lets macOS 26+ give the item its system icon.

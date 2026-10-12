@@ -14,28 +14,40 @@ struct GeneralSettings: View {
         @Bindable var settings = model.settings
         Form {
             Section {
-                Toggle("Open at login", isOn: $launchAtLogin)
-                    .onChange(of: launchAtLogin) { _, on in setLaunchAtLogin(on) }
-                if let loginError {
-                    Text(loginError).foregroundStyle(Color.errorText).font(.caption)
-                }
                 Toggle("Notify when a run succeeds", isOn: $settings.notifyOnSuccess)
             } footer: {
-                Text("Rota runs routines only while it is open. Failed and skipped runs always notify.")
+                Text("Failed and skipped runs always notify.")
+                    .foregroundStyle(Color.secondaryText)
             }
             Section {
                 TerminalPicker()
             } footer: {
                 Text("Open in Terminal and Continue in Terminal use it.")
+                    .foregroundStyle(Color.secondaryText)
             }
             Section {
+                Toggle("Launch at login", isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { _, on in setLaunchAtLogin(on) }
+            } header: {
+                Text("Startup")
+            } footer: {
+                Text(loginError.map { "Couldn't change this: \($0)" }
+                     ?? "Start Rota automatically when you log in to your Mac. "
+                     + "Rota runs routines only while it is open.")
+                    .foregroundStyle(Color.secondaryText)
+            }
+            Section {
+                LabeledContent("Version", value: Updater.shared.version)
                 Toggle("Check for updates automatically", isOn: Binding(
                     get: { Updater.shared.automaticallyChecks },
                     set: { Updater.shared.automaticallyChecks = $0 }
                 ))
-                LabeledContent("Version \(Updater.shared.version)") {
-                    Button("Check for Updates\u{2026}") { Updater.shared.checkForUpdates() }
-                }
+                Button("Check for Updates\u{2026}") { Updater.shared.checkForUpdates() }
+            } header: {
+                Text("Updates")
+            } footer: {
+                Text("Checks once a day and installs a new version when you choose to.")
+                    .foregroundStyle(Color.secondaryText)
             }
         }
         .settingsPane()
@@ -75,6 +87,7 @@ struct AgentSettings: View {
                 Text("Agent CLIs")
             } footer: {
                 Text("Rota lists the copies it finds on your login shell's PATH and in the usual install folders.")
+                    .foregroundStyle(Color.secondaryText)
             }
             ClaudeModeSection()
             AgentAccessSection()
@@ -109,6 +122,7 @@ private struct ClaudeModeSection: View {
             Text("As in a terminal: computer use where you turned it on in Claude Code, and Open in Terminal "
                  + "shows the live session. Computer use acts as Rota, so macOS asks Rota for these two. "
                  + "Folders Claude Code has not been trusted in run with claude -p.")
+                .foregroundStyle(Color.secondaryText)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             access = ComputerUseAccess.current()
@@ -252,6 +266,7 @@ private struct AgentAccessSection: View {
         } footer: {
             Text("An agent with Rota added can create, change, run and read routines; a routine it adds runs on its "
                  + "schedule and Rota tells you. In a terminal, run rota help.")
+                .foregroundStyle(Color.secondaryText)
         }
         .task { await refresh() }
     }
@@ -352,7 +367,7 @@ private struct StatusLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(spacing: 4) {
             configuration.icon.foregroundStyle(.green)
-            configuration.title.foregroundStyle(.secondary)
+            configuration.title.foregroundStyle(Color.secondaryText)
         }
     }
 }
@@ -386,7 +401,7 @@ private struct ChatTextSection: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Clicks are down 8% week over week.").font(text.body)
-                Text("$ git log --oneline -5").font(text.code).foregroundStyle(.secondary)
+                Text("$ git log --oneline -5").font(text.code).foregroundStyle(Color.secondaryText)
             }
             .padding(.vertical, 4)
             .accessibilityLabel("Sample")

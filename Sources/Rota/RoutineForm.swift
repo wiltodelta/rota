@@ -121,7 +121,7 @@ private struct ScheduleField: View {
                 }
             }
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Color.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -146,7 +146,7 @@ struct HarnessWarnings: View {
         } else if !needs.isEmpty {
             Text("Uses " + needs.map(\.title).sorted().joined(separator: " and ") + ", available here.")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.secondaryText)
         }
     }
 

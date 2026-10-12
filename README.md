@@ -153,7 +153,7 @@ Claude Code, `--dangerously-bypass-approvals-and-sandbox` for Codex,
 is there to answer a prompt. Point a routine only at a project whose skill you
 trust.
 
-Rota runs routines only while it is open; turn on **Open at login** in
+Rota runs routines only while it is open; turn on **Launch at login** in
 Settings, so runs cut off by a shutdown continue after the Mac starts.
 Quitting Rota yourself while routines run asks first and stops them; their
 sessions can be continued later.

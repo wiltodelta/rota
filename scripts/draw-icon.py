@@ -15,10 +15,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SIZE = 1024
 CENTER = SIZE / 2
-FACE_RADIUS = 360
-TICK_OUTER = 300
-TICK_LENGTH, MAJOR_TICK_LENGTH, TICK_WIDTH = 50, 75, 34
-PLAY_SIZE, PLAY_SHIFT, PLAY_ROUNDING = 118, 22, 20
+# The dial fills about 64% of the canvas, the weight shared with the other apps'
+# icons (claude-config docs/macos-apps.md, "Icons").
+DIAL_SCALE = 330 / 360
+FACE_RADIUS = 360 * DIAL_SCALE
+TICK_OUTER = 300 * DIAL_SCALE
+TICK_LENGTH, MAJOR_TICK_LENGTH, TICK_WIDTH = 50 * DIAL_SCALE, 75 * DIAL_SCALE, 34 * DIAL_SCALE
+PLAY_SIZE, PLAY_SHIFT, PLAY_ROUNDING = 118 * DIAL_SCALE, 22 * DIAL_SCALE, 20 * DIAL_SCALE
 
 # The menu bar glyph: the dial as a ring with twelve hour dots, the app icon's
 # ticks reduced to what reads at 18 pt with the weight of the system's symbols.
@@ -39,8 +42,8 @@ def ticks():
     bars = []
     for hour in range(12):
         length = MAJOR_TICK_LENGTH if hour % 3 == 0 else TICK_LENGTH
-        bars.append(f'<rect x="{CENTER - TICK_WIDTH / 2:.1f}" y="{CENTER - TICK_OUTER:.1f}" width="{TICK_WIDTH}" '
-                    f'height="{length}" rx="{TICK_WIDTH / 2}" fill="{{color}}" '
+        bars.append(f'<rect x="{CENTER - TICK_WIDTH / 2:.1f}" y="{CENTER - TICK_OUTER:.1f}" width="{TICK_WIDTH:.1f}" '
+                    f'height="{length:.1f}" rx="{TICK_WIDTH / 2:.1f}" fill="{{color}}" '
                     f'transform="rotate({hour * 30} {CENTER} {CENTER})"/>')
     return "".join(bars)
 

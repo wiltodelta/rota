@@ -133,7 +133,7 @@ struct MainWindow: View {
                     Text("Routines start a session when they run. Pick a routine and choose Run Now.")
                 }
             } else {
-                Text("Select a session").foregroundStyle(.secondary)
+                Text("Select a session").foregroundStyle(Color.secondaryText)
             }
         }
         .navigationTitle("Rota")
@@ -189,7 +189,7 @@ private struct SessionRow: View {
                     .lineLimit(1)
                 Text(details)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.secondaryText)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)

@@ -42,7 +42,7 @@ struct WorkSection: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(live)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.secondaryText)
                 .help(expanded ? "Hide the steps" : "Show the steps")
                 .accessibilityIdentifier("workToggle")
                 Hairline()
@@ -113,7 +113,7 @@ private struct ToolRunRow: View {
                     ForEach(calls) { call in
                         Text(call.text)
                             .font(model.chatText.smallCode)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.secondaryText)
                             .lineLimit(2)
                             .help(call.text)
                     }
@@ -144,7 +144,7 @@ private struct ToolRunRow: View {
                     .rotationEffect(.degrees(expanded ? 90 : 0))
             }
         }
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Color.secondaryText)
         .contentShape(Rectangle())
     }
 }
@@ -161,7 +161,7 @@ private struct WorkNoteView: View {
         default:
             Text(item.text)
                 .font(model.chatText.small)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.secondaryText)
                 .textSelection(.enabled)
                 .padding(.vertical, 2)
         }
@@ -232,16 +232,16 @@ struct PlanCard: View {
             HStack {
                 Text("Plan").fontWeight(.semibold)
                 Spacer()
-                Text("\(done) of \(steps.count) done").foregroundStyle(.secondary)
+                Text("\(done) of \(steps.count) done").foregroundStyle(Color.secondaryText)
             }
             .font(model.chatText.small)
             ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: Self.symbol(step.status))
-                        .foregroundStyle(step.status == .inProgress ? Color.accentColor : .secondary)
+                        .foregroundStyle(step.status == .inProgress ? Color.accentColor : Color.secondaryText)
                     Text(step.text)
                         .strikethrough(step.status == .completed)
-                        .foregroundStyle(step.status == .completed ? .secondary : .primary)
+                        .foregroundStyle(step.status == .completed ? Color.secondaryText : .primary)
                 }
                 .font(model.chatText.body)
                 .accessibilityElement(children: .combine)
@@ -257,7 +257,7 @@ struct PlanCard: View {
     static func symbol(_ status: PlanStep.Status) -> String {
         switch status {
         case .pending: return "circle"
-        case .inProgress: return "circle.dotted.circle"
+        case .inProgress: return "circle.dotted"
         case .completed: return "checkmark.circle.fill"
         }
     }

@@ -65,7 +65,7 @@ struct SessionView: View {
                 Text([record.harness.title, record.trigger == .catchUp ? "missed slot, run late" : nil,
                       record.outcome.title].compactMap { $0 }.joined(separator: " \u{00B7} "))
                     .font(.caption)
-                    .foregroundStyle(record.outcome.isFailure ? Color.errorText : .secondary)
+                    .foregroundStyle(record.outcome.isFailure ? Color.errorText : Color.secondaryText)
             }
             Spacer()
             if let path = record.logPath {
@@ -125,7 +125,7 @@ private struct Composer: View {
             } else if let note {
                 Text(note)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.secondaryText)
                     .frame(maxWidth: .infinity)
             }
         }
@@ -154,11 +154,11 @@ private struct Composer: View {
                     HarnessLogo(harness: record.harness)
                     Text(ModelLabel.name(harness: record.harness, routine: routine, models: model.settings.models))
                     if record.harness == routine.harness, let effort = routine.effort {
-                        Text(effort.capitalized).foregroundStyle(.tertiary)
+                        Text(effort.capitalized).foregroundStyle(Color.secondaryText)
                     }
                 }
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.secondaryText)
                 .lineLimit(1)
                 Spacer(minLength: 8)
                 // As super.engineering's: while the session works, its clock, and Stop in Send's
@@ -167,7 +167,7 @@ private struct Composer: View {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         Text(Self.clock(context.date.timeIntervalSince(since)))
                             .font(.callout.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.secondaryText)
                     }
                 }
                 if running && !canSend {
@@ -177,7 +177,7 @@ private struct Composer: View {
                         .accessibilityIdentifier("composerStop")
                 } else {
                     RoundButton(symbol: "arrow.up", filled: canSend, fill: Color.accentColor,
-                                foreground: canSend ? .white : .secondary, action: send)
+                                foreground: canSend ? .white : Color.secondaryText, action: send)
                         .disabled(!canSend)
                         .keyboardShortcut(.return, modifiers: .command)
                         .help("Send (Return)")

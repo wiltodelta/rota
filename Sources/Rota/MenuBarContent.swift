@@ -16,7 +16,7 @@ struct MenuBarContent: View {
         VStack(alignment: .leading, spacing: 0) {
             if routines.isEmpty {
                 Text("No routines yet")
-                    .foregroundStyle(Color.panelSecondary)
+                    .foregroundStyle(Color.secondaryText)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 20)
             } else {
@@ -73,23 +73,33 @@ struct MenuBarContent: View {
             }
             if let version = Updater.shared.pendingVersion {
                 Divider()
-                Button("Update to \(version) available") { Updater.shared.checkForUpdates() }
-                    .buttonStyle(.borderless)
-                    .padding(10)
+                Button { Updater.shared.checkForUpdates() } label: {
+                    HStack {
+                        Label("Install Update\u{2026}", systemImage: "arrow.down.circle")
+                        Spacer()
+                        Text("Version \(version) is available").foregroundStyle(Color.secondaryText)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .padding(10)
             }
             Divider()
-            HStack {
-                Button("Open Rota") { model.showMainWindow() }
+            HStack(spacing: 16) {
+                // Opens a window, so the title ends with an ellipsis (HIG).
+                Button { model.showSettings() } label: {
+                    Label("Settings\u{2026}", systemImage: "gearshape").footerTarget()
+                }
+                Button { model.showMainWindow() } label: { Text("Open Rota").footerTarget() }
                 Spacer()
-                Button("Settings", systemImage: "gearshape") { model.showSettings() }
-                    .labelStyle(.iconOnly)
-                    .help("Settings")
-                Button("Quit", systemImage: "power") { NSApp.terminate(nil) }
-                    .labelStyle(.iconOnly)
+                Button { NSApp.terminate(nil) } label: { Text("Quit").footerTarget() }
                     .help("Quit Rota")
             }
-            .buttonStyle(.borderless)
-            .padding(10)
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.secondaryText)
+            .font(.callout)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
         }
         .frame(width: 340)
     }
@@ -116,7 +126,7 @@ private struct MenuRoutineRow: View {
                 Text(routine.name).lineLimit(1)
                 Text(subtitle(running: running))
                     .font(.caption)
-                    .foregroundStyle(Color.panelSecondary)
+                    .foregroundStyle(Color.secondaryText)
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
@@ -182,7 +192,7 @@ struct StatusDot: View {
     private func color(_ last: RunRecord?) -> Color {
         if model.scheduler.active[routine.id] != nil { return .blue }
         if last?.outcome.isFailure == true { return .red }
-        return routine.enabled ? .green : .secondary.opacity(0.5)
+        return routine.enabled ? .green : Color.secondary.opacity(0.5)
     }
 
     static func status(of routine: Routine, in scheduler: Scheduler) -> String {
@@ -197,10 +207,11 @@ struct StatusDot: View {
 }
 
 extension Color {
-    /// Secondary text on the glass panel. The system `.secondary` measured under
-    /// 4.5:1 on Liquid Glass in watch-me-sleep's identical panel; this keeps the
-    /// softer look at a readable contrast.
-    static let panelSecondary = Color.primary.opacity(0.66)
+    /// Secondary text the app draws. The system `.secondary` measured under 4.5:1
+    /// on Liquid Glass in watch-me-sleep's identical panel and on translate-like-me's
+    /// settings forms; this keeps the softer look at a readable contrast
+    /// (claude-config docs/macos-apps.md).
+    static let secondaryText = Color.primary.opacity(0.66)
 
     /// Warning and error text. The system orange and red measure 2.3:1 and
     /// 3.6:1 on a light window, under the 4.5:1 text needs; these are Apple's

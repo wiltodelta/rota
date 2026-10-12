@@ -31,7 +31,7 @@ struct ChatTranscript: View {
                     ForEach(Array(sending.enumerated()), id: \.offset) { _, text in
                         VStack(alignment: .trailing, spacing: 4) {
                             UserBubble(text: text).opacity(0.6)
-                            Text("Sending\u{2026}").font(model.chatText.small).foregroundStyle(.secondary)
+                            Text("Sending\u{2026}").font(model.chatText.small).foregroundStyle(Color.secondaryText)
                         }
                         .frame(maxWidth: .infinity, alignment: .trailing)
                     }
@@ -168,7 +168,7 @@ private struct AgentHeader: View {
             HarnessLogo(harness: record.harness)
             Text(ModelLabel.name(harness: record.harness, routine: routine, models: model.settings.models))
             if record.harness == routine.harness, let effort = routine.effort {
-                Text(effort.capitalized).foregroundStyle(.secondary)
+                Text(effort.capitalized).foregroundStyle(Color.secondaryText)
             }
         }
         .font(model.chatText.small)
@@ -219,7 +219,7 @@ private struct NoteView: View {
                 Hairline()
                 Text(item.text)
                     .font(model.chatText.small)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.secondaryText)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                 Hairline()
@@ -241,7 +241,7 @@ private struct TurnFooter: View {
             Text([record.endedAt?.formatted(date: .omitted, time: .shortened),
                   status.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? record.outcome.title]
                 .compactMap { $0 }.joined(separator: " \u{00B7} "))
-                .foregroundStyle(record.outcome.isFailure ? Color.errorText : .secondary)
+                .foregroundStyle(record.outcome.isFailure ? Color.errorText : Color.secondaryText)
             Hairline()
             if !copyText.isEmpty {
                 Button {
@@ -251,7 +251,7 @@ private struct TurnFooter: View {
                     Image(systemName: "doc.on.doc")
                 }
                 .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.secondaryText)
                 .help("Copy the answer")
                 .accessibilityLabel("Copy the answer")
             }
@@ -269,7 +269,7 @@ private struct WorkingLabel: View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             Text("Working for " + Elapsed.short(since.map { context.date.timeIntervalSince($0) } ?? 0))
                 .monospacedDigit()
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.secondaryText)
                 .shimmering()
         }
         .font(model.chatText.small)
@@ -317,7 +317,7 @@ private struct MarkdownText: View {
                         .padding(.top, 4)
                 case .listItem(let marker, let content, let indent):
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(marker).foregroundStyle(.secondary)
+                        Text(marker).foregroundStyle(Color.secondaryText)
                         Text(inline(content))
                     }
                     .font(text.body)
@@ -391,7 +391,7 @@ struct CodeBlockView: View {
                 .accessibilityLabel(copied ? "Copied" : "Copy Code")
             }
             .font(model.chatText.small)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Color.secondaryText)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             Divider()
