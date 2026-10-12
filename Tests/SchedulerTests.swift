@@ -50,7 +50,8 @@ final class SchedulerTests: XCTestCase {
         launcher = FakeLauncher()
         notifier = RecordingNotifier()
         clock = makeDate(hour: 9, minute: 0)
-        scheduler = Scheduler(location: StorageLocation(root: directory, logs: directory.appendingPathComponent("logs")),
+        scheduler = Scheduler(location: StorageLocation(root: directory,
+                                                   logs: directory.appendingPathComponent("logs")),
                               launcher: launcher)
         scheduler.calendar = calendar
         scheduler.now = { [unowned self] in clock }

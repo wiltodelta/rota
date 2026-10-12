@@ -9,8 +9,9 @@ protocol MessageTransport: AnyObject {
 }
 
 /// A JSON-RPC 2.0 client over a transport: requests with replies, notifications
-/// both ways, and requests the peer sends us. Callbacks arrive on the transport's
-/// reading thread; callers hop to their own queue.
+/// both ways, and requests the peer sends us. Replies, notifications and the close
+/// arrive on `callbackQueue` (a run's own serial queue), or on the transport's
+/// reading thread without one; `onRequest` always answers on the reading thread.
 final class JSONRPCPeer: @unchecked Sendable {
     typealias Reply = (Result<Any, JSONRPCError>) -> Void
 
@@ -23,9 +24,11 @@ final class JSONRPCPeer: @unchecked Sendable {
     /// A request from the peer; return the result to send, or nil to answer "method not found".
     var onRequest: ((String, [String: Any]) -> Any?)?
     var onClose: (() -> Void)?
+    private let callbackQueue: DispatchQueue?
 
-    init(transport: MessageTransport) {
+    init(transport: MessageTransport, callbackQueue: DispatchQueue? = nil) {
         self.transport = transport
+        self.callbackQueue = callbackQueue
         transport.onMessage = { [weak self] data in self?.receive(data) }
         transport.onClose = { [weak self] in self?.closed() }
     }
@@ -65,16 +68,17 @@ final class JSONRPCPeer: @unchecked Sendable {
                 write(["jsonrpc": "2.0", "id": id, "error": error])
             }
         case let (method?, nil):
-            onNotification?(method, params)
+            deliver { self.onNotification?(method, params) }
         case let (nil, id as Int):
             lock.lock()
             let reply = pending.removeValue(forKey: id)
             lock.unlock()
-            if let error = message["error"] as? [String: Any] {
-                reply?(.failure(JSONRPCError(message: error["message"] as? String ?? "error")))
+            let result: Result<Any, JSONRPCError> = if let error = message["error"] as? [String: Any] {
+                .failure(JSONRPCError(message: error["message"] as? String ?? "error"))
             } else {
-                reply?(.success(message["result"] ?? NSNull()))
+                .success(message["result"] ?? NSNull())
             }
+            deliver { reply?(result) }
         default:
             break
         }
@@ -85,9 +89,26 @@ final class JSONRPCPeer: @unchecked Sendable {
         let waiting = pending.values
         pending.removeAll()
         lock.unlock()
-        waiting.forEach { $0(.failure(JSONRPCError(message: "connection closed"))) }
-        onClose?()
+        deliver {
+            waiting.forEach { $0(.failure(JSONRPCError(message: "connection closed"))) }
+            self.onClose?()
+        }
     }
+
+    /// Runs `work` on the callback queue, or right here without one.
+    private func deliver(_ work: @escaping () -> Void) {
+        guard let callbackQueue else { return work() }
+        // Unchecked: the closure carries JSON values parsed on the reading thread,
+        // which never touches them again.
+        let box = UncheckedSendable(work)
+        callbackQueue.async { box.value() }
+    }
+}
+
+/// A value handed to another queue that the sending side never touches again.
+struct UncheckedSendable<Value>: @unchecked Sendable {
+    let value: Value
+    init(_ value: Value) { self.value = value }
 }
 
 struct JSONRPCError: Error, LocalizedError {

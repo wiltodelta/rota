@@ -13,7 +13,8 @@ final class ControlCommandTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         launcher = ControlFakeLauncher()
         notifier = AddedNotifier()
-        scheduler = Scheduler(location: StorageLocation(root: directory, logs: directory.appendingPathComponent("logs")),
+        scheduler = Scheduler(location: StorageLocation(root: directory,
+                                                   logs: directory.appendingPathComponent("logs")),
                               launcher: launcher)
         scheduler.executable = { "/bin/\($0.rawValue)" }
         scheduler.notifier = notifier
@@ -45,7 +46,8 @@ final class ControlCommandTests: XCTestCase {
     }
 
     func testCreateRefusesWhatCouldNotRun() {
-        XCTAssertEqual(create(["workingDirectory": "/nonexistent-rota"]).failure?.message.contains("does not exist"), true)
+        let missing = create(["workingDirectory": "/nonexistent-rota"])
+        XCTAssertEqual(missing.failure?.message.contains("does not exist"), true)
         XCTAssertEqual(create(["schedule": "every day"]).failure?.message.contains("schedule"), true)
         XCTAssertEqual(create(["id": "Bad Id"]).failure?.message.contains("lowercase"), true)
         XCTAssertEqual(create(["prompt": "  "]).failure?.message.contains("prompt"), true)
@@ -238,7 +240,8 @@ final class ControlSocketTests: XCTestCase {
         nonisolated(unsafe) var echoed: String?
         nonisolated(unsafe) var refusal: String?
         DispatchQueue.global().async {
-            echoed = ((try? ControlClient.call("echo", ["text": "hi"], socket: path, timeout: 5)) as? [String: Any])?["got"]
+            let answer = try? ControlClient.call("echo", ["text": "hi"], socket: path, timeout: 5)
+            echoed = (answer as? [String: Any])?["got"]
                 as? String
             do {
                 _ = try ControlClient.call("other", socket: path, timeout: 5)
@@ -297,9 +300,11 @@ private extension Result {
 
 final class AgentAccessTests: XCTestCase {
     func testEachAgentCLIGetsItsOwnAddAndRemoveArguments() {
-        XCTAssertEqual(AgentAccess.addArguments(.claude, command: "/r"), ["mcp", "add", "-s", "user", "rota", "--", "/r", "mcp"])
+        XCTAssertEqual(AgentAccess.addArguments(.claude, command: "/r"),
+                       ["mcp", "add", "-s", "user", "rota", "--", "/r", "mcp"])
         XCTAssertEqual(AgentAccess.addArguments(.codex, command: "/r"), ["mcp", "add", "rota", "--", "/r", "mcp"])
-        XCTAssertEqual(AgentAccess.addArguments(.grok, command: "/r"), ["mcp", "add", "-s", "user", "rota", "/r", "--", "mcp"])
+        XCTAssertEqual(AgentAccess.addArguments(.grok, command: "/r"),
+                       ["mcp", "add", "-s", "user", "rota", "/r", "--", "mcp"])
         XCTAssertEqual(AgentAccess.removeArguments(.codex), ["mcp", "remove", "rota"])
         XCTAssertEqual(AgentAccess.addArguments(.shell, command: "/r"), [])
     }
@@ -315,7 +320,8 @@ final class AgentAccessTests: XCTestCase {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
         let helper = folder.appendingPathComponent("Rota.app/Contents/Helpers/rota")
-        try FileManager.default.createDirectory(at: helper.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: helper.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
         try Data().write(to: helper)
         let link = folder.appendingPathComponent("bin/rota")
         XCTAssertFalse(AgentAccess.commandInstalled(link: link, helper: helper))

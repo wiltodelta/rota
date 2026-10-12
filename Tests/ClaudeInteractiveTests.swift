@@ -4,7 +4,8 @@ import XCTest
 /// The interactive Claude run's pure parts: its transcript, its command line, and when Rota uses it.
 final class ClaudeInteractiveTests: XCTestCase {
     private func entry(_ json: [String: Any]) -> ClaudeTranscript {
-        ClaudeTranscript.read(try! JSONSerialization.data(withJSONObject: json))
+        // A fixture that does not serialize reads as nothing, and its assertion fails.
+        ClaudeTranscript.read((try? JSONSerialization.data(withJSONObject: json)) ?? Data())
     }
 
     /// Shapes as Claude Code 2.1.296 wrote them in a live interactive session on 2026-10-11.
@@ -75,8 +76,10 @@ final class ClaudeInteractiveTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             .resolvingSymlinksInPath()
         let repo = root.appendingPathComponent("repo")
-        try FileManager.default.createDirectory(at: repo.appendingPathComponent(".git"), withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: repo.appendingPathComponent("sub"), withIntermediateDirectories: true)
+        for folder in [".git", "sub"] {
+            try FileManager.default.createDirectory(at: repo.appendingPathComponent(folder),
+                                                    withIntermediateDirectories: true)
+        }
         try FileManager.default.createDirectory(at: root.appendingPathComponent("plain"),
                                                 withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }

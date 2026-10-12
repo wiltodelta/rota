@@ -40,7 +40,7 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
             self.openPrompts += 1
             let params: [String: Any] = ["sessionId": sessionID, "prompt": [["type": "text", "text": message]]]
             self.peer?.request("session/prompt", params) { result in
-                self.queue.async { self.promptEnded(result, isRoutine: false) }
+                self.promptEnded(result, isRoutine: false)
             }
         }
     }
@@ -66,14 +66,15 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         }
         self.process = process
         let peer = JSONRPCPeer(transport: LineTransport(input: stdin.fileHandleForWriting,
-                                                        output: stdout.fileHandleForReading))
-        peer.onNotification = { [weak self] method, params in self?.queue.async { self?.handle(method, params) } }
+                                                        output: stdout.fileHandleForReading),
+                               callbackQueue: queue)
+        peer.onNotification = { [weak self] method, params in self?.handle(method, params) }
         peer.onRequest = { method, params in Self.answer(method, params) }
-        peer.onClose = { [weak self] in self?.queue.async { self?.journal.finish(.interrupted) } }
+        peer.onClose = { [weak self] in self?.journal.finish(.interrupted) }
         self.peer = peer
         let hello: [String: Any] = ["protocolVersion": 1, "clientCapabilities": [String: Any]()]
         peer.request("initialize", hello) { [weak self] result in
-            self?.queue.async { self?.initialized(result) }
+            self?.initialized(result)
         }
         if let timeout = spec.timeout {
             queue.asyncAfter(deadline: .now() + timeout) { [weak self] in self?.cancel(as: .timedOut) }
@@ -105,15 +106,13 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
             params["sessionId"] = session
             loading = true
             peer?.request("session/load", params) { [weak self] result in
-                self?.queue.async {
-                    self?.loading = false
-                    guard case .success = result else { return self?.fail(result, "session/load") ?? () }
-                    self?.sessionReady(session)
-                }
+                self?.loading = false
+                guard case .success = result else { return self?.fail(result, "session/load") ?? () }
+                self?.sessionReady(session)
             }
         } else {
             peer?.request("session/new", params) { [weak self] result in
-                self?.queue.async { self?.sessionCreated(result) }
+                self?.sessionCreated(result)
             }
         }
     }
@@ -134,7 +133,7 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         let params: [String: Any] = ["sessionId": id, "prompt": [["type": "text", "text": spec.prompt]]]
         openPrompts += 1
         peer?.request("session/prompt", params) { [weak self] result in
-            self?.queue.async { self?.promptEnded(result, isRoutine: true) }
+            self?.promptEnded(result, isRoutine: true)
         }
     }
 

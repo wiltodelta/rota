@@ -4,11 +4,12 @@ import RotaCore
 import UserNotifications
 
 /// Posts a macOS notification when a run fails, and on success when asked to.
+@MainActor
 final class Notifier: NSObject, RunNotifying, UNUserNotificationCenterDelegate {
-    private static let log = Logger(subsystem: "com.wiltodelta.rota", category: "notifications")
+    nonisolated private static let log = Logger(subsystem: "com.wiltodelta.rota", category: "notifications")
     var notifyOnSuccess: () -> Bool = { false }
-    private static let sessionKey = "session"
-    private static let routineKey = "routine"
+    nonisolated private static let sessionKey = "session"
+    nonisolated private static let routineKey = "routine"
     /// Opens what a clicked notification is about.
     var open: (SidebarItem) -> Void = { _ in }
     /// Sends what the user typed into a notification's Reply field to its session.
@@ -86,14 +87,14 @@ final class Notifier: NSObject, RunNotifying, UNUserNotificationCenterDelegate {
         Self.log.info("Notified from \(record?.routineID ?? "outside a routine", privacy: .public)")
     }
 
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler([.banner, .sound])
     }
 
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {

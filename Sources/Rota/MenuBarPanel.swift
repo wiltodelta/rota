@@ -1,6 +1,9 @@
 import AppKit
 import SwiftUI
 
+// twin: menu-bar-panel - watch-me-sleep and rota keep this file identical
+// except lines marked twin-local (claude-config bin/check-twins.py).
+
 /// Borderless panel that can take key focus so the hosted SwiftUI controls
 /// (buttons, the Return/Escape default actions) work.
 public final class MenuBarPanelWindow: NSPanel {
@@ -126,6 +129,7 @@ final class PanelHostController: NSViewController {
 /// click outside) without the dated triangular arrow that `NSPopover` always
 /// draws. The content is a SwiftUI view hosted in a rounded, material-backed
 /// borderless window.
+@MainActor
 public final class MenuBarPanelController {
     private let panel: MenuBarPanelWindow
     private weak var anchorButton: NSStatusBarButton?
@@ -223,8 +227,10 @@ public final class MenuBarPanelController {
             object: panel,
             queue: .main
         ) { [weak self] _ in
-            guard let self, let topLeft = self.anchorTopLeft else { return }
-            self.panel.setFrameOrigin(NSPoint(x: topLeft.x, y: topLeft.y - self.panel.frame.height))
+            MainActor.assumeIsolated {
+                guard let self, let topLeft = self.anchorTopLeft else { return }
+                self.panel.setFrameOrigin(NSPoint(x: topLeft.x, y: topLeft.y - self.panel.frame.height))
+            }
         }
     }
 

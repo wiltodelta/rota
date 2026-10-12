@@ -4,7 +4,7 @@ import Foundation
 /// one that failed on a network error or while offline, and one still open when
 /// the Mac shut down or Rota stopped. Once the Mac is online and the agent's
 /// service answers (`ServiceProbe`), a run with a session continues in it (the
-/// agent gets "Continue.", which the chat does not show), and an agent run that
+/// agent gets "Continue", shown in the chat like any message), and an agent run that
 /// failed on the network before it had a session runs again. Scheduled slots
 /// wait for the network too (`tick`). Shell commands are never run twice behind
 /// the user's back; each run continues, and each routine reruns, twice at most.
@@ -13,8 +13,8 @@ extension Scheduler {
     /// How long a run cut off waits before asking the service again.
     public static let retryDelay: TimeInterval = 60
 
-    /// What the agent gets to pick the work back up; the chat does not show it.
-    public static let resumeMessage = "Continue."
+    /// What the agent gets to pick the work back up, shown in the chat where the session went on.
+    public static let resumeMessage = "Continue"
 
     /// The Mac is about to sleep: the runs going now may be cut off by it.
     public func systemWillSleep() {
@@ -84,7 +84,7 @@ extension Scheduler {
                 else { return }
                 record.resumes = (record.resumes ?? 0) + 1
                 Self.log.info("Continuing \(routineID, privacy: .public) after an interruption")
-                self.continueSession(record, with: Self.resumeMessage, quietly: true)
+                self.continueSession(record, with: Self.resumeMessage)
             }
         }
         for (routineID, trigger) in pendingReruns {

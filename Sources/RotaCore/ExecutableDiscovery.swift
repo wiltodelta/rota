@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// An installed copy of a harness CLI, as the settings list it.
 public struct InstalledExecutable: Hashable, Identifiable, Sendable {
@@ -61,13 +62,13 @@ public enum ExecutableDiscovery {
 
     static func installed(_ harness: Harness, in directories: [String]) -> [InstalledExecutable] {
         let paths = find(harness.commandName, in: directories)
-        var versions = [String: String]()
-        let lock = NSLock()
+        let versions = OSAllocatedUnfairLock(initialState: [String: String]())
         DispatchQueue.concurrentPerform(iterations: paths.count) { index in
             let found = version(of: paths[index])
-            lock.withLock { versions[paths[index]] = found }
+            versions.withLock { $0[paths[index]] = found }
         }
-        return paths.map { InstalledExecutable(path: $0, version: versions[$0]) }
+        let found = versions.withLock { $0 }
+        return paths.map { InstalledExecutable(path: $0, version: found[$0]) }
     }
 
     /// The first line of `path --version`, given five seconds.

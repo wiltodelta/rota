@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import os
 
+@MainActor
 public protocol RunNotifying {
     func runEnded(_ record: RunRecord, routine: Routine)
     /// The routine was turned off after failing `failures` times in a row.
@@ -292,16 +293,14 @@ public final class Scheduler {
         return (program ?? executable(record.harness), arguments)
     }
 
-    func continueSession(_ record: RunRecord, with message: String, quietly: Bool = false) {
+    func continueSession(_ record: RunRecord, with message: String) {
         guard let routine = routine(record.routineID), let session = record.sessionID,
               let logPath = record.logPath else { return }
         var record = record
         record.outcome = .running
         record.endedAt = nil
-        var spec = spec(for: routine, record: record, harness: record.harness, prompt: message,
-                        log: URL(fileURLWithPath: logPath), resume: session)
-        spec.quietPrompt = quietly
-        start(record, spec: spec)
+        start(record, spec: spec(for: routine, record: record, harness: record.harness, prompt: message,
+                                 log: URL(fileURLWithPath: logPath), resume: session))
     }
 
     private func attachSession(_ session: String, to routineID: String) {

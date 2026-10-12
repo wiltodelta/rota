@@ -202,8 +202,8 @@ flowchart LR
   from the agent's API host (the Mac can report a network before DNS or a
   captive portal lets anything through); otherwise it asks again after
   `retryDelay` (60 s). A resume is continued in
-  its session with `resumeMessage` ("Continue.", kept out of the chat by
-  `LaunchSpec.quietPrompt`) once online, at most `resumeLimit` (2) times
+  its session with `resumeMessage` ("Continue", shown in the chat as a
+  message) once online, at most `resumeLimit` (2) times
   per run (`RunRecord.resumes`). An interactive Claude whose screen session is
   still up (Rota crashed, Claude did not) is left alone, and shell commands are
   never rerun. On `willPowerOff` the app quits without its confirmation, so

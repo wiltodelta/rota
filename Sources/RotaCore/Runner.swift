@@ -21,8 +21,6 @@ public struct LaunchSpec: Equatable, Sendable {
     public var effort: String?
     /// A note the log opens with, such as why a Claude run is not interactive.
     public var notice: String?
-    /// The prompt is Rota's own nudge, kept out of the chat: a cut-off session's "Continue."
-    public var quietPrompt = false
 
     public init(executable: String, prompt: String, arguments: [String], workingDirectory: String,
                 environment: [String: String], mode: LaunchMode, timeout: TimeInterval?, log: URL,
@@ -114,7 +112,7 @@ public final class ProcessLauncher: RoutineLaunching {
         }
         let output = try FileHandle(forWritingTo: spec.log)
         output.seekToEndOfFile()
-        if !spec.quietPrompt { output.write(Data((Transcript.userLines(spec.prompt) + "\n").utf8)) }
+        output.write(Data((Transcript.userLines(spec.prompt) + "\n").utf8))
         Self.log.info("Starting \(spec.executable, privacy: .public) in \(spec.workingDirectory, privacy: .public)")
         let journal = RunJournal(output: output, events: events)
         switch spec.mode {

@@ -17,71 +17,76 @@ struct MCPServer {
         ["type": type, "description": description]
     }
 
-    private static let id = property("string", "The routine's id, such as weekly-report.")
-    private static let session = property("string", "A session id; the latest session when left out.")
-    private static let fields: [String: [String: Any]] = [
-        "id": id,
-        "name": property("string", "A title for people; the id when left out."),
-        "workingDirectory": property("string", "The project folder the routine runs in, an absolute path."),
-        "schedule": property("string",
+    // Built per call: a stdio CLI answers a handful of requests, and the tables hold
+    // JSON values (`[String: Any]`) that are not Sendable as stored statics.
+    static var tools: [Tool] {
+        let id = property("string", "The routine's id, such as weekly-report.")
+        let session = property("string", "A session id; the latest session when left out.")
+        let fields: [String: [String: Any]] = [
+            "id": id,
+            "name": property("string", "A title for people; the id when left out."),
+            "workingDirectory": property("string", "The project folder the routine runs in, an absolute path."),
+            "schedule": property("string",
                              "Five-field cron in the Mac's local time, such as \"0 9 * * 1-5\" for weekdays at 9:00."),
-        "harness": property("string", "Where it runs: claude (Claude Code), codex, grok (Grok Build) or shell "
-                                + "(a zsh command).").merging(["enum": Harness.allCases.map(\.rawValue)]) { $1 },
-        "prompt": property("string", "What the agent is asked each run, or the command for shell."),
-        "skill": property("string",
+            "harness": property("string", "Where it runs: claude (Claude Code), codex, grok (Grok Build) or shell "
+                                    + "(a zsh command).").merging(["enum": Harness.allCases.map(\.rawValue)]) { $1 },
+            "prompt": property("string", "What the agent is asked each run, or the command for shell."),
+            "skill": property("string",
                           "A project skill in .claude/skills/<skill>/SKILL.md; writes the usual prompt that runs it."),
-        "model": property(["string", "null"], "A model the harness's CLI lists; null for its default."),
-        "effort": property(["string", "null"],
-                           "Reasoning effort, such as low, medium or high; null for the model's default."),
-        "timeLimitMinutes": property(["integer", "null"], "Stop a run after this many minutes; null (the default) "
-                                         + "lets it take as long as it needs."),
-        "enabled": property("boolean", "Whether it runs on its schedule. New routines are on unless this is false.")
-    ]
+            "model": property(["string", "null"], "A model the harness's CLI lists; null for its default."),
+            "effort": property(["string", "null"],
+                               "Reasoning effort, such as low, medium or high; null for the model's default."),
+            "timeLimitMinutes": property(["integer", "null"], "Stop a run after this many minutes; null (the default) "
+                                             + "lets it take as long as it needs."),
+            "enabled": property("boolean", "Whether it runs on its schedule. New routines are on unless this is false.")
+        ]
 
-    static let tools: [Tool] = [
-        Tool(name: "list_routines", method: "routines.list",
-             description: "List Rota's scheduled routines with their schedules, harness, state and latest session.",
-             properties: [:], required: []),
-        Tool(name: "get_routine", method: "routines.get", description: "Show one routine.",
-             properties: ["id": id], required: ["id"]),
-        Tool(name: "create_routine", method: "routines.create",
+        return [
+            Tool(name: "list_routines", method: "routines.list",
+                 description: "List Rota's scheduled routines with their schedules, harness, state and latest session.",
+                 properties: [:], required: []),
+            Tool(name: "get_routine", method: "routines.get", description: "Show one routine.",
+                 properties: ["id": id], required: ["id"]),
+            Tool(name: "create_routine", method: "routines.create",
              description: "Schedule a new routine in Rota. It runs unattended on its schedule with approvals bypassed, "
-                + "and Rota notifies the user that an agent added it. Give a prompt or a skill.",
-             properties: fields, required: ["id", "workingDirectory", "schedule"]),
-        Tool(name: "update_routine", method: "routines.update",
-             description: "Change a routine; only the fields given change.", properties: fields, required: ["id"]),
-        Tool(name: "set_routine_enabled", method: "routines.setEnabled", description: "Turn a routine on or off.",
-             properties: ["id": id, "enabled": fields["enabled"]!], required: ["id", "enabled"]),
-        Tool(name: "run_routine", method: "routines.run", description: "Start a run of a routine now.",
-             properties: ["id": id], required: ["id"]),
-        Tool(name: "stop_routine", method: "routines.stop", description: "Stop a routine's running session.",
-             properties: ["id": id], required: ["id"]),
-        Tool(name: "delete_routine", method: "routines.delete",
-             description: "Delete a routine and its session history. Ask the user first.",
-             properties: ["id": id], required: ["id"]),
-        Tool(name: "list_sessions", method: "sessions.list", description: "A routine's recent sessions, newest first.",
-             properties: ["id": id, "limit": property("integer", "How many; 10 by default.")],
-             required: ["id"]),
-        Tool(name: "read_session", method: "sessions.read",
-             description: "A session's chat log: [you] lines are the prompt and messages, -> lines tools, "
-                + "the rest the agent.",
-             properties: ["id": id, "session": session,
-                          "limit": property("integer", "Characters from the end; 20000 by default.")],
-             required: ["id"]),
-        Tool(name: "notify_user", method: "notify",
-             description: "Show the user a Mac notification from Rota. Inside a routine it opens this session; set "
-                + "needsReply when the user has to answer or confirm something, and the session stays marked until "
-                + "they reply in its chat.",
+                    + "and Rota notifies the user that an agent added it. Give a prompt or a skill.",
+                 properties: fields, required: ["id", "workingDirectory", "schedule"]),
+            Tool(name: "update_routine", method: "routines.update",
+                 description: "Change a routine; only the fields given change.", properties: fields, required: ["id"]),
+            Tool(name: "set_routine_enabled", method: "routines.setEnabled", description: "Turn a routine on or off.",
+                 properties: ["id": id, "enabled": fields["enabled"]!], required: ["id", "enabled"]),
+            Tool(name: "run_routine", method: "routines.run", description: "Start a run of a routine now.",
+                 properties: ["id": id], required: ["id"]),
+            Tool(name: "stop_routine", method: "routines.stop", description: "Stop a routine's running session.",
+                 properties: ["id": id], required: ["id"]),
+            Tool(name: "delete_routine", method: "routines.delete",
+                 description: "Delete a routine and its session history. Ask the user first.",
+                 properties: ["id": id], required: ["id"]),
+            Tool(name: "list_sessions", method: "sessions.list",
+                 description: "A routine's recent sessions, newest first.",
+                 properties: ["id": id, "limit": property("integer", "How many; 10 by default.")],
+                 required: ["id"]),
+            Tool(name: "read_session", method: "sessions.read",
+                 description: "A session's chat log: [you] lines are the prompt and messages, -> lines tools, "
+                    + "the rest the agent.",
+                 properties: ["id": id, "session": session,
+                              "limit": property("integer", "Characters from the end; 20000 by default.")],
+                 required: ["id"]),
+            Tool(name: "notify_user", method: "notify",
+                 description: "Show the user a Mac notification from Rota. Inside a routine it opens this session; set "
+                    + "needsReply when the user has to answer or confirm something, and the session stays marked until "
+                    + "they reply in its chat.",
              properties: ["message": property("string", "What the user should know or decide, in a sentence or two."),
-                          "title": property("string", "A short title; the routine's name when left out."),
-                          "needsReply": property("boolean", "The session waits for the user's answer.")],
-             required: ["message"]),
-        Tool(name: "message_session", method: "sessions.message",
-             description: "Send a message to a routine's session: it joins a running turn, or continues "
-                + "a finished session.",
-             properties: ["id": id, "session": session, "text": property("string", "The message.")],
-             required: ["id", "text"])
-    ]
+                              "title": property("string", "A short title; the routine's name when left out."),
+                              "needsReply": property("boolean", "The session waits for the user's answer.")],
+                 required: ["message"]),
+            Tool(name: "message_session", method: "sessions.message",
+                 description: "Send a message to a routine's session: it joins a running turn, or continues "
+                    + "a finished session.",
+                 properties: ["id": id, "session": session, "text": property("string", "The message.")],
+                 required: ["id", "text"])
+        ]
+    }
 
     func serve() {
         while let line = readLine(strippingNewline: true) {

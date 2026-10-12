@@ -61,10 +61,13 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
                 handle.readabilityHandler = nil
                 return
             }
-            self?.queue.async { self?.consume(data) }
+            guard let self else { return }
+            self.queue.async { self.consume(data) }
         }
         process.terminationHandler = { [weak self] finished in
-            self?.queue.async { self?.exited(status: finished.terminationStatus) }
+            guard let self else { return }
+            let status = finished.terminationStatus
+            self.queue.async { self.exited(status: status) }
         }
         try process.run()
         self.process = process

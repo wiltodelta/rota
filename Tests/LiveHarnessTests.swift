@@ -10,7 +10,8 @@ final class LiveHarnessTests: XCTestCase {
 
     override func setUpWithError() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["ROTA_LIVE"] == "1", "set ROTA_LIVE=1 to run")
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("rota-live-\(UUID().uuidString.prefix(6))")
+        folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rota-live-\(UUID().uuidString.prefix(6))")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     }
 
@@ -29,9 +30,10 @@ final class LiveHarnessTests: XCTestCase {
                               workingDirectory: workingDirectory, environment: [:], mode: harness.launchMode,
                               timeout: timeout, log: log, resume: resume, model: model, effort: effort)
         let ended = expectation(description: "run ended")
-        var outcome: RunOutcome?
-        var session: String?
-        var control: RunControl?
+        // Written by the run's callbacks and read after `wait`, which orders the two.
+        nonisolated(unsafe) var outcome: RunOutcome?
+        nonisolated(unsafe) var session: String?
+        nonisolated(unsafe) var control: RunControl?
         let events = RunEvents(session: { id in
             session = id
             if let stopAfter {
@@ -163,7 +165,8 @@ final class LiveHarnessTests: XCTestCase {
                 Thread.sleep(forTimeInterval: 0.5)
             }
             let ran = try String(contentsOf: marker, encoding: .utf8)
-            let handler = try XCTUnwrap(TerminalLauncher.defaultTerminal().flatMap { Bundle(url: $0)?.bundleIdentifier })
+            let handler = try XCTUnwrap(TerminalLauncher.defaultTerminal()
+                .flatMap { Bundle(url: $0)?.bundleIdentifier })
             let want = expected[terminal ?? KnownTerminal(rawValue: handler) ?? .terminal]
             print("\(terminal?.title ?? "default") ran the script in \(ran)")
             XCTAssertEqual(ran, want, terminal?.title ?? "default")

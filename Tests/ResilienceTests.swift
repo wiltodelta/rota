@@ -36,7 +36,8 @@ final class ResilienceTests: XCTestCase {
     }
 
     private func makeScheduler(alive: Bool = false) -> Scheduler {
-        let scheduler = Scheduler(location: StorageLocation(root: directory, logs: directory.appendingPathComponent("logs")),
+        let scheduler = Scheduler(location: StorageLocation(root: directory,
+                                                   logs: directory.appendingPathComponent("logs")),
                                   launcher: launcher)
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC")!
@@ -86,7 +87,6 @@ final class ResilienceTests: XCTestCase {
         XCTAssertEqual(launcher.specs.count, 2)
         XCTAssertEqual(launcher.specs.last?.resume, "thread-1")
         XCTAssertEqual(launcher.specs.last?.prompt, Scheduler.resumeMessage)
-        XCTAssertEqual(launcher.specs.last?.quietPrompt, true, "the chat does not show Rota's nudge")
         XCTAssertEqual(scheduler.active["digest"]?.resumes, 1)
     }
 
@@ -158,7 +158,6 @@ final class ResilienceTests: XCTestCase {
         scheduler.networkBecameAvailable()
         XCTAssertEqual(launcher.specs.count, 2)
         XCTAssertEqual(launcher.specs.last?.resume, "thread-1")
-        XCTAssertEqual(launcher.specs.last?.quietPrompt, true)
     }
 
     func testARunThatFailedOnTheNetworkBeforeItsSessionRunsAgain() throws {

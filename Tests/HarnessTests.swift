@@ -301,7 +301,7 @@ final class ModelChoiceTests: XCTestCase {
         XCTAssertNil(defaulted.first?.timeLimitMinutes)
         // A routine saved by this version round-trips without the old key.
         let saved = try JSONEncoder().encode(defaulted)
-        XCTAssertFalse(String(decoding: saved, as: UTF8.self).contains("timeoutMinutes"))
+        XCTAssertFalse(String(bytes: saved, encoding: .utf8)?.contains("timeoutMinutes") ?? true)
     }
 }
 
@@ -474,7 +474,8 @@ final class TranscriptTurnTests: XCTestCase {
     }
 
     func testAShellRunIsItsOutput() {
-        let turns = TranscriptTurn.group(Transcript.parse("[you] echo hi\nhi\n[result: succeeded after 1 s]", shell: true))
+        let log = "[you] echo hi\nhi\n[result: succeeded after 1 s]"
+        let turns = TranscriptTurn.group(Transcript.parse(log, shell: true))
         XCTAssertEqual(turns.count, 1)
         XCTAssertEqual(turns[0].answer.map(\.kind), [.output])
         XCTAssertEqual(turns[0].work, [])
@@ -520,6 +521,7 @@ final class PlanTests: XCTestCase {
     }
 
     func testClaudeTodoWriteBecomesAPlan() {
+        // swiftlint:disable:next line_length
         let event = #"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"Fix the link","status":"in_progress","activeForm":"Fixing"}]}}]}}"#
         let lines = StreamJSONFormatter.format(event) ?? ""
         let item = Transcript.parse(lines).first

@@ -66,12 +66,13 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         }
         proxy = process
         let peer = JSONRPCPeer(transport: WebSocketTransport(input: stdin.fileHandleForWriting,
-                                                             output: stdout.fileHandleForReading))
-        peer.onNotification = { [weak self] method, params in self?.queue.async { self?.handle(method, params) } }
-        peer.onClose = { [weak self] in self?.queue.async { self?.journal.finish(.interrupted) } }
+                                                             output: stdout.fileHandleForReading),
+                               callbackQueue: queue)
+        peer.onNotification = { [weak self] method, params in self?.handle(method, params) }
+        peer.onClose = { [weak self] in self?.journal.finish(.interrupted) }
         self.peer = peer
         peer.request("initialize", ["clientInfo": ["name": "rota", "version": "1"]]) { [weak self] result in
-            self?.queue.async { self?.initialized(result) }
+            self?.initialized(result)
         }
         if let timeout = spec.timeout {
             queue.asyncAfter(deadline: .now() + timeout) { [weak self] in self?.interrupt(as: .timedOut) }
@@ -91,7 +92,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         let method = spec.resume == nil ? "thread/start" : "thread/resume"
         if let thread = spec.resume { params["threadId"] = thread }
         peer?.request(method, params) { [weak self] result in
-            self?.queue.async { self?.threadStarted(result) }
+            self?.threadStarted(result)
         }
     }
 
@@ -118,13 +119,11 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         if let model = spec.model { params["model"] = model }
         if let effort = spec.effort { params["effort"] = effort }
         peer?.request("turn/start", params) { [weak self] result in
-            self?.queue.async {
-                guard case .success(let value) = result,
-                      let turn = (value as? [String: Any])?["turn"] as? [String: Any] else {
-                    return self?.fail(result, "turn/start") ?? ()
-                }
-                self?.turnID = turn["id"] as? String
+            guard case .success(let value) = result,
+                  let turn = (value as? [String: Any])?["turn"] as? [String: Any] else {
+                return self?.fail(result, "turn/start") ?? ()
             }
+            self?.turnID = turn["id"] as? String
         }
     }
 

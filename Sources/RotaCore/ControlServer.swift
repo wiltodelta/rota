@@ -114,17 +114,18 @@ public final class ControlServer: @unchecked Sendable {
               let method = request["method"] as? String else {
             return reply(["error": ["message": "Not a JSON request with a method."]], to: client)
         }
-        let id = request["id"] ?? NSNull()
-        let params = request["params"] as? [String: Any] ?? [:]
+        let boxed = UncheckedSendable(request)
         DispatchQueue.main.async { [handler] in
-            let result = MainActor.assumeIsolated { handler(method, params) }
+            let id = boxed.value["id"] ?? NSNull()
+            let result = handler(method, boxed.value["params"] as? [String: Any] ?? [:])
             let response: [String: Any]
             switch result {
             case .success(let value): response = ["id": id, "result": value]
             case .failure(let error): response = ["id": id, "error": ["message": error.message]]
             }
             Self.log.info("\(method, privacy: .public): \(error(result), privacy: .public)")
-            self.queue.async { self.reply(response, to: client) }
+            let reply = UncheckedSendable(response)
+            self.queue.async { self.reply(reply.value, to: client) }
         }
     }
 

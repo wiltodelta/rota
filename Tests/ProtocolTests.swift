@@ -13,6 +13,27 @@ private final class LoopbackTransport: MessageTransport {
 }
 
 final class JSONRPCPeerTests: XCTestCase {
+    func testRepliesAndNotificationsArriveOnTheCallbackQueue() {
+        let transport = LoopbackTransport()
+        let queue = DispatchQueue(label: "rota.test.callbacks")
+        let key = DispatchSpecificKey<Bool>()
+        queue.setSpecific(key: key, value: true)
+        let peer = JSONRPCPeer(transport: transport, callbackQueue: queue)
+        let replied = expectation(description: "reply on the queue")
+        let notified = expectation(description: "notification on the queue")
+        peer.request("ping", [:]) { _ in
+            XCTAssertEqual(DispatchQueue.getSpecific(key: key), true)
+            replied.fulfill()
+        }
+        peer.onNotification = { _, _ in
+            XCTAssertEqual(DispatchQueue.getSpecific(key: key), true)
+            notified.fulfill()
+        }
+        transport.deliver(#"{"jsonrpc":"2.0","id":1,"result":{}}"#)
+        transport.deliver(#"{"jsonrpc":"2.0","method":"update","params":{}}"#)
+        wait(for: [replied, notified], timeout: 2)
+    }
+
     func testRequestGetsItsOwnReply() {
         let transport = LoopbackTransport()
         let peer = JSONRPCPeer(transport: transport)
@@ -59,7 +80,9 @@ final class WebSocketFrameTests: XCTestCase {
             let payload = Data((0..<count).map { UInt8($0 % 251) })
             let frame = WebSocketTransport.frame(payload, opcode: 0x1)
             XCTAssertEqual(frame[1] & 0x80, 0x80, "client frames are masked")
-            let parsedFrame = try XCTUnwrap(WebSocketTransport.parse(frame)); let (opcode, final, parsed, length) = (parsedFrame.opcode, parsedFrame.final, parsedFrame.payload, parsedFrame.length)
+            let parsedFrame = try XCTUnwrap(WebSocketTransport.parse(frame))
+            let (opcode, final, parsed, length) = (parsedFrame.opcode, parsedFrame.final, parsedFrame.payload,
+                                                   parsedFrame.length)
             XCTAssertEqual(opcode, 0x1)
             XCTAssertTrue(final)
             XCTAssertEqual(parsed, payload, "length \(count)")
@@ -75,7 +98,8 @@ final class WebSocketFrameTests: XCTestCase {
 
     func testUnmaskedServerFrame() throws {
         let frame = Data([0x81, 0x02]) + Data("hi".utf8)
-        let parsedFrame = try XCTUnwrap(WebSocketTransport.parse(frame + Data([0x81]))); let (opcode, payload, length) = (parsedFrame.opcode, parsedFrame.payload, parsedFrame.length)
+        let parsedFrame = try XCTUnwrap(WebSocketTransport.parse(frame + Data([0x81])))
+        let (opcode, payload, length) = (parsedFrame.opcode, parsedFrame.payload, parsedFrame.length)
         XCTAssertEqual(opcode, 0x1)
         XCTAssertEqual(payload, Data("hi".utf8))
         XCTAssertEqual(length, 4)
@@ -89,7 +113,8 @@ final class LiveRunPieceTests: XCTestCase {
         let answer = GrokACPRun.answer("session/request_permission", params) as? [String: Any]
         XCTAssertEqual((answer?["outcome"] as? [String: Any])?["optionId"] as? String, "yes")
         XCTAssertNil(GrokACPRun.answer("fs/read_text_file", [:]))
-        XCTAssertNil(GrokACPRun.answer("session/request_permission", ["options": [["optionId": "no", "kind": "reject_once"]]]))
+        XCTAssertNil(GrokACPRun.answer("session/request_permission",
+                                       ["options": [["optionId": "no", "kind": "reject_once"]]]))
     }
 
     func testCodexItemDescriptions() {
@@ -115,7 +140,8 @@ final class LiveRunPieceTests: XCTestCase {
         process.standardOutput = FileHandle.nullDevice
         try process.run()
         process.waitUntilExit()
-        XCTAssertEqual(try String(contentsOf: exitFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), "4")
+        let status = try String(contentsOf: exitFile, encoding: .utf8)
+        XCTAssertEqual(status.trimmingCharacters(in: .whitespacesAndNewlines), "4")
         let text = try String(contentsOf: log, encoding: .utf8)
         XCTAssertTrue(text.contains("oops"))
         XCTAssertTrue(text.contains("in /"), text)

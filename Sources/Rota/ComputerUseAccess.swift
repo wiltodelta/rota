@@ -18,7 +18,8 @@ struct ComputerUseAccess: Equatable {
 
     static func requestAccessibility() {
         // macOS's prompt offers its settings pane itself.
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        // The value of kAXTrustedCheckOptionPrompt, a C global Swift 6 treats as mutable.
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
     }
 
