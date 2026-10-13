@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Settings in toolbar tabs: General, Chat, Agents and Integrations.
+/// Settings in toolbar tabs: General, Chat, Agents, Integrations and Browsers.
 /// The window takes each tab's height and remembers the last tab.
 final class SettingsTabController: NSTabViewController {
     private static let lastTab = "settingsTab"
@@ -15,6 +15,7 @@ final class SettingsTabController: NSTabViewController {
         add(ChatSettings(), label: "Chat", symbol: "textformat.size", model: model)
         add(AgentSettings(), label: "Agents", symbol: "terminal", model: model)
         add(IntegrationSettings(), label: "Integrations", symbol: "puzzlepiece.extension", model: model)
+        add(BrowserConnectionSettings(), label: "Browsers", symbol: "globe", model: model)
         selectedTabViewItemIndex = min(max(remembered, 0), tabViewItems.count - 1)
         recordsSelection = true
     }

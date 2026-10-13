@@ -195,6 +195,39 @@ window opens when you choose it or check from Settings.
 Pushing an annotated `vX.Y.Z` tag builds, notarizes and publishes a release
 with the Sparkle appcast. Details: [`docs/build-and-release.md`](docs/build-and-release.md).
 
+### Browser and computer use checks
+
+Settings > Browsers checks Chrome and native Browser Use separately for each
+agent. Choose the project folder and click **Check Connection**. The check uses
+the CLI selected in Agents and the harness's existing settings. It reads browser
+inventories, with a two-minute limit, without changing permissions, accounts or
+tabs. It uses a short agent session and may spend quota. Results show the last
+check time for this app session; changing the folder or CLI invalidates them.
+A successful native tool result confirms the connection. **Not confirmed** is
+not proof that a tool is absent. **Open Check Log** provides the tool errors.
+External and isolated Playwright results do not confirm a native connection.
+
+
+After `./create-app.sh`, run `python3 scripts/capability-check.py --live` to probe
+Claude Code, Codex and Grok Build serially through the signed development app.
+It spends quota and requires the development app to be closed first. Use
+`--harness codex` to select one provider, or `--folder /path/to/trusted/project`
+to use that project's existing configuration. It preserves harness defaults and
+never grants permissions or changes tool settings.
+
+The browser probe reads a fresh DOM challenge on a loopback page. The computer
+probe requires an image returned by a native desktop tool; a browser screenshot
+does not count. A provider's success message or a successful process exit is
+insufficient. Missing evidence remains `unverified`, with the provider's own
+blocker reported separately. Exit 1 means at least one capability was not proven.
+Private journals, a JSON report and provider session IDs are retained in the
+reported temporary directory for diagnosis; screenshots can contain private
+content. The check closes only its own app process and asks agents to close
+only their own tabs. Shared provider daemons remain running.
+
+Test the evidence checker without starting agents:
+`python3 -m unittest discover -s scripts/tests -v`.
+
 ## Uninstall
 
 Quit Rota from the panel, move **Rota.app** to the Trash, and remove its data:

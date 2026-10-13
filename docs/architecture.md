@@ -380,3 +380,45 @@ row's 8 pt inset and up or down as far as the list (a pinned section header
 floats over the rows). Every
 capture runs it. `choose` reads the pop-up back and retries,
 because SwiftUI can redraw the form while its menu is open and drop the pick.
+
+### Browser and desktop diagnostics
+
+`scripts/capability-check.py --live` probes installed harness capabilities through
+the signed development app, with isolated disabled routines and a loopback
+browser fixture. It preserves provider defaults. The ordinary test gate runs
+only the deterministic evidence checks through `CapabilityCheckTests`. Browser
+proof requires the fresh DOM value in a browser tool result; desktop proof
+requires a native tool's PNG image or JPEG with nonzero dimensions, separately
+from browser screenshots.
+Unsupported image formats or opaque wrappers remain unverified. Provider claims
+are retained separately from the checker's verdict.
+
+macOS attributes child browser-profile access to the responsible application.
+Development and production Rota have separate bundle identities and permissions;
+a successful Terminal run or a shared helper started elsewhere does not prove
+that a freshly started Rota child can read Chrome's profile. A driver's missing
+`DevToolsActivePort` error can conceal a read-permission denial. Check existence
+and readability inside the failing harness and inspect the responsible bundle's
+TCC decision before attributing the failure to Chrome configuration. The live
+check never changes grants, accounts or browser settings.
+
+Settings > Browsers uses `ToolConnectionChecks` and `ToolConnectionEvidence` to
+launch a user-requested, read-only inventory check through `ProcessLauncher`.
+It respects the selected executable, project folder and Claude launch mode,
+and leaves model, effort and permission settings at their provider defaults.
+Results are scoped to that launch context and kept for the current app session.
+An explicit provider permission request stops the check. Native Chrome/CUA tool
+results establish connection; prose, discovery and external Playwright do not.
+Each check has a two-minute limit and a private log under `connection-checks`
+in the app's log folder. No scheduler registration is created.
+
+Connection status, timestamps and check details use primary text so small text
+remains readable in inactive settings windows in both appearances.
+
+Codex's native browser helper resolves `CODEX_CLI_PATH` independently from the
+ordinary node REPL and the Unified Computer Use plugin's MCP environment. A
+missing executable produces an app-server spawn error even when browser
+discovery succeeds. Inspect the running helper's environment, not only the
+config file. The shared daemon can cache plugin settings until a safe restart.
+Chrome identity in native `listTabs` results comes from the provider's
+`codex/toolSurface.browserFamily`, rather than numeric browser IDs.
