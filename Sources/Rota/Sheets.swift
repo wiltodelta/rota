@@ -4,6 +4,7 @@ import SwiftUI
 /// Lists the routines other apps schedule, by source, and copies the chosen
 /// ones into Rota, turned off.
 struct ImportSheet: View {
+    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var scans: [ImportScan]?
@@ -12,10 +13,10 @@ struct ImportSheet: View {
     @State private var harness: Harness?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Import Routines").font(.headline)
+        VStack(alignment: .leading, spacing: metrics(12)) {
+            Text("Import Routines").scaledFont(.headline)
             Text("Rota copies the routines you pick from other apps, turned off.")
-                .font(.callout)
+                .scaledFont(.callout)
                 .foregroundStyle(Color.secondaryText)
             if let scans {
                 List {
@@ -31,12 +32,12 @@ struct ImportSheet: View {
                         }
                     }
                 }
-                .frame(minHeight: 180, idealHeight: 360)
+                .frame(minHeight: metrics(180), idealHeight: metrics.sheetHeight(360))
             } else {
                 ProgressView("Looking for routines\u{2026}")
-                    .frame(maxWidth: .infinity, minHeight: 180)
+                    .frame(maxWidth: .infinity, minHeight: metrics(180))
             }
-            Picker("Run on", selection: $harness) {
+            InterfacePicker("Run on", value: harness?.title ?? "The same agent as in its app", selection: $harness) {
                 Text("The same agent as in its app").tag(Harness?.none)
                 Divider()
                 ForEach(Harness.agents) { Text($0.title).tag(Optional($0)) }
@@ -49,23 +50,24 @@ struct ImportSheet: View {
                       : "\(stillOn) of them are still on in their apps. Turn them off there before turning "
                         + "them on here, or both apps will run them.",
                       systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout)
+                    .scaledFont(.callout)
                     .foregroundStyle(Color.warningText)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack {
-                Spacer()
+            HStack(spacing: metrics(8)) {
+                Spacer(minLength: metrics(8))
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button(chosen.isEmpty ? "Import" : "Import \(chosen.count) Routine\(chosen.count == 1 ? "" : "s")") {
                     importChosen()
                 }
                 .keyboardShortcut(.defaultAction)
+                .buttonStyle(InterfaceButtonStyle(prominent: true))
                 .disabled(chosen.isEmpty)
             }
         }
-        .padding(20)
-        .frame(width: 600)
+        .padding(metrics(20))
+        .frame(width: metrics.sheetWidth(600))
         .task {
             let found = await Task.detached(priority: .userInitiated) { RoutineImport.scanAll() }.value
             scans = found
@@ -83,15 +85,15 @@ struct ImportSheet: View {
     private func sectionHeader(_ scan: ImportScan) -> some View {
         let ids = importable(scan)
         let all = !ids.isEmpty && Set(ids).isSubset(of: chosen)
-        return HStack {
+        return HStack(spacing: metrics(8)) {
             Text(scan.source.title)
-            Spacer()
+            Spacer(minLength: metrics(8))
             if !ids.isEmpty {
                 Button(all ? "Select None" : "Select All") {
                     if all { chosen.subtract(ids) } else { chosen.formUnion(ids) }
                 }
                 .buttonStyle(.link)
-                .font(.callout)
+                .scaledFont(.callout)
             }
         }
     }
@@ -118,6 +120,7 @@ struct ImportSheet: View {
 /// One importable routine: its name, schedule in words, folder, and whether it
 /// is still on in its app, already in Rota, or cannot be imported.
 private struct ImportRow: View {
+    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     let candidate: ImportCandidate
     @Binding var chosen: Set<String>
@@ -128,15 +131,15 @@ private struct ImportRow: View {
             get: { chosen.contains(candidate.id) },
             set: { if $0 { chosen.insert(candidate.id) } else { chosen.remove(candidate.id) } }
         )) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: metrics(8)) {
+                VStack(alignment: .leading, spacing: metrics(2)) {
                     Text(candidate.routine.name)
-                    Text(detail).font(.caption).foregroundStyle(Color.secondaryText)
+                    Text(detail).scaledFont(.caption).foregroundStyle(Color.secondaryText)
                     if let reason = candidate.unsupported {
-                        Text(reason).font(.caption).foregroundStyle(Color.errorText)
+                        Text(reason).scaledFont(.caption).foregroundStyle(Color.errorText)
                     }
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: metrics(8))
                 if inRota {
                     Tag(text: "In Rota", color: Color.secondaryText)
                 } else if candidate.onInSource {
@@ -159,20 +162,22 @@ private struct ImportRow: View {
 
 /// A small capsule label for a row's state.
 private struct Tag: View {
+    @Environment(\.interfaceMetrics) private var metrics
     let text: String
     let color: Color
 
     var body: some View {
         Text(text)
-            .font(.caption)
+            .scaledFont(.caption)
             .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
+            .padding(.horizontal, metrics(6))
+            .padding(.vertical, metrics(2))
             .background(color.opacity(0.12), in: Capsule())
     }
 }
 
 struct NewRoutineSheet: View {
+    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     // A routine made here runs on its schedule from the start; only imports start off.
@@ -198,12 +203,14 @@ struct NewRoutineSheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .accessibilityIdentifier("addRoutine")
+                .buttonStyle(InterfaceButtonStyle(prominent: true))
                 .disabled(problem != nil || identifierTaken)
             }
         }
         // Fits the window at its minimum height; the form scrolls inside.
-        .frame(width: 560)
-        .frame(minHeight: 360, idealHeight: 520)
+        .frame(width: metrics.sheetWidth(560))
+        .frame(minHeight: metrics.sheetHeight(360),
+               idealHeight: metrics.sheetHeight(520))
         .onChange(of: draft.id) { fillPrompt() }
         .onChange(of: draft.workingDirectory) { fillPrompt() }
     }
@@ -221,33 +228,35 @@ struct NewRoutineSheet: View {
 
 /// A sheet's title above its form, as the import sheet has.
 struct SheetTitle: View {
+    @Environment(\.interfaceMetrics) private var metrics
     let text: String
 
     var body: some View {
         Text(text)
-            .font(.headline)
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
+            .scaledFont(.headline)
+            .padding(.horizontal, metrics(20))
+            .padding(.top, metrics(18))
     }
 }
 
 /// A sheet's button row, with what still keeps it from saving on the left.
 struct SheetButtons<Buttons: View>: View {
+    @Environment(\.interfaceMetrics) private var metrics
     let problem: String?
     @ViewBuilder let buttons: Buttons
 
     var body: some View {
-        HStack {
+        HStack(spacing: metrics(8)) {
             if let problem {
                 Text(problem)
-                    .font(.callout)
+                    .scaledFont(.callout)
                     .foregroundStyle(Color.secondaryText)
                     .lineLimit(2)
                     .accessibilityIdentifier("sheetProblem")
             }
-            Spacer(minLength: 12)
+            Spacer(minLength: metrics(12))
             buttons
         }
-        .padding(16)
+        .padding(metrics(16))
     }
 }

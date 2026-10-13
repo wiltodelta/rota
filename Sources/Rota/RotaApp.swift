@@ -31,16 +31,11 @@ struct RotaApp: App {
                 }
             }
             RoutineCommands()
-            // Chat text size, as chat apps and browsers do it.
+            // App zoom and chat text size have independent shortcuts.
             CommandGroup(after: .toolbar) {
                 SidebarToggleCommand()
                 Divider()
-                Button("Bigger") { AppModel.shared.chatText.bigger() }
-                    .keyboardShortcut("+")
-                Button("Smaller") { AppModel.shared.chatText.smaller() }
-                    .keyboardShortcut("-")
-                Button("Actual Size") { AppModel.shared.chatText.reset() }
-                    .keyboardShortcut("0")
+                ZoomMenuItems()
             }
             CommandGroup(replacing: .help) {
                 Button("Rota Help") {
@@ -115,6 +110,7 @@ final class AppModel {
     }
     let settings = AppSettings()
     let chatText = ChatTextSettings()
+    let appZoom = AppZoomSettings()
     private let notifier = Notifier()
     @ObservationIgnored var openMainWindow: () -> Void = {}
     @ObservationIgnored var openSettingsWindow: () -> Void = {}
@@ -176,6 +172,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return
         }
         NSApp.setActivationPolicy(.accessory)
+        for name in [NSMenu.didBeginTrackingNotification, NSMenu.didAddItemNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(separateFullScreenMenuItem(_:)),
+                                                   name: name, object: nil)
+        }
         NSWindow.allowsAutomaticWindowTabbing = false
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -185,8 +185,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             addShowMenuAction(to: button)
         }
-        panel = MenuBarPanelController(rootView: MenuBarContent().environment(model),
-                                       size: NSSize(width: 340, height: 300))
+        panel = MenuBarPanelController(rootView: MenuBarContent().appZoom().environment(model),
+                                       size: NSSize(width: 340 * model.appZoom.scale, height: 300))
+        observePanelZoom()
         model.openMainWindow = { [weak self] in self?.showMainWindow() }
         model.openSettingsWindow = { [weak self] in self?.showSettingsWindow() }
         observeStatus()
@@ -197,6 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         startControlServer()
         if model.scheduler.routines.isEmpty { showMainWindow() }
         // Development hooks: open settings, or the panel, where a capture script can find them.
+        if ProcessInfo.processInfo.environment["ROTA_OPEN_MAIN"] != nil { showMainWindow() }
         if ProcessInfo.processInfo.environment["ROTA_OPEN_SETTINGS"] != nil { showSettingsWindow() }
         if ProcessInfo.processInfo.environment["ROTA_OPEN_PANEL"] != nil, let screen = NSScreen.main {
             panel.show(topLeft: NSPoint(x: screen.visibleFrame.midX - 170, y: screen.visibleFrame.maxY - 40))
@@ -223,6 +225,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             Logger(subsystem: "com.wiltodelta.rota", category: "control")
                 .error("Control socket failed: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    @objc private func separateFullScreenMenuItem(_ notification: Notification) {
+        if let menu = NSApp.mainMenu { FullScreenMenuSeparator.update(menu) }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -363,6 +369,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: Windows
 
+    private func observePanelZoom() {
+        withObservationTracking {
+            _ = model.appZoom.percent
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let shown = self.panel.isShown
+                self.panel.close()
+                let width = min(340 * self.model.appZoom.scale,
+                                (NSScreen.main?.visibleFrame.width ?? 1024) - 16)
+                self.panel = MenuBarPanelController(rootView: MenuBarContent().appZoom().environment(self.model),
+                                                    size: NSSize(width: width, height: 300))
+                if shown, let button = self.statusItem.button { self.panel.show(relativeTo: button) }
+                self.observePanelZoom()
+            }
+        }
+    }
+
     private func showMainWindow() {
         panel.close()
         if mainWindow == nil {
@@ -374,7 +398,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.tabbingMode = .disallowed
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
             window.toolbarStyle = .unified
-            window.setContentSize(NSSize(width: 1040, height: 680))
+            let environment = ProcessInfo.processInfo.environment
+            let width = environment["ROTA_WINDOW_WIDTH"].flatMap(Double.init) ?? 1040
+            let height = environment["ROTA_WINDOW_HEIGHT"].flatMap(Double.init) ?? 680
+            window.setContentSize(NSSize(width: max(820, width), height: max(520, height)))
             window.contentMinSize = NSSize(width: 820, height: 520)
             window.isReleasedWhenClosed = false
             window.delegate = self

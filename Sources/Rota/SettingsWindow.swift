@@ -24,7 +24,7 @@ final class SettingsTabController: NSTabViewController {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     private func add(_ view: some View, label: String, symbol: String, model: AppModel) {
-        let hosting = NSHostingController(rootView: view.environment(model))
+        let hosting = NSHostingController(rootView: view.appZoom().environment(model))
         // The hosting view reports its SwiftUI height, which sizes the window per tab.
         hosting.sizingOptions = [.preferredContentSize]
         // The tab controller copies the selected child's title to the window.

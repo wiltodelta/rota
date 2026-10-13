@@ -5,6 +5,9 @@ import AppKit
 final class TranscriptScrollView: NSScrollView, NSTextViewDelegate {
     private var firstUpdate = true
     var activityToggled: ((Int) -> Void)?
+    var interfaceScale: Double = 1 {
+        didSet { if oldValue != interfaceScale { fitText() } }
+    }
 
     let transcript: NSTextView
 
@@ -47,13 +50,22 @@ final class TranscriptScrollView: NSScrollView, NSTextViewDelegate {
         guard let text = documentView as? NSTextView, let container = text.textContainer,
               let layout = text.layoutManager else { return }
         let width = contentSize.width
-        let inset = min(width / 4, max(24, (width - 712) / 2))
-        text.textContainerInset = NSSize(width: inset, height: 20)
+        let inset = min(width / 4, max(24 * interfaceScale, (width - 712 * interfaceScale) / 2))
+        text.textContainerInset = NSSize(width: inset, height: 20 * interfaceScale)
         container.containerSize = NSSize(width: max(1, width - 2 * inset), height: CGFloat.greatestFiniteMagnitude)
         layout.ensureLayout(for: container)
         let size = NSSize(width: width,
-                          height: max(contentSize.height, layout.usedRect(for: container).maxY + 40))
+                          height: max(contentSize.height, layout.usedRect(for: container).maxY + 40 * interfaceScale))
         if text.frame.size != size { text.setFrameSize(size) }
+        scrollViewport(to: contentView.bounds.origin)
+    }
+
+    /// A resized document can no longer contain the old scroll point.
+    private func scrollViewport(to origin: NSPoint) {
+        var bounds = contentView.bounds
+        bounds.origin = origin
+        contentView.scroll(to: contentView.constrainBoundsRect(bounds).origin)
+        reflectScrolledClipView(contentView)
     }
 
     func update(_ document: NSAttributedString) {
@@ -68,11 +80,10 @@ final class TranscriptScrollView: NSScrollView, NSTextViewDelegate {
         let translate = Self.selectionTranslation(replacing: old, with: document.string)
         transcript.selectedRanges = ranges.map { NSValue(range: translate($0)) }
         if follow {
-            contentView.scroll(to: NSPoint(x: 0, y: max(0, transcript.frame.height - contentSize.height)))
+            scrollViewport(to: NSPoint(x: 0, y: max(0, transcript.frame.height - contentSize.height)))
         } else {
-            contentView.scroll(to: origin)
+            scrollViewport(to: origin)
         }
-        reflectScrolledClipView(contentView)
         firstUpdate = false
     }
 

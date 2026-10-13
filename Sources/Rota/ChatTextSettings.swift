@@ -2,12 +2,15 @@ import AppKit
 import SwiftUI
 
 /// The chat's text: one family for messages, a monospaced one for commands and
-/// output, and one size both follow. The sidebar and forms keep the system's.
+/// output, and one base size both follow. App zoom scales this and the system
+/// sizes used by the sidebar and forms independently of this preference.
 @MainActor
 @Observable
 final class ChatTextSettings {
-    static let sizes: ClosedRange<Double> = 10...28
     static let defaultSize: Double = 14
+    static let scales: ClosedRange<Double> = 0.5...2
+    /// Stored size is relative to app zoom, so it can compensate at either limit.
+    static let sizes: ClosedRange<Double> = (defaultSize * 0.25)...(defaultSize * 4)
 
     private let defaults: UserDefaults
 
@@ -23,7 +26,7 @@ final class ChatTextSettings {
 
     var size: Double {
         didSet {
-            let clamped = min(max(size, Self.sizes.lowerBound), Self.sizes.upperBound)
+            let clamped = Self.normalize(size)
             if clamped != size { size = clamped }
             defaults.set(size, forKey: "chatFontSize")
         }
@@ -34,23 +37,36 @@ final class ChatTextSettings {
         family = defaults.string(forKey: "chatFontFamily") ?? ""
         codeFamily = defaults.string(forKey: "chatCodeFontFamily") ?? ""
         let stored = defaults.double(forKey: "chatFontSize")
-        size = stored == 0 ? Self.defaultSize : stored
+        size = Self.normalize(stored == 0 ? Self.defaultSize : stored)
     }
 
-    var body: Font { font(family, size: size) }
-    var code: Font { codeFont(size: size * 0.9) }
-    var small: Font { font(family, size: size * 0.82) }
+    func body(scale: Double) -> Font { font(family, size: effectiveSize(appScale: scale)) }
+    func code(scale: Double) -> Font { codeFont(size: effectiveSize(appScale: scale) * 0.9) }
 
-    /// A heading's size steps down from 1.35 times the body for `#` to the body size.
-    func heading(level: Int) -> Font {
-        let scale = [1.35, 1.2, 1.1, 1.0, 1.0, 1.0][min(max(level, 1), 6) - 1]
-        return font(family, size: size * scale).weight(.semibold)
+    func effectiveScale(appScale: Double) -> Double {
+        min(max(size / Self.defaultSize * appScale, Self.scales.lowerBound), Self.scales.upperBound)
     }
-    var smallCode: Font { codeFont(size: size * 0.82) }
 
-    func bigger() { size += 1 }
-    func smaller() { size -= 1 }
-    func reset() { size = Self.defaultSize }
+    func effectiveSize(appScale: Double) -> Double { Self.defaultSize * effectiveScale(appScale: appScale) }
+
+    func canIncrease(appScale: Double) -> Bool { effectiveScale(appScale: appScale) < Self.scales.upperBound - 1e-7 }
+    func canDecrease(appScale: Double) -> Bool { effectiveScale(appScale: appScale) > Self.scales.lowerBound + 1e-7 }
+
+    func bigger(appScale: Double = 1) { adjust(1, appScale: appScale) }
+    func smaller(appScale: Double = 1) { adjust(-1, appScale: appScale) }
+    func reset(appScale: Double = 1) { size = Self.defaultSize / appScale }
+
+    private func adjust(_ direction: Double, appScale: Double) {
+        let current = effectiveScale(appScale: appScale)
+        let next = current + direction * 0.1 * appScale
+        let bounded = min(max(next, Self.scales.lowerBound), Self.scales.upperBound)
+        guard abs(bounded - current) > 1e-7 else { return }
+        size = Self.defaultSize * bounded / appScale
+    }
+
+    private static func normalize(_ value: Double) -> Double {
+        value.isFinite ? min(max(value, sizes.lowerBound), sizes.upperBound) : defaultSize
+    }
 
     private func font(_ family: String, size: Double) -> Font {
         family.isEmpty ? .system(size: size) : .custom(family, size: size)

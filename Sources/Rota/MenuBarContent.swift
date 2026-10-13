@@ -3,6 +3,7 @@ import RotaCore
 import SwiftUI
 
 struct MenuBarContent: View {
+    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
 
     private var routines: [Routine] {
@@ -18,20 +19,21 @@ struct MenuBarContent: View {
                 Text("No routines yet")
                     .foregroundStyle(Color.secondaryText)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
+                    .padding(.vertical, metrics(20))
             } else {
                 // Rows at their own height; a ScrollView only once they would not
                 // fit, because one is greedy and stretched the panel to its limit.
-                let rows = VStack(spacing: 2) {
+                let rows = VStack(spacing: metrics(2)) {
                     ForEach(routines) { routine in
                         MenuRoutineRow(routine: routine) {
                             model.showMainWindow(selecting: model.latest(of: routine.id))
                         }
                     }
                 }
-                .padding(6)
-                if routines.count > 9 {
-                    ScrollView { rows }.frame(height: 420)
+                .padding(metrics(6))
+                if routines.count > max(1, Int(9 / metrics.scale)) {
+                    ScrollView { rows }
+                        .frame(height: min(metrics(420), (NSScreen.main?.visibleFrame.height ?? 800) - metrics(180)))
                 } else {
                     rows
                 }
@@ -53,7 +55,7 @@ struct MenuBarContent: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.borderless)
-                .padding(10)
+                .padding(metrics(10))
                 .help("Open the newest session waiting for you")
                 .accessibilityIdentifier("panelNeedsReply")
             }
@@ -68,44 +70,45 @@ struct MenuBarContent: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.borderless)
-                .padding(10)
+                .padding(metrics(10))
                 .help("Open the newest unread session")
             }
             if let version = Updater.shared.pendingVersion {
                 Divider()
                 Button { Updater.shared.checkForUpdates() } label: {
-                    HStack {
+                    HStack(spacing: metrics(8)) {
                         Label("Install Update\u{2026}", systemImage: "arrow.down.circle")
-                        Spacer()
+                        Spacer(minLength: metrics(8))
                         Text("Version \(version) is available").foregroundStyle(Color.secondaryText)
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
-                .padding(10)
+                .padding(metrics(10))
             }
             Divider()
-            HStack(spacing: 16) {
+            HStack(spacing: metrics(16)) {
                 // Opens a window, so the title ends with an ellipsis (HIG).
                 Button { model.showSettings() } label: {
-                    Label("Settings\u{2026}", systemImage: "gearshape").footerTarget()
+                    Label("Settings\u{2026}", systemImage: "gearshape").interfaceFooterTarget()
                 }
-                Button { model.showMainWindow() } label: { Text("Open Rota").footerTarget() }
-                Spacer()
-                Button { NSApp.terminate(nil) } label: { Text("Quit").footerTarget() }
+                Button { model.showMainWindow() } label: { Text("Open Rota").interfaceFooterTarget() }
+                Spacer(minLength: metrics(8))
+                Button { NSApp.terminate(nil) } label: { Text("Quit").interfaceFooterTarget() }
                     .help("Quit Rota")
             }
             .buttonStyle(.plain)
             .foregroundStyle(Color.secondaryText)
-            .font(.callout)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
+            .scaledFont(.callout)
+            .padding(.horizontal, metrics(10))
+            .padding(.vertical, metrics(4))
         }
-        .frame(width: 340)
+        .frame(width: min(metrics(340), (NSScreen.main?.visibleFrame.width ?? 1024) - 16))
     }
 }
 
 private struct MenuRoutineRow: View {
+    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     let routine: Routine
     let open: () -> Void
@@ -120,16 +123,16 @@ private struct MenuRoutineRow: View {
                 model.scheduler.run(routine, trigger: .manual)
             }
         }
-        HStack(spacing: 8) {
+        HStack(spacing: metrics(8)) {
             StatusDot(routine: routine)
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: metrics(1)) {
                 Text(routine.name).lineLimit(1)
                 Text(subtitle(running: running))
-                    .font(.caption)
+                    .scaledFont(.caption)
                     .foregroundStyle(Color.secondaryText)
                     .lineLimit(1)
             }
-            Spacer(minLength: 4)
+            Spacer(minLength: metrics(4))
             if hovering {
                 Button(action: toggleRun) {
                     Image(systemName: running ? "stop.fill" : "play.fill")
@@ -138,9 +141,9 @@ private struct MenuRoutineRow: View {
                 .help(running ? "Stop" : "Run now")
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(hovering ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        .padding(.horizontal, metrics(8))
+        .padding(.vertical, metrics(5))
+        .background(hovering ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: metrics(6)))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture(perform: open)
@@ -170,6 +173,7 @@ private struct MenuRoutineRow: View {
 
 /// Running, last run failed, last run fine, or off.
 struct StatusDot: View {
+    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     let routine: Routine
 
@@ -178,7 +182,7 @@ struct StatusDot: View {
         let last = Self.lastRun(of: routine, in: model.scheduler)
         Circle()
             .fill(color(last))
-            .frame(width: 8, height: 8)
+            .frame(width: metrics(8), height: metrics(8))
             .accessibilityLabel(Self.status(of: routine, in: model.scheduler, last: last))
     }
 

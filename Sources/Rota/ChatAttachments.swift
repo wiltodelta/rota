@@ -32,39 +32,40 @@ enum AttachmentPreview {
 
 /// The composer's retained selection; removing a chip never deletes the user's file.
 struct ChatAttachmentStrip: View {
+    @Environment(\.interfaceMetrics) private var metrics
     let files: [ChatAttachment]
     let remove: (String) -> Void
 
     var body: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 8) {
+            HStack(spacing: metrics(8)) {
                 ForEach(files) { file in
-                    HStack(spacing: 8) {
+                    HStack(spacing: metrics(8)) {
                         if let image = AttachmentPreview.image(file, pixels: 128) {
                             Image(nsImage: image).resizable().scaledToFit()
-                                .frame(width: 48, height: 48)
+                                .frame(width: metrics(48), height: metrics(48))
                                 .accessibilityLabel("Preview of " + file.name)
                         } else {
-                            Image(systemName: "doc").font(.system(size: 24))
-                                .frame(width: 32, height: 48)
+                            Image(systemName: "doc").scaledFont(size: 24)
+                                .frame(width: metrics(32), height: metrics(48))
                         }
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(file.name).font(.callout).lineLimit(1)
+                        VStack(alignment: .leading, spacing: metrics(3)) {
+                            Text(file.name).scaledFont(.callout).lineLimit(1)
                             Text(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file))
-                                .font(.caption).foregroundStyle(Color.secondaryText)
+                                .scaledFont(.caption).foregroundStyle(Color.secondaryText)
                         }
-                        .frame(maxWidth: 140, alignment: .leading)
+                        .frame(maxWidth: metrics(140), alignment: .leading)
                         Button { remove(file.id) } label: {
                             Image(systemName: "xmark")
-                                .frame(width: 28, height: 28)
+                                .frame(width: metrics.target(28), height: metrics.target(28))
                                 .contentShape(Rectangle())
                         }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Remove " + file.name)
                             .accessibilityIdentifier("removeAttachment-" + file.id)
                     }
-                    .padding(8)
-                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                    .padding(metrics(8))
+                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: metrics(10)))
                     .help(file.name)
                 }
             }

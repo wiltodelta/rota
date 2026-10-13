@@ -3,28 +3,32 @@ import SwiftUI
 
 /// A live provider request. Choices are never submitted by opening the session.
 struct SessionRequestView: View {
+    @Environment(\.interfaceMetrics) private var metrics
     let request: SessionRequest
     let reply: (SessionResponse) -> Void
     @State private var answers: [String: String] = [:]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(request.title).font(.headline)
+        VStack(alignment: .leading, spacing: metrics(12)) {
+            Text(request.title).scaledFont(.headline)
             if !request.detail.isEmpty {
                 ScrollView {
-                    Text(request.detail).font(.callout).textSelection(.enabled)
+                    Text(request.detail).scaledFont(.callout).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 110)
+                .frame(maxHeight: metrics(110))
             }
             if !request.questions.isEmpty {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: metrics(12)) {
             ForEach(request.questions) { question in
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(question.title).font(.callout)
+                VStack(alignment: .leading, spacing: metrics(6)) {
+                    Text(question.title).scaledFont(.callout)
                     if !question.options.isEmpty && !question.multiple {
-                        Picker("Choose an answer", selection: answer(question.id)) {
+                        InterfacePicker("Choose an answer",
+                                        value: answers[question.id, default: ""].isEmpty
+                                        ? "Choose…" : answers[question.id, default: ""],
+                                        selection: answer(question.id)) {
                             Text("Choose…").tag("")
                             ForEach(question.options, id: \.self) { Text($0).tag($0) }
                         }
@@ -33,12 +37,12 @@ struct SessionRequestView: View {
                         ForEach(question.options, id: \.self) { option in
                             Toggle(option, isOn: selected(question.id, option: option)).toggleStyle(.checkbox)
                             if let description = question.descriptions[option] {
-                                Text(description).font(.caption)
+                                Text(description).scaledFont(.caption)
                             }
                         }
                     }
                     if let explanation = question.descriptions[answers[question.id, default: ""]] {
-                        Text(explanation).font(.caption)
+                        Text(explanation).scaledFont(.caption)
                     }
                     if question.allowsText {
                         if question.secret { SecureField("Answer", text: answer(question.id)) } else {
@@ -49,16 +53,16 @@ struct SessionRequestView: View {
             }
                     }
                 }
-                .frame(maxHeight: 180)
+                .frame(maxHeight: metrics(180))
             }
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { buttons }
-                VStack(alignment: .leading, spacing: 8) { buttons }
+                HStack(spacing: metrics(8)) { buttons }
+                VStack(alignment: .leading, spacing: metrics(8)) { buttons }
             }
         }
-        .padding(16)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
-        .padding(12)
+        .padding(metrics(16))
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: metrics(12)))
+        .padding(metrics(12))
     }
 
     private var buttons: some View {

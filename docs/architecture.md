@@ -36,7 +36,12 @@ flowchart LR
   `LaunchSpec.modelFlags`, Codex fields in `thread/start` and `turn/start`. A
   session continued on a harness the routine has since left runs without them. `ModelCatalog` lists the choices without
   spending quota: Codex `model/list` with each model's efforts, `grok models`,
-  and Claude's family aliases (it has no list). Each runner writes the model
+  and Claude's stream-json `initialize` control response (`models`). Claude
+  choices show the CLI's versioned display names and model-specific efforts;
+  family aliases keep their original IDs, and older versions use explicit IDs.
+  Initialization sends no user prompt, disables hooks and MCP, and persists no
+  session. An unavailable catalog is shown as unavailable, never replaced with
+  a hardcoded model list; a saved selection remains intact. Each runner writes the model
   the CLI actually picked into its log header. A Grok model passed on the
   command line in leader mode left `grok models`' default untouched (live test,
   2026-10-09); Grok's agent-mode guide says a `session/set_config_option`
@@ -258,7 +263,14 @@ flowchart LR
   directory. Continuations reuse it even after routine edits, with legacy
   records adopting it on their next continuation. Reported model/effort update
   `RunRecord.metadata` and each new response's label without rewriting earlier
-  responses. Event-save failures are retained in `RunRecord.eventError` and
+  responses. The composer shows the harness and a readable model name, using
+  the reported model first, then the launch snapshot, and routine settings only
+  for legacy records without a snapshot. Catalog titles take priority; Claude
+  versioned IDs display as names such as Opus 5.5, with the original ID in a
+  tooltip. Unknown ID formats remain intact. The label may wrap to two lines at large
+  zoom instead of squeezing the Send or Stop control. Claude ID formatting
+  follows the [documented version scheme](https://platform.claude.com/docs/en/models/model-ids-and-versions).
+  Event-save failures are retained in `RunRecord.eventError` and
   shown in the session; the readable log remains available.
 - Legacy sessions and shell output still use `Transcript.parse` over the
   readable log. Before an old agent session continues, its full readable
@@ -325,9 +337,74 @@ Glass rules), and the main and settings windows as `NSWindow`s around
 back to `.accessory` when the last one closes. Window tabbing is off. The
 File menu holds New Routine and Import, the Routine menu Run Now, Stop and
 Edit Routine for `AppModel.selectedRoutine`; sheets open from `AppModel`
-flags so menus and buttons share them. `ChatTextSettings` holds the chat's font family, monospaced family and size in
-UserDefaults; only the chat and its composer follow them, the sidebar and
-forms keep the system's sizes. `ChatOpener` writes a `.command` file, which needs no Automation permission,
+flags so menus and buttons share them. `ChatTextSettings` saves font families
+and a base point size relative to app scale, keeping earlier point-size
+preferences compatible. `AppZoomSettings` saves 50–200% app scale, normalized
+in 10 percentage point steps, with Command-=, Command-Minus and Command-0
+(reset to 100%) in View. Chat text has its own Option-Command variants. Its
+rendered scale is `clamp(appScale * baseSize / 14, 0.5, 2)`, so the default
+14 pt body stays within 7–28 pt. Each chat step adds or subtracts
+`0.1 * appScale` to that effective scale, then stores the result divided by
+app scale. A chat reset restores an effective 14 pt and leaves app scale
+alone; changing app scale preserves the saved relative chat preference.
+`ZoomMenuItems` observes the preferences in a view so shortcut availability
+updates without reopening the menu. Increase and decrease are disabled at
+their effective limits. Settings > General shows app zoom, and Settings > Chat
+shows effective chat text size. Both use percentages with minus, plus and reset
+controls; their explanations distinguish interface scaling from text-only changes.
+`InterfaceTypography` resizes system font descriptors before drawing;
+`scaledFont` applies the coefficient to body, headline, callout, caption and
+explicit point sizes. Window content, settings, sheets and the menu bar panel
+use real fonts and reflow naturally. `InterfaceMetrics` scales spacing, padding,
+status dots, logos, card radii, outlines, editor heights and column widths.
+Content button geometry scales continuously, with a 20 pt minimum hit target;
+`InterfacePicker` draws selected values and chevrons in scaled points while
+using an AppKit button and `NSHostingMenu` with an inline picker for selection
+and checkmarks. The button exposes a native popup accessibility role and sizes
+its actual font and symbol, without hiding a control behind an overlay. Native
+switches use macOS control-size variants. Settings and the
+menu bar panel grow with app scale. Sheets are bounded by the parent window,
+and settings by the visible screen; their forms scroll before reaching those
+bounds. The split view preserves room for the detail at the 820 pt minimum
+window width instead of forcing a wider window. Transcript margins, list
+indents and paragraph spacing follow app scale independently of chat font size.
+Native transcript fonts and the composer use the same bounded effective chat
+size. No view or bitmap is stretched, so text draws at the display's native
+resolution. The system's menu rows and window chrome retain their native sizes.
+Native toolbar symbols use real scaled system fonts, with a 10 pt minimum,
+inside regular borderless controls. Content styles stay inside the split-view
+panes instead of propagating to the native toolbar. On macOS 26, shared toolbar
+backgrounds are hidden
+to prevent nested bezels. `FullScreenMenuSeparator` adds a visible native
+separator before AppKit's full-screen command; a trailing SwiftUI divider
+can disappear before AppKit appends that command.
+After transcript resizing, the scroll origin is constrained to the document
+with `NSClipView.constrainBoundsRect`, preserving visible text and selection.
+Typography keeps distinct roles: sidebar names use the system body style,
+metadata uses caption, and section headings use headline. Forms and supporting
+information retain system fonts; chat prose and code have separately chosen
+families, with code at 90% of the chat body size. App zoom preserves these
+relationships, while chat text size changes the transcript and composer
+without enlarging navigation. There is no separate sidebar font preference.
+The interaction follows the editor pattern: [VS Code separates window zoom
+from editor font size](https://code.visualstudio.com/docs/editing/getting-started/tips-and-tricks),
+and [IntelliJ IDEA applies IDE zoom to all UI elements](https://www.jetbrains.com/help/idea/ide-zoom-level.html)
+while keeping [editor font preferences separate](https://www.jetbrains.com/help/idea/configuring-colors-and-fonts.html).
+Their steps are not a common standard; Rota keeps the requested super.engineering
+steps and shortcuts. The reference comparison, evidence boundaries and the
+two-control decision are in [interface-scaling.md](interface-scaling.md).
+[WCAG Resize Text](https://www.w3.org/WAI/WCAG21/Understanding/resize-text)
+is a usability benchmark here: doubling text must preserve content and actions,
+including at intermediate scales. This is not a claim of WCAG conformance.
+For repeatable captures, `ROTA_OPEN_MAIN=1` opens the main window and
+`ROTA_WINDOW_WIDTH` / `ROTA_WINDOW_HEIGHT` choose its initial size, bounded
+below by the normal minimum. Use a separate development bundle and data folder.
+Verify main content at 820 pt in both appearances at 50%, 100% and 200%;
+also check sheets, settings, native menu selection, focus, hit targets and
+selection preservation. Use point geometry and real fonts instead of magnifying
+a rendered surface, matching [AppKit's high-resolution rendering model](https://developer.apple.com/library/archive/documentation/GraphicsAnimation/Conceptual/HighResolutionOSX/Introduction/Introduction.html).
+
+`ChatOpener` writes a `.command` file, which needs no Automation permission,
 and `TerminalLauncher` opens it in the terminal picked in Settings: Terminal,
 iTerm2 or another app as a document, Ghostty as a new instance with `-e`
 (it does not run a script handed to it), or in the macOS default terminal:
@@ -422,3 +499,13 @@ discovery succeeds. Inspect the running helper's environment, not only the
 config file. The shared daemon can cache plugin settings until a safe restart.
 Chrome identity in native `listTabs` results comes from the provider's
 `codex/toolSurface.browserFamily`, rather than numeric browser IDs.
+
+### Composer model-label verification
+
+The readable model label was rendered in the signed development bundle at
+820 pt, in light and dark appearances, at 50%, 100% and 200% app zoom. Native
+bounds kept it inside the composer and clear of Send. At 200%, its two-line
+height was measured and the complete harness and model names were visible.
+The text contrast passed in both appearances. The model-source and formatting
+tests passed; a disposable mutation reverting to the raw ID failed the
+readable-name assertion. No real agent was started for these checks.

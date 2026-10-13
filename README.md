@@ -76,8 +76,16 @@ Desktop.
   bold in the list with a blue dot, counted on the Dock icon and in the menu
   bar panel.
 - **Readable chat text.** Pick the chat's font, a monospaced font for commands
-  and output, and the size in Settings; View > Bigger, Smaller and Actual Size
-  (Command-Plus, Command-Minus, Command-0) change the size as you read.
+  and output, and the size in Settings. View > Increase, Decrease and Reset
+  App Zoom (Command-=, Command-Minus, Command-0) scale interface fonts,
+  spacing, icons and controls proportionally from
+  50% to 200% in 10 percentage point steps, with a reset to 100%. The separate
+  Chat Text Size commands use Option-Command-=, Option-Command-Minus and
+  Option-Command-0. Their effective scale also stays within 50–200%; each step
+  is 10 percentage points multiplied by app scale. Chat reset restores the
+  default 14 pt without resetting the interface. Settings > General controls
+  app zoom, and Settings > Chat controls text size; both show percentages.
+  Both preferences are saved independently.
 - **Agent Markdown as it is meant to read:** headings, lists and code blocks.
 - **Notifications** when a run fails, times out or cannot start, and when a
   missed slot is skipped; click one to open its session. Successes notify too if you ask for it. A routine

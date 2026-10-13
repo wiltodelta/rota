@@ -6,8 +6,10 @@ struct TranscriptStyle {
     let font: NSFont
     let codeFont: NSFont
     let smallFont: NSFont
+    let interfaceScale: Double
 
-    init(family: String, codeFamily: String, size: Double) {
+    init(family: String, codeFamily: String, size: Double, interfaceScale: Double = 1) {
+        self.interfaceScale = interfaceScale
         func font(_ family: String, size: Double, fallback: NSFont) -> NSFont {
             NSFontManager.shared.font(withFamily: family, traits: [], weight: 5, size: size) ?? fallback
         }
@@ -19,9 +21,9 @@ struct TranscriptStyle {
 
     func attributes(code: Bool = false, small: Bool = false, indent: CGFloat = 0) -> [NSAttributedString.Key: Any] {
         let paragraph = NSMutableParagraphStyle()
-        paragraph.paragraphSpacing = (code ? 4 : 8)
-        paragraph.firstLineHeadIndent = indent
-        paragraph.headIndent = indent
+        paragraph.paragraphSpacing = (code ? 4 : 8) * interfaceScale
+        paragraph.firstLineHeadIndent = indent * interfaceScale
+        paragraph.headIndent = indent * interfaceScale
         paragraph.lineBreakMode = .byWordWrapping
         return [.font: code ? codeFont : small ? smallFont : font,
                 .foregroundColor: small ? NSColor.labelColor.withAlphaComponent(0.66) : NSColor.labelColor,

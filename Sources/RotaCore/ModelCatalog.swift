@@ -18,21 +18,16 @@ public struct ModelOption: Hashable, Identifiable, Sendable {
 
 /// The models each harness offers, read from the CLI where it can list them.
 /// Listing spends no quota: Codex answers `model/list` and Grok `grok models`
-/// without a prompt. Claude has no list, so its aliases stand in; each follows
-/// the newest model of its family.
+/// without a prompt. Claude's stream-json initialization lists available models,
+/// their resolved versions and supported efforts, also without a prompt.
 public enum ModelCatalog {
-    /// `claude --help`, 2026-10-09.
-    static let claudeEfforts = ["low", "medium", "high", "xhigh", "max"]
     /// The `reasoning_effort` options of a Grok ACP session, 2026-10-09.
     static let grokEfforts = ["low", "medium", "high", "xhigh"]
 
     /// Blocks while the CLI answers: call it off the main thread.
     public static func models(for harness: Harness, executable: String) -> [ModelOption] {
         switch harness {
-        case .claude:
-            return ["fable", "opus", "sonnet", "haiku"].map {
-                ModelOption(id: $0, title: $0.prefix(1).uppercased() + $0.dropFirst(), efforts: claudeEfforts)
-            }
+        case .claude: return claudeModels(executable: executable)
         case .codex: return codexModels(executable: executable)
         case .grok: return grokModels(executable: executable)
         case .shell: return []

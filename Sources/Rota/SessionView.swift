@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 /// One session as a chat: the routine's prompt, what the agent said and did,
 /// and the user's messages, with a field to write the next one.
 struct SessionView: View {
+    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
     let routine: Routine
@@ -27,13 +28,13 @@ struct SessionView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
+                .padding(.horizontal, metrics(20))
+                .padding(.vertical, metrics(12))
             Divider()
             if let reason = current.eventError {
                 Label("Could not save session events: " + reason, systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout)
-                    .padding(12)
+                    .scaledFont(.callout)
+                    .padding(metrics(12))
             }
             if let question = current.attention, current.requests?.isEmpty != false {
                 AttentionBanner(text: question, canReply: model.scheduler.canMessage(current)) {
@@ -52,7 +53,7 @@ struct SessionView: View {
                 outbox.append((id, message))
             }
         }
-        .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: min(520, metrics(520)), maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(routine.name)
         .task(id: RefreshKey(record: record.id, running: running, version: model.scheduler.historyVersion)) {
             if readerID != record.id {
@@ -99,16 +100,16 @@ struct SessionView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: metrics(12)) {
+            VStack(alignment: .leading, spacing: metrics(2)) {
                 Text(record.startedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.callout)
+                    .scaledFont(.callout)
                 Text([record.harness.title, record.trigger == .catchUp ? "missed slot, run late" : nil,
                       record.outcome.title].compactMap { $0 }.joined(separator: " \u{00B7} "))
-                    .font(.caption)
+                    .scaledFont(.caption)
                     .foregroundStyle(record.outcome.isFailure ? Color.errorText : Color.secondaryText)
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: metrics(8))
             if let path = record.logPath {
                 Button("Show Log in Finder", systemImage: "folder") {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
@@ -170,6 +171,7 @@ struct SessionView: View {
 /// the live session where the harness allows it, continues a finished session
 /// otherwise, and says where to go when neither works.
 struct Composer: View {
+    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
     let routine: Routine
@@ -191,16 +193,16 @@ struct Composer: View {
                 box
             } else if let note {
                 Text(note)
-                    .font(.callout)
+                    .scaledFont(.callout)
                     .foregroundStyle(Color.secondaryText)
                     .frame(maxWidth: .infinity)
             }
         }
         // The chat's column, so the box lines up with the messages above it.
-        .padding(.horizontal, 24)
-        .padding(.top, 6)
-        .padding(.bottom, 16)
-        .frame(maxWidth: 760)
+        .padding(.horizontal, metrics(24))
+        .padding(.top, metrics(6))
+        .padding(.bottom, metrics(16))
+        .frame(maxWidth: metrics(760))
         .frame(maxWidth: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
         .task(id: record.id) { focused = true }
@@ -225,57 +227,64 @@ struct Composer: View {
     }
 
     private var box: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: metrics(10)) {
             if let failedMessage, text.isEmpty, attachments.isEmpty {
-                HStack(spacing: 8) {
+                HStack(spacing: metrics(8)) {
                     Label("Message not delivered", systemImage: "exclamationmark.triangle.fill")
-                    Spacer(minLength: 8)
+                    Spacer(minLength: metrics(8))
                     Button("Restore Message") {
                         text = failedMessage.text; attachments = failedMessage.attachments; focused = true
                     }
                         .accessibilityIdentifier("restoreMessage")
                 }
-                .font(.callout)
+                .scaledFont(.callout)
             }
             if let attachmentError {
                 Label(attachmentError, systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout).accessibilityIdentifier("attachmentError")
+                    .scaledFont(.callout).accessibilityIdentifier("attachmentError")
             }
             if !attachments.isEmpty {
                 ChatAttachmentStrip(files: attachments) { id in attachments.removeAll { $0.id == id } }
             }
             TextField(placeholder, text: $text, axis: .vertical)
-                .font(model.chatText.body)
+                .font(model.chatText.body(scale: model.appZoom.scale))
                 .lineLimit(2...8)
                 .textFieldStyle(.plain)
                 .focused($focused)
                 .onSubmit(send)
                 .help("\(effect) Return sends, Option-Return starts a new line.")
                 .accessibilityIdentifier("composer")
-            HStack(spacing: 8) {
+            HStack(spacing: metrics(8)) {
                 Button { choosingFiles = true } label: { Image(systemName: "paperclip") }
-                    .frame(width: 28, height: 28)
+                    .frame(width: metrics.target(28), height: metrics.target(28))
                     .help("Attach files and images (up to 10 files, 20 MB each)")
                     .accessibilityLabel("Attach Files…")
                     .accessibilityIdentifier("attachFiles")
-                HStack(spacing: 5) {
+                HStack(spacing: metrics(5)) {
                     HarnessLogo(harness: record.harness)
                     Text(ModelLabel.name(harness: record.harness, routine: routine,
                                          models: model.settings.models, record: record))
+                        .foregroundStyle(Color.primary.opacity(0.82))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .truncationMode(.middle)
+                        .help(ModelLabel.modelID(harness: record.harness, routine: routine, record: record)
+                              ?? record.harness.title)
+                        .accessibilityIdentifier("composerModel")
                     if let effort = record.metadata?.effort ?? record.configuration?.effort {
                         Text(effort.capitalized).foregroundStyle(Color.secondaryText)
                     }
                 }
-                .font(.callout)
+                .scaledFont(.callout)
                 .foregroundStyle(Color.secondaryText)
                 .lineLimit(1)
-                Spacer(minLength: 8)
+                Spacer(minLength: metrics(8))
                 // As super.engineering's: while the session works, its clock, and Stop in Send's
                 // place until there is something to send.
                 if running, let since = model.scheduler.runStartedAt(record) {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         Text(Self.clock(context.date.timeIntervalSince(since)))
-                            .font(.callout).monospacedDigit()
+                            .scaledFont(.callout).monospacedDigit()
                             .foregroundStyle(Color.secondaryText)
                     }
                 }
@@ -295,16 +304,16 @@ struct Composer: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
-        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 20))
+        .padding(.horizontal, metrics(16))
+        .padding(.top, metrics(14))
+        .padding(.bottom, metrics(10))
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: metrics(20)))
         .overlay {
-            RoundedRectangle(cornerRadius: 20)
+            RoundedRectangle(cornerRadius: metrics(20))
                 .strokeBorder(focused ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.08),
-                              lineWidth: focused ? 1.5 : 1)
+                              lineWidth: metrics(focused ? 1.5 : 1))
         }
-        .contentShape(RoundedRectangle(cornerRadius: 20))
+        .contentShape(RoundedRectangle(cornerRadius: metrics(20)))
         .onTapGesture { focused = true }
     }
 
@@ -361,6 +370,7 @@ struct Composer: View {
 
 /// Stop while the session works: a square in a circle, an arc running round it.
 private struct StopRingButton: View {
+    @Environment(\.interfaceMetrics) private var metrics
     let action: () -> Void
 
     var body: some View {
@@ -370,15 +380,15 @@ private struct StopRingButton: View {
                 ZStack {
                     Circle().fill(Color.primary.opacity(0.08))
                     Image(systemName: "stop.fill")
-                        .font(.system(size: 11, weight: .bold))
+                        .scaledFont(size: 11, weight: .bold)
                         .foregroundStyle(Color.errorText)
                     Circle()
                         .trim(from: 0, to: 0.28)
-                        .stroke(Color.orange, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .stroke(Color.orange, style: StrokeStyle(lineWidth: metrics(2), lineCap: .round))
                         .rotationEffect(.degrees(turn * 360))
-                        .padding(1)
+                        .padding(metrics(1))
                 }
-                .frame(width: 28, height: 28)
+                .frame(width: metrics.target(28), height: metrics.target(28))
             }
         }
         .buttonStyle(.plain)
@@ -388,6 +398,7 @@ private struct StopRingButton: View {
 /// A 28 pt circular icon button, as the composer's Send and Stop: filled when
 /// it acts, an outlined circle when it waits, as super.engineering's Send does.
 private struct RoundButton: View {
+    @Environment(\.interfaceMetrics) private var metrics
     let symbol: String
     let filled: Bool
     let fill: Color
@@ -397,9 +408,9 @@ private struct RoundButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .bold))
+                .scaledFont(size: 13, weight: .bold)
                 .foregroundStyle(foreground)
-                .frame(width: 28, height: 28)
+                .frame(width: metrics.target(28), height: metrics.target(28))
                 .background(filled ? fill : .clear, in: Circle())
                 .overlay { if !filled { Circle().strokeBorder(Color.secondary.opacity(0.5)) } }
         }
@@ -411,31 +422,32 @@ private struct RoundButton: View {
 /// A session that takes no message (a command, or one whose routine runs again)
 /// cannot be answered here, so the banner asks for a look and a Done instead.
 private struct AttentionBanner: View {
+    @Environment(\.interfaceMetrics) private var metrics
     let text: String
     let canReply: Bool
     let dismiss: () -> Void
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: metrics(10)) {
             Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(canReply ? "Needs your reply" : "Needs your attention").font(.callout.weight(.semibold))
+            VStack(alignment: .leading, spacing: metrics(2)) {
+                Text(canReply ? "Needs your reply" : "Needs your attention").scaledFont(.callout, weight: .semibold)
                     .accessibilityIdentifier("attentionBanner")
-                Text(text).font(.callout).textSelection(.enabled)
+                Text(text).scaledFont(.callout).textSelection(.enabled)
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: metrics(8))
             Button(canReply ? "Dismiss" : "Done", action: dismiss)
                 .help(canReply ? "Clear the mark without replying" : "Clear the mark")
                 .accessibilityIdentifier("dismissAttention")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, metrics(14))
+        .padding(.vertical, metrics(10))
         // A card inside the column: an edge-to-edge band shows through the translucent sidebar.
-        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: metrics(10)))
         // The chat's column, so the card lines up with the messages under it.
-        .padding(.horizontal, 24)
-        .padding(.top, 12)
-        .frame(maxWidth: 760)
+        .padding(.horizontal, metrics(24))
+        .padding(.top, metrics(12))
+        .frame(maxWidth: metrics(760))
         .frame(maxWidth: .infinity)
     }
 }
@@ -443,6 +455,7 @@ private struct AttentionBanner: View {
 /// A harness's own mark (`HarnessLogos.xcassets`, sources in `docs/harness-logos.md`):
 /// Claude in its orange, the others in the text color; a shell gets the terminal glyph.
 struct HarnessLogo: View {
+    @Environment(\.interfaceMetrics) private var metrics
     let harness: Harness
 
     var body: some View {
@@ -458,7 +471,7 @@ struct HarnessLogo: View {
         }
         .foregroundStyle(harness == .claude ? Color(red: 0xD9 / 255, green: 0x77 / 255, blue: 0x57 / 255)
                          : Color.primary)
-        .frame(width: 14, height: 14)
+        .frame(width: metrics(14), height: metrics(14))
         .accessibilityHidden(true)
     }
 }
