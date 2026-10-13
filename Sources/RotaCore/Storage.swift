@@ -112,7 +112,7 @@ public struct RunHistory: Sendable {
         }
         records.sort { $0.startedAt > $1.startedAt }
         for dropped in records.dropFirst(Self.limit) {
-            if let path = dropped.logPath { try? FileManager.default.removeItem(atPath: path) }
+            if let path = dropped.logPath { removeLog(path) }
         }
         try JSONFile.write(Array(records.prefix(Self.limit)), to: file(for: record.routineID))
     }
@@ -134,9 +134,16 @@ public struct RunHistory: Sendable {
 
     public func removeAll(for routineID: String) {
         for record in records(for: routineID) {
-            if let path = record.logPath { try? FileManager.default.removeItem(atPath: path) }
+            if let path = record.logPath { removeLog(path) }
         }
         try? FileManager.default.removeItem(at: file(for: routineID))
+    }
+
+    private func removeLog(_ path: String) {
+        let log = URL(fileURLWithPath: path)
+        try? FileManager.default.removeItem(at: log)
+        try? FileManager.default.removeItem(at: SessionEventReader.file(for: log))
+        try? FileManager.default.removeItem(at: log.deletingPathExtension().appendingPathExtension("attachments"))
     }
 
     public func logFile(for record: RunRecord) -> URL {

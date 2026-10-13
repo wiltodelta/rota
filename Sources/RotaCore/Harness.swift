@@ -1,31 +1,10 @@
 import Foundation
 
-/// A tool a routine's skill may depend on that not every harness has.
-public enum Capability: String, CaseIterable, Codable, Sendable {
-    case chrome
-    case push
-
-    public var title: String {
-        switch self {
-        case .chrome: return "Chrome"
-        case .push: return "Phone push"
-        }
-    }
-}
-
-public enum CapabilitySupport: Equatable, Sendable {
-    case native
-    /// The harness has the capability under different tool names, so a skill
-    /// written against Claude's names needs a binding before it works there.
-    case differentTools(String)
-    case missing
-}
-
 /// How a run is started and watched. Each keeps the run open to the user while it works.
 public enum LaunchMode: Equatable, Sendable {
     /// `claude -p` with stream-json in and out; Rota writes into the session.
     case claudeStream
-    /// An interactive `claude` in a detached `screen`; Rota reads its transcript and types into it.
+    /// An interactive `claude` on an owned PTY; Rota reads its transcript and bridges requests through hooks.
     case claudeInteractive
     /// A thread on Codex's shared app-server daemon; Rota steers it with `turn/steer`.
     case codexDaemon
@@ -70,28 +49,6 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
-    public func support(for capability: Capability) -> CapabilitySupport {
-        switch (self, capability) {
-        case (.claude, _):
-            return .native
-        case (.codex, .chrome):
-            return .differentTools("Codex drives Chrome through its own plugin, not mcp__claude-in-chrome__ tools.")
-        case (.grok, .chrome):
-            return .differentTools("Grok drives Chrome through the playwright MCP server it loads from Claude's "
-                                   + "user config, not mcp__claude-in-chrome__ tools.")
-        case (.grok, .push):
-            // Grok's commands run under its shared leader, so the session's rule names the command.
-            return .differentTools("Use the rota notify command the session's rules name (add --needs-reply "
-                                   + "to wait for an answer) instead: a Mac notification that opens this session.")
-        case (_, .push):
-            // Phone push is Claude's; Rota's own notification reaches every harness.
-            return .differentTools("Use \"$ROTA_CLI\" notify \"…\" (add --needs-reply to wait for an answer) "
-                                   + "instead: a Mac notification that opens this session.")
-        case (.grok, _), (.shell, _):
-            return .missing
-        }
-    }
-
     public var launchMode: LaunchMode {
         switch self {
         case .claude: return .claudeStream
@@ -102,9 +59,8 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
     }
 
     /// The `claude` arguments; the other harnesses are driven over their protocols
-    /// and take none. Every agent runs with approvals bypassed, the
-    /// `bypassPermissions` mode Claude Desktop routines use: nobody is there to
-    /// answer a prompt. The prompt itself goes in on stdin.
+    /// and take none. Permission modes come from the harness's own settings.
+    /// The prompt itself goes in on stdin.
     /// Claude gets Chrome exactly when the user's settings turn it on by default,
     /// as an interactive session would.
     public func arguments(settings: ClaudeUserSettings, resume: String? = nil) -> [String] {

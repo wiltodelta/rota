@@ -17,19 +17,24 @@ Desktop.
   schedules, with common ones a click away and the next three run times shown
   as you type.
 - **Sessions are the main view.** The sidebar lists every routine's sessions,
-  newest first, by day. A session reads as a chat laid out like
-  super.engineering's: your prompt and messages in bubbles, the agent's answer
-  as plain text under the agent's own logo and model, the tool calls that led
-  there folded into one "Worked for …" line you can open, and a footer with
-  the time and a copy button. While a session works the line reads "Working
-  for 12s", calls in a row read as what they did ("ran 2 commands, read 1
-  file"), the agent's plan shows with each step's state, the field shows the
-  clock and turns its button into Stop, and the chat follows the session
-  unless you scroll up. Code blocks name their language and copy in one click.
+  newest first, by day. Messages use a plain layout with speaker labels and
+  basic Markdown: paragraphs, lists, links and code. Select any number of lines,
+  across paragraphs and messages, and copy with Command-C. Tool activity can
+  be shown or hidden, and plans show each step's status as text. The rounded
+  message field shows the model and run clock, with Send and Stop controls.
+  The chat follows the session unless you scroll up or select text.
+- **Attach files and images.** Use the paperclip or drop files onto the composer.
+  Image previews and file names stay with the message; a message can contain only
+  attachments. Up to 10 files, 20 MB each and 50 MB total. Rota copies attachments
+  into the session's log storage. Claude print mode and Codex receive PNG, JPEG,
+  GIF and WebP as image inputs. Grok receives native images on a new turn when
+  its ACP capabilities allow them; live steering and interactive Claude receive
+  local file references. Other files are passed as local references for the
+  agent's tools to read, under its existing permissions.
 - **Keep talking to a session, on every agent, while it works or after.** The
   field under the chat sends your message:
   - Claude Code runs interactively, as in a terminal, inside a detached
-    `screen` session: it gets computer use where you turned it on, a message
+    PTY owned by Rota: it gets computer use where you turned it on, a message
     is typed in and joins the current turn, and **Open in Terminal** shows the
     live session. Afterwards the session continues with `--resume`. A folder
     Claude Code has not been trusted in, or Settings > Agents with the switch
@@ -37,10 +42,15 @@ Desktop.
     so Settings asks macOS to allow Rota Accessibility and Screen Recording.
   - Codex runs on its local app-server daemon: a message joins the current
     turn (`turn/steer`). Afterwards the thread continues (`thread/resume`).
-  - Grok Build runs through its shared leader: a message is answered right
-    after the current turn. Afterwards the session is loaded and continued.
+  - Grok Build runs through its shared leader: a text message can interject
+    into the current turn. Afterwards the session is loaded and continued.
   - Shell commands run in a detached `screen` session; **Open in Terminal**
     attaches with `screen -r`, where you can type into the command or stop it.
+  Messages show whether they are being sent, accepted, queued, rejected, or
+  unconfirmed. A rejected message can be restored to the composer. Streamed
+  responses and tool results appear as they arrive; each response keeps its
+  reported model, and editing a routine preserves its existing sessions' launch
+  settings.
   A continued session runs again and appends to the same chat. Finished agent
   sessions also open in their own CLI with **Continue in Terminal**. Sessions
   open in the terminal app picked in Settings (Terminal, iTerm2, Ghostty or
@@ -72,9 +82,8 @@ Desktop.
 - **Notifications** when a run fails, times out or cannot start, and when a
   missed slot is skipped; click one to open its session. Successes notify too if you ask for it. A routine
   whose last five scheduled runs failed pauses itself and says so.
-- **Harness warnings.** Rota reads the routine's project skill and warns when
-  it uses a tool the chosen harness lacks: Claude in Chrome on Grok Build, for
-  example, or phone push anywhere but Claude Code.
+- **Choose the agent.** Rota passes the routine to the selected harness. The
+  agent resolves the skill's tool requirements during the run.
 - **Import from Claude Desktop and Codex.** Reads the routines Claude Desktop
   schedules and the automations of the Codex app (read-only), with their
   schedules in words, and copies the ones you pick, turned off, so nothing runs
@@ -147,11 +156,17 @@ mv Rota.app /Applications/
 - If the icon is hidden (behind the notch, or by a menu bar manager), open
   Rota again from Finder or Spotlight to get its window.
 
-Agents run unattended with approvals bypassed (`bypassPermissions` for
-Claude Code, `--dangerously-bypass-approvals-and-sandbox` for Codex,
-`--always-approve` for Grok Build), the same mode Claude Desktop routines use: nobody
-is there to answer a prompt. Point a routine only at a project whose skill you
-trust.
+Sessions use the selected harness's own configuration for permissions, sandbox,
+MCP servers, plugins and skills. Rota does not enable bypass or auto-approval.
+Default model and effort use the harness settings; an explicit choice in a
+routine overrides those values. Configure the harness for the routine's needs.
+Codex, Grok and both Claude modes show supported permission requests and
+questions in the chat. Interactive Claude bridges `AskUserQuestion` and one-time
+permissions through its own per-session hooks while keeping its PTY. Native
+prompts outside those hooks remain available in Terminal.
+Closing or stopping a run invalidates its pending requests; chat text never
+approves a tool. Ctrl-] detaches from an interactive Claude terminal without
+stopping its session.
 
 Rota runs routines only while it is open; turn on **Launch at login** in
 Settings, so runs cut off by a shutdown continue after the Mac starts.

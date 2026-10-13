@@ -2,7 +2,7 @@ import AppKit
 import RotaCore
 import SwiftUI
 
-/// The editable fields of a routine, with schedule preview and harness warnings.
+/// The editable fields of a routine, with schedule preview.
 struct RoutineForm: View {
     @Environment(AppModel.self) private var model
     @Binding var draft: Routine
@@ -50,7 +50,6 @@ struct RoutineForm: View {
             if draft.harness.isAgent {
                 ModelPickers(draft: $draft)
             }
-            HarnessWarnings(routine: draft)
             TimeLimitField(minutes: $draft.timeLimitMinutes)
             VStack(alignment: .leading, spacing: 6) {
                 Text(draft.harness.isAgent ? "Prompt" : "Command")
@@ -123,41 +122,6 @@ private struct ScheduleField: View {
             .font(.caption)
             .foregroundStyle(Color.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
-/// Explains which tools the skill uses that the chosen harness lacks.
-struct HarnessWarnings: View {
-    @Environment(AppModel.self) private var model
-    let routine: Routine
-
-    var body: some View {
-        let needs = model.scheduler.requirements(of: routine)
-        let gaps = SkillRequirements.gaps(needs, on: routine.harness)
-        if !gaps.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(gaps, id: \.0) { capability, support in
-                    Label(message(capability, support), systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(support == .missing ? Color.errorText : Color.warningText)
-                }
-            }
-            .font(.callout)
-        } else if !needs.isEmpty {
-            Text("Uses " + needs.map(\.title).sorted().joined(separator: " and ") + ", available here.")
-                .font(.caption)
-                .foregroundStyle(Color.secondaryText)
-        }
-    }
-
-    private func message(_ capability: Capability, _ support: CapabilitySupport) -> String {
-        switch support {
-        case .native:
-            return ""
-        case .differentTools(let detail):
-            return "The skill uses \(capability.title). \(detail)"
-        case .missing:
-            return "The skill uses \(capability.title), which \(routine.harness.title) does not have."
         }
     }
 }

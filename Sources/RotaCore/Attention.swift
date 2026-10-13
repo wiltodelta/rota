@@ -67,7 +67,8 @@ extension Scheduler {
     }
 
     public func dismissAttention(_ record: RunRecord) {
-        guard let now = current(record.id, routineID: record.routineID), now.attention != nil else { return }
+        guard let now = current(record.id, routineID: record.routineID), now.attention != nil,
+              now.requests?.isEmpty != false else { return }
         _ = setAttention(nil, on: now)
     }
 

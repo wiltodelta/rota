@@ -4,19 +4,22 @@ import Foundation
 /// stdio`), so messages from Rota join the live session. Protocol:
 /// ~/.grok/docs/user-guide/15-agent-mode.md.
 final class GrokACPRun: RunControl, @unchecked Sendable {
+    private lazy var requests = SessionRequests(changed: journal.requests)
     private let spec: LaunchSpec
     private let journal: RunJournal
     private let queue = DispatchQueue(label: "com.wiltodelta.rota.grok")
     private var process: Process?
     private var peer: JSONRPCPeer?
     private var sessionID: String?
+    private var supportsImages = false
     private var stopReason: RunOutcome?
-    /// Prompts still waiting for their turn to end. Grok queues a message sent
-    /// mid-turn after the current turn, so the run ends only when all are answered.
+    /// The initial prompt and interject acknowledgments still in flight; do not
+    /// disconnect before a user's message has a confirmed outcome.
     private var openPrompts = 0
     private var routineOutcome: RunOutcome?
     /// True while `session/load` replays history, which must not reach the log again.
     private var loading = false
+    private let mapper = GrokEventMapper()
 
     private init(spec: LaunchSpec, journal: RunJournal) {
         self.spec = spec
@@ -29,29 +32,65 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         return run
     }
 
+    func respond(_ id: String, response: SessionResponse) {
+        queue.async { _ = self.requests.answer(id, response) }
+    }
+
     func stop() {
         queue.async { self.cancel(as: .cancelled) }
     }
 
-    func send(_ message: String) {
+    func send(_ message: String) { send(message, id: UUID().uuidString) }
+
+    func send(_ message: String, id: String) { send(ChatMessage(text: message), id: id) }
+
+    func send(_ message: ChatMessage, id: String) {
         queue.async {
-            guard let sessionID = self.sessionID, !self.journal.isFinished else { return }
-            self.journal.line(Transcript.userLines(message))
+            self.journal.user(message, id: id)
+            guard let sessionID = self.sessionID, !self.journal.isFinished,
+                  self.stopReason == nil, let peer = self.peer else {
+                return self.journal.delivery(id, .failed("The session cannot accept steering now."))
+            }
+            self.journal.line(Transcript.userLines(message.fileReferenceText), structured: false)
             self.openPrompts += 1
-            let params: [String: Any] = ["sessionId": sessionID, "prompt": [["type": "text", "text": message]]]
-            self.peer?.request("session/prompt", params) { result in
-                self.promptEnded(result, isRoutine: false)
+            let params: [String: Any] = ["sessionId": sessionID, "text": message.fileReferenceText]
+            peer.request("_x.ai/interject", params, timeout: 10) { result in
+                switch result {
+                case .success(let value):
+                    self.journal.delivery(id, Self.interjectionDelivery(value))
+                case .failure(let error):
+                    let state: MessageDelivery = error.deliveryUncertain
+                        ? .unconfirmed(error.message) : .failed(error.message)
+                    self.journal.delivery(id, state)
+                }
+                self.openPrompts -= 1
+                self.finishIfReady()
             }
         }
+    }
+
+    /// Transport flags only; tool permissions come from Grok's configuration.
+    static func arguments(_ spec: LaunchSpec) -> [String] {
+        ["agent", "--leader"] + spec.modelFlags(effortFlag: "--reasoning-effort") + ["stdio"]
+    }
+
+    /// Grok's leader confirms queueing with {"result":{"status":"queued"}}.
+    static func interjectionDelivery(_ value: Any) -> MessageDelivery {
+        let response = value as? [String: Any]
+        if let accepted = response?["accepted"] as? Bool {
+            return accepted ? .accepted : .failed("Grok did not accept the interjection.")
+        }
+        if (response?["result"] as? [String: Any])?["status"] as? String == "queued" { return .queued }
+        return .unconfirmed("Grok did not confirm whether the message was queued.")
     }
 
     // MARK: On `queue`
 
     private func connect() {
+        guard !journal.isFinished, stopReason == nil else { return }
         // On the command line, not session/set_config_option: Grok's guide says a
         // model set that way is synced to the leader's other clients.
-        let arguments = ["agent", "--leader", "--always-approve"]
-            + spec.modelFlags(effortFlag: "--reasoning-effort") + ["stdio"]
+        let arguments = Self.arguments(spec)
         let process = ProcessLauncher.loginShellProcess(spec.executable, arguments,
                                                         in: ProcessLauncher.helperDirectory, environment: [:])
         let stdin = Pipe()
@@ -69,8 +108,21 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
                                                         output: stdout.fileHandleForReading),
                                callbackQueue: queue)
         peer.onNotification = { [weak self] method, params in self?.handle(method, params) }
-        peer.onRequest = { method, params in Self.answer(method, params) }
-        peer.onClose = { [weak self] in self?.journal.finish(.interrupted) }
+        peer.onAsyncRequest = { [weak self] method, params, _, reply in
+            guard method == "session/request_permission" else { return reply(nil) }
+            guard let self, !self.journal.isFinished, self.stopReason == nil,
+                  params["sessionId"] as? String == self.sessionID,
+                  let request = RequestPresentation.grok(params) else {
+                return reply(Self.answer(method, params))
+            }
+            self.requests.add(request, answer: { response in
+                reply(["outcome": ["outcome": "selected", "optionId": response.choice]])
+            }, cancel: { reply(Self.answer(method, params)) })
+        }
+        peer.onClose = { [weak self] in
+            self?.requests.cancelAll(notifyProvider: false)
+            self?.journal.finish(.interrupted)
+        }
         self.peer = peer
         let hello: [String: Any] = ["protocolVersion": 1, "clientCapabilities": [String: Any]()]
         peer.request("initialize", hello) { [weak self] result in
@@ -96,7 +148,13 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     }
 
     private func initialized(_ result: Result<Any, JSONRPCError>) {
-        guard case .success = result else { return fail(result, "initialize") }
+        guard stopReason == nil, !journal.isFinished else {
+            journal.finish(stopReason ?? .cancelled)
+            return disconnect()
+        }
+        guard case .success(let value) = result else { return fail(result, "initialize") }
+        let capabilities = (value as? [String: Any])?["agentCapabilities"] as? [String: Any]
+        supportsImages = (capabilities?["promptCapabilities"] as? [String: Any])?["image"] as? Bool == true
         var params: [String: Any] = ["cwd": spec.workingDirectory, "mcpServers": [Any]()]
         // Grok's commands run under its shared leader, which has no per-session
         // environment; the session learns who it is from a rule instead.
@@ -108,6 +166,7 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
             peer?.request("session/load", params) { [weak self] result in
                 self?.loading = false
                 guard case .success = result else { return self?.fail(result, "session/load") ?? () }
+                if case .success(let value) = result { self?.captureMetadata(value) }
                 self?.sessionReady(session)
             }
         } else {
@@ -121,16 +180,34 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         guard case .success(let value) = result, let id = (value as? [String: Any])?["sessionId"] as? String else {
             return fail(result, "session/new")
         }
+        captureMetadata(value)
         let options = (value as? [String: Any])?["configOptions"] as? [[String: Any]] ?? []
         let model = options.first { $0["id"] as? String == "model" }?["currentValue"] as? String
-        journal.line("[grok session \(id)" + (model.map { ", \($0)" } ?? "") + "]")
+        journal.line("[grok session \(id)" + (model.map { ", \($0)" } ?? "") + "]", structured: false)
         sessionReady(id)
+    }
+
+    private func captureMetadata(_ value: Any) {
+        let options = (value as? [String: Any])?["configOptions"] as? [[String: Any]] ?? []
+        let model = options.first { $0["id"] as? String == "model" }?["currentValue"] as? String
+        let effort = options.first { $0["id"] as? String == "reasoning_effort" }?["currentValue"] as? String
+        journal.metadata(model: model, effort: effort ?? spec.effort)
     }
 
     private func sessionReady(_ id: String) {
         sessionID = id
         journal.session(id)
-        let params: [String: Any] = ["sessionId": id, "prompt": [["type": "text", "text": spec.prompt]]]
+        guard stopReason == nil, !journal.isFinished else {
+            peer?.notify("session/cancel", ["sessionId": id])
+            journal.finish(stopReason ?? .cancelled)
+            return disconnect()
+        }
+        let content: [[String: Any]]
+        do { content = try spec.chatMessage.acpContent(images: supportsImages) } catch {
+            journal.finish(.launchFailed(error.localizedDescription))
+            return disconnect()
+        }
+        let params: [String: Any] = ["sessionId": id, "prompt": content]
         openPrompts += 1
         peer?.request("session/prompt", params) { [weak self] result in
             self?.promptEnded(result, isRoutine: true)
@@ -151,6 +228,10 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
             outcome = stopReason ?? .failed(exitCode: 1)
         }
         if isRoutine { routineOutcome = outcome }
+        finishIfReady()
+    }
+
+    private func finishIfReady() {
         guard openPrompts <= 0, let routineOutcome else { return }
         journal.finish(routineOutcome)
         disconnect()
@@ -158,33 +239,33 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
 
     private func handle(_ method: String, _ params: [String: Any]) {
         guard method == "session/update", !loading, let update = params["update"] as? [String: Any] else { return }
-        switch update["sessionUpdate"] as? String {
-        case "agent_message_chunk":
-            if let text = (update["content"] as? [String: Any])?["text"] as? String { journal.text(text) }
-        case "tool_call":
-            journal.line("-> \(update["title"] as? String ?? "tool")")
-        case "plan":
-            let steps = (update["entries"] as? [[String: Any]] ?? []).map {
-                PlanStep(status: $0["status"] as? String, text: $0["content"] as? String ?? "")
+        for payload in mapper.events(update) {
+            switch payload {
+            case .delta(let id, let text, let phase):
+                journal.delivery(spec.messageID, .accepted)
+                if phase == .work { journal.event(payload) } else { journal.text(text, id: id, phase: phase) }
+            default:
+                journal.endText()
+                journal.event(payload)
             }
-            if !steps.isEmpty { journal.line(PlanStep.lines(steps)) }
-        default:
-            break
+        }
+        switch update["sessionUpdate"] as? String {
+        case "tool_call": journal.line("-> \(update["title"] as? String ?? "tool")", structured: false)
+        case "plan":
+            journal.line(PlanStep.lines(EventContent.plan(update["entries"], textKey: "content")), structured: false)
+        default: break
         }
     }
 
-    /// Permission requests (rare with --always-approve) get the first "allow"
-    /// option; Rota offers no file system or terminal of its own.
+    /// Rota never grants permissions the harness configuration did not already allow.
     static func answer(_ method: String, _ params: [String: Any]) -> Any? {
-        guard method == "session/request_permission",
-              let options = params["options"] as? [[String: Any]],
-              let allow = options.first(where: { ($0["kind"] as? String)?.hasPrefix("allow") == true }),
-              let optionID = allow["optionId"] else { return nil }
-        return ["outcome": ["outcome": "selected", "optionId": optionID]]
+        guard method == "session/request_permission" else { return nil }
+        return ["outcome": ["outcome": "cancelled"]]
     }
 
     private func cancel(as reason: RunOutcome) {
         guard !journal.isFinished else { return }
+        requests.cancelAll()
         stopReason = reason
         if let sessionID { peer?.notify("session/cancel", ["sessionId": sessionID]) }
         queue.asyncAfter(deadline: .now() + 15) { [weak self] in
@@ -199,6 +280,7 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     }
 
     private func disconnect() {
+        requests.cancelAll()
         peer?.close()
         process?.terminate()
     }

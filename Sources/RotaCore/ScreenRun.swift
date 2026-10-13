@@ -6,6 +6,11 @@ import Foundation
 final class ScreenRun: RunControl, @unchecked Sendable {
     static let screen = "/usr/bin/screen"
 
+    static func alive(_ name: String) -> Bool {
+        let (_, output) = ProcessLauncher.capture(screen, ["-ls", name], in: NSTemporaryDirectory(), loginShell: false)
+        return output.contains("." + name)
+    }
+
     private let journal: RunJournal
     private let name: String
     private let exitFile: URL

@@ -14,7 +14,8 @@ enum ChatOpener {
             .appendingPathComponent("Rota/chat")
         let file = folder.appendingPathComponent("\(record.routineID).command")
         let command = ([executable] + arguments).map(shellQuote).joined(separator: " ")
-        let script = "#!/bin/zsh -l\ncd \(shellQuote(workingDirectory)) || exit 1\nexec \(command)\n"
+        let directory = record.configuration?.workingDirectory ?? workingDirectory
+        let script = "#!/bin/zsh -l\ncd \(shellQuote(directory)) || exit 1\nexec \(command)\n"
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try script.write(to: file, atomically: true, encoding: .utf8)

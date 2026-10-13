@@ -5,7 +5,8 @@ final class HarnessTests: XCTestCase {
     func testClaudeStreamArguments() {
         let plain = Harness.claude.arguments(settings: ClaudeUserSettings())
         XCTAssertEqual(plain, ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-                               "--permission-mode", "bypassPermissions"])
+                               "--include-partial-messages", "--replay-user-messages",
+                               "--permission-prompt-tool", "stdio"])
         XCTAssertEqual(Array(Harness.claude.arguments(settings: ClaudeUserSettings(), resume: "s1").suffix(2)),
                        ["--resume", "s1"])
     }
@@ -61,14 +62,6 @@ final class HarnessTests: XCTestCase {
         XCTAssertFalse(Harness.shell.takesMessages)
     }
 
-    func testScanFindsEachMarker() {
-        XCTAssertEqual(SkillRequirements.scan("call mcp__claude-in-chrome__navigate"), [.chrome])
-        XCTAssertEqual(SkillRequirements.scan("open it in Claude in Chrome"), [.chrome])
-        XCTAssertEqual(SkillRequirements.scan("the Chrome MCP tab"), [.chrome])
-        XCTAssertEqual(SkillRequirements.scan("then PushNotification"), [.push])
-        XCTAssertEqual(SkillRequirements.scan("read the repo with Playwright"), [])
-    }
-
     /// Codex's daemon and Grok's leader outlive a run, so a run's variables go over the protocol.
     func testTheRunsVariablesReachSharedHarnessesOverTheProtocol() throws {
         let environment = ["ROTA_SESSION": "S1", "ROTA_ROUTINE": "digest", "ROTA_CLI": "/x/rota",
@@ -99,26 +92,6 @@ final class HarnessTests: XCTestCase {
         let process = ProcessLauncher.loginShellProcess("/bin/echo", [], in: "/", environment: ["ROTA_SESSION": "S"])
         XCTAssertEqual(process.environment?["ROTA_SESSION"], "S")
         XCTAssertNil(process.environment?["CLAUDECODE"])
-    }
-
-    func testGapsPerHarness() {
-        let both: Set<Capability> = [.chrome, .push]
-        XCTAssertTrue(SkillRequirements.gaps(both, on: .claude).isEmpty)
-        let codex = SkillRequirements.gaps(both, on: .codex)
-        XCTAssertEqual(codex.map(\.0), [.chrome, .push])
-        if case .differentTools = codex[0].1 {} else { XCTFail("Codex has Chrome under other tool names") }
-        // Without Claude's phone push, every harness has Rota's own notification to use instead.
-        for harness in [Harness.codex, .grok, .shell] {
-            guard case .differentTools(let advice) = SkillRequirements.gaps([.push], on: harness).first?.1 else {
-                return XCTFail("\(harness) should point to rota notify")
-            }
-            XCTAssertTrue(advice.contains("notify"))
-        }
-        if case .differentTools = SkillRequirements.gaps([.chrome], on: .grok).first?.1 {} else {
-            XCTFail("Grok reaches Chrome through playwright")
-        }
-        XCTAssertEqual(SkillRequirements.gaps([.chrome], on: .shell).map(\.1), [.missing])
-        XCTAssertTrue(SkillRequirements.gaps([], on: .grok).isEmpty)
     }
 
     func testDefaultExecutablesLiveUnderHome() {
@@ -527,18 +500,5 @@ final class PlanTests: XCTestCase {
         let item = Transcript.parse(lines).first
         XCTAssertEqual(item?.kind, .plan)
         XCTAssertEqual(PlanStep.parse(item?.text ?? ""), [PlanStep(status: .inProgress, text: "Fix the link")])
-    }
-}
-
-final class OutgoingTests: XCTestCase {
-    func testAMessageShowsAsSendingUntilTheLogHasIt() {
-        let before = Transcript.parse("[you] Check it\nLooking.")
-        let message = Outgoing(text: "Also say EXTRA", seen: Outgoing.count("Also say EXTRA", in: before))
-        XCTAssertFalse(message.delivered(in: before))
-        XCTAssertTrue(message.delivered(in: Transcript.parse("[you] Check it\nLooking.\n[you] Also say EXTRA")))
-        // The same words sent twice wait for the second copy.
-        let again = Outgoing(text: "ok", seen: 1)
-        XCTAssertFalse(again.delivered(in: Transcript.parse("[you] ok\nfine")))
-        XCTAssertTrue(again.delivered(in: Transcript.parse("[you] ok\nfine\n[you] ok")))
     }
 }

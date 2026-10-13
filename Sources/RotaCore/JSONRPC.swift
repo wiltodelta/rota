@@ -11,7 +11,7 @@ protocol MessageTransport: AnyObject {
 /// A JSON-RPC 2.0 client over a transport: requests with replies, notifications
 /// both ways, and requests the peer sends us. Replies, notifications and the close
 /// arrive on `callbackQueue` (a run's own serial queue), or on the transport's
-/// reading thread without one; `onRequest` always answers on the reading thread.
+/// reading thread without one. Incoming server requests use the same queue.
 final class JSONRPCPeer: @unchecked Sendable {
     typealias Reply = (Result<Any, JSONRPCError>) -> Void
 
@@ -19,10 +19,17 @@ final class JSONRPCPeer: @unchecked Sendable {
     private let lock = NSLock()
     private var nextID = 1
     private var pending: [Int: Reply] = [:]
+    /// Tests advance request deadlines synchronously; a timeout never retries a remote write.
+    var scheduleTimeout: (TimeInterval, @escaping () -> Void) -> Void = { seconds, work in
+        let box = UncheckedSendable(work)
+        DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { box.value() }
+    }
     /// A notification from the peer: method and params.
     var onNotification: ((String, [String: Any]) -> Void)?
     /// A request from the peer; return the result to send, or nil to answer "method not found".
     var onRequest: ((String, [String: Any]) -> Any?)?
+    /// Delayed server replies run on callbackQueue and can wait for explicit user input.
+    var onAsyncRequest: ((String, [String: Any], String, @escaping (Any?) -> Void) -> Void)?
     var onClose: (() -> Void)?
     private let callbackQueue: DispatchQueue?
 
@@ -33,13 +40,27 @@ final class JSONRPCPeer: @unchecked Sendable {
         transport.onClose = { [weak self] in self?.closed() }
     }
 
-    func request(_ method: String, _ params: [String: Any], reply: @escaping Reply) {
+    /// Keep numeric and string request IDs distinct when a provider resolves a request elsewhere.
+    static func requestIdentity(_ value: Any) -> String { EventContent.text([value]) ?? "" }
+
+    func request(_ method: String, _ params: [String: Any], timeout: TimeInterval? = nil, reply: @escaping Reply) {
         lock.lock()
         let id = nextID
         nextID += 1
         pending[id] = reply
         lock.unlock()
         write(["jsonrpc": "2.0", "id": id, "method": method, "params": params])
+        if let timeout { scheduleTimeout(timeout) { [weak self] in self?.expire(id) } }
+    }
+
+    private func expire(_ id: Int) {
+        lock.lock()
+        let reply = pending.removeValue(forKey: id)
+        lock.unlock()
+        deliver {
+            let error = JSONRPCError(message: "The provider did not confirm delivery in time.", deliveryUncertain: true)
+            reply?(.failure(error))
+        }
     }
 
     func notify(_ method: String, _ params: [String: Any] = [:]) {
@@ -61,11 +82,22 @@ final class JSONRPCPeer: @unchecked Sendable {
         let params = message["params"] as? [String: Any] ?? [:]
         switch (method, message["id"]) {
         case let (method?, id?):
-            if let result = onRequest?(method, params) {
-                write(["jsonrpc": "2.0", "id": id, "result": result])
-            } else {
-                let error: [String: Any] = ["code": -32601, "message": "Rota does not handle \(method)"]
-                write(["jsonrpc": "2.0", "id": id, "error": error])
+            let requestID = UncheckedSendable(id)
+            let parameters = UncheckedSendable(params)
+            let once = RPCServerReply { [weak self] result in
+                if let result {
+                    self?.write(["jsonrpc": "2.0", "id": requestID.value, "result": result])
+                } else {
+                    self?.write(["jsonrpc": "2.0", "id": requestID.value,
+                                 "error": ["code": -32601, "message": "Rota does not handle \(method)"]])
+                }
+            }
+            deliver {
+                if let handler = self.onAsyncRequest {
+                    handler(method, parameters.value, Self.requestIdentity(requestID.value), once.send)
+                } else {
+                    once.send(self.onRequest?(method, parameters.value))
+                }
             }
         case let (method?, nil):
             deliver { self.onNotification?(method, params) }
@@ -90,7 +122,8 @@ final class JSONRPCPeer: @unchecked Sendable {
         pending.removeAll()
         lock.unlock()
         deliver {
-            waiting.forEach { $0(.failure(JSONRPCError(message: "connection closed"))) }
+            let error = JSONRPCError(message: "connection closed before the reply", deliveryUncertain: true)
+            waiting.forEach { $0(.failure(error)) }
             self.onClose?()
         }
     }
@@ -113,6 +146,7 @@ struct UncheckedSendable<Value>: @unchecked Sendable {
 
 struct JSONRPCError: Error, LocalizedError {
     let message: String
+    var deliveryUncertain: Bool = false
     var errorDescription: String? { message }
 }
 
@@ -294,5 +328,19 @@ final class WebSocketTransport: MessageTransport, @unchecked Sendable {
             payload = Data(payload.enumerated().map { $0.element ^ mask[$0.offset % 4] })
         }
         return Frame(opcode: opcode, final: final, payload: payload, length: offset + length)
+    }
+}
+
+/// A deferred reply may race cancellation; only one result is ever put on the wire.
+private final class RPCServerReply: @unchecked Sendable {
+    private let lock = NSLock()
+    private var reply: ((Any?) -> Void)?
+    init(_ reply: @escaping (Any?) -> Void) { self.reply = reply }
+    func send(_ value: Any?) {
+        lock.lock()
+        let work = reply
+        reply = nil
+        lock.unlock()
+        work?(value)
     }
 }

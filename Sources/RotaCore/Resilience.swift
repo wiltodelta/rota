@@ -60,10 +60,10 @@ extension Scheduler {
         return NetworkFailure.matches(Self.tail(of: path, characters: 4000).0)
     }
 
-    /// An interactive Claude outlives Rota in its screen session; one still at work is not started again.
+    /// Legacy screen sessions can outlive an older Rota build; do not duplicate that work.
     func stillRunning(_ record: RunRecord) -> Bool {
         guard record.harness == .claude, let session = record.sessionID else { return false }
-        return sessionAlive(ClaudeInteractiveRun.screenName(session))
+        return sessionAlive("rota-claude-" + session.prefix(8).lowercased())
     }
 
     /// Continues or reruns what waits, each once its service answers; what cannot yet waits a minute.

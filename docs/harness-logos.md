@@ -1,7 +1,8 @@
 # Harness logos (`HarnessLogos.xcassets`)
 
-Each harness's own mark, shown beside its answers and in the composer. The
-marks are the owners' trademarks; they identify the service they belong to.
+Each harness's own mark is shown in the composer. The transcript uses plain
+speaker labels. The marks are the owners' trademarks; they identify the
+service they belong to.
 
 - `harness-claude`: the Claude mark, from Simple Icons (`claude`, CC0 SVG data), as super.engineering shows Claude Code sessions.
 - `harness-codex`: OpenAI, from Simple Icons (`openai`, CC0 SVG data). Codex

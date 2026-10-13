@@ -43,7 +43,7 @@ public final class Scheduler {
     /// Whether the Mac is online; while it is not, scheduled runs and resumes wait.
     @ObservationIgnored public var isOnline: () -> Bool = { true }
     /// Whether a screen session is still up; a seam so tests never run `screen`.
-    @ObservationIgnored public var sessionAlive: (String) -> Bool = { ClaudeInteractiveRun.alive($0) }
+    @ObservationIgnored public var sessionAlive: (String) -> Bool = { ScreenRun.alive($0) }
     /// Routines whose run was going when the Mac went to sleep.
     @ObservationIgnored var sleptThrough: Set<String> = []
     /// Sessions cut off by sleep, shutdown or a lost network, to continue once online: record id to routine id.
@@ -63,7 +63,7 @@ public final class Scheduler {
     @ObservationIgnored let store: RoutineStore
     @ObservationIgnored public let history: RunHistory
     @ObservationIgnored let launcher: RoutineLaunching
-    @ObservationIgnored private var controls: [String: RunControl] = [:]
+    @ObservationIgnored var controls: [String: RunControl] = [:]
     /// When each routine's current run started, a continued session included.
     @ObservationIgnored private var runStarts: [String: Date] = [:]
     @ObservationIgnored private var timer: Timer?
@@ -169,11 +169,6 @@ public final class Scheduler {
 
     // MARK: Running
 
-    public func requirements(of routine: Routine) -> Set<Capability> {
-        guard routine.harness.isAgent else { return [] }
-        return SkillRequirements.scan(file: routine.skillFile).union(SkillRequirements.scan(routine.prompt))
-    }
-
     public func run(_ routine: Routine, trigger: RunTrigger) {
         guard active[routine.id] == nil else { return }
         var record = RunRecord(routineID: routine.id, trigger: trigger, harness: routine.harness,
@@ -191,16 +186,18 @@ public final class Scheduler {
         let sameHarness = harness == routine.harness
         // Only Claude reads ~/.claude.json, a file of hundreds of KB on a busy Mac.
         let settings = harness == .claude ? claudeSettings() : ClaudeUserSettings()
+        let captured = resume == nil ? nil : record.configuration
         var spec = LaunchSpec(
             executable: executable(harness), prompt: prompt,
             arguments: harness.arguments(settings: settings, resume: resume),
-            workingDirectory: routine.workingDirectory,
+            workingDirectory: captured?.workingDirectory ?? routine.workingDirectory,
             environment: sessionEnvironment(record),
             mode: harness.launchMode, timeout: routine.timeLimitMinutes.map { TimeInterval($0 * 60) },
             log: log, resume: resume,
-            model: sameHarness ? routine.model : nil, effort: sameHarness ? routine.effort : nil)
+            model: captured.map(\.model) ?? (sameHarness ? routine.model : nil),
+            effort: captured.map(\.effort) ?? (sameHarness ? routine.effort : nil))
         if harness == .claude, claudeInteractive() {
-            if settings.trusts(routine.workingDirectory) {
+            if settings.trusts(spec.workingDirectory) {
                 spec.mode = .claudeInteractive
             } else {
                 spec.notice = "ran with claude -p: Claude Code has not been trusted in this folder; "
@@ -214,9 +211,16 @@ public final class Scheduler {
     private func start(_ record: RunRecord, spec: LaunchSpec) {
         var record = record
         let id = record.routineID
+        if record.configuration == nil {
+            record.configuration = RunConfiguration(model: spec.model, effort: spec.effort,
+                                                     workingDirectory: spec.workingDirectory)
+        }
         let events = RunEvents(
             session: { [weak self] session in self?.attachSession(session, to: id) },
-            finished: { [weak self] outcome in self?.finish(id, outcome: outcome) })
+            finished: { [weak self] outcome in self?.finish(id, outcome: outcome) },
+            metadata: { [weak self] value in self?.updateMetadata(value, routineID: id, recordID: record.id) },
+            eventError: { [weak self] reason in self?.eventWriteFailed(reason, routineID: id, recordID: record.id) },
+            requests: { [weak self] requests in self?.updateRequests(requests, routineID: id, recordID: record.id) })
         do {
             active[id] = record
             runStarts[id] = now()
@@ -258,21 +262,6 @@ public final class Scheduler {
         return record.harness.takesMessages
     }
 
-    /// Sends `message` into `record`'s session: into the live session while it
-    /// runs, or by continuing the finished session as a run of its own.
-    public func message(_ message: String, to record: RunRecord) {
-        guard canMessage(record) else { return }
-        // Answering is what the session waited for; the continued run saves this copy, so it must not carry the mark.
-        dismissAttention(record)
-        var record = record
-        record.attention = nil
-        if isActive(record) {
-            controls[record.routineID]?.send(message)
-        } else {
-            continueSession(record, with: message)
-        }
-    }
-
     /// When `record`'s run started, while it runs: a continued session's run, not the session's first.
     public func runStartedAt(_ record: RunRecord) -> Date? {
         isActive(record) ? runStarts[record.routineID] : nil
@@ -293,14 +282,33 @@ public final class Scheduler {
         return (program ?? executable(record.harness), arguments)
     }
 
-    func continueSession(_ record: RunRecord, with message: String) {
+    func continueSession(_ record: RunRecord, with message: String, messageID: String = UUID().uuidString,
+                         attachments: [ChatAttachment] = []) {
         guard let routine = routine(record.routineID), let session = record.sessionID,
               let logPath = record.logPath else { return }
         var record = record
         record.outcome = .running
         record.endedAt = nil
-        start(record, spec: spec(for: routine, record: record, harness: record.harness, prompt: message,
-                                 log: URL(fileURLWithPath: logPath), resume: session))
+        var launch = spec(for: routine, record: record, harness: record.harness, prompt: message,
+                          log: URL(fileURLWithPath: logPath), resume: session)
+        launch.messageID = messageID
+        launch.attachments = attachments
+        start(record, spec: launch)
+    }
+
+    private func eventWriteFailed(_ reason: String, routineID: String, recordID: UUID) {
+        guard var record = active[routineID], record.id == recordID else { return }
+        record.eventError = reason
+        active[routineID] = record
+        saveRecord(record)
+    }
+
+    private func updateMetadata(_ value: SessionMetadata, routineID: String, recordID: UUID) {
+        guard var record = active[routineID], record.id == recordID else { return }
+        record.metadata = SessionMetadata(model: value.model ?? record.metadata?.model,
+                                          effort: value.effort ?? record.metadata?.effort)
+        active[routineID] = record
+        saveRecord(record)
     }
 
     private func attachSession(_ session: String, to routineID: String) {
@@ -314,6 +322,8 @@ public final class Scheduler {
         guard var record = active[routineID] else { return }
         record.outcome = outcome
         record.endedAt = now()
+        if record.attention == record.requests?.first?.title { record.attention = nil }
+        record.requests = nil
         active[routineID] = nil
         controls[routineID] = nil
         runStarts[routineID] = nil
@@ -370,5 +380,32 @@ public final class Scheduler {
             lastError = "Could not save run history: \(error.localizedDescription)"
         }
         historyVersion += 1
+    }
+}
+
+// Message delivery and attachment retention share the scheduler's actor isolation.
+extension Scheduler {
+    /// Sends `message` into `record`'s session: into the live session while it
+    /// runs, or by continuing the finished session as a run of its own.
+    @discardableResult
+    public func message(_ message: String, to record: RunRecord) -> String? {
+        try? self.message(ChatMessage(text: message), to: record)
+    }
+
+    @discardableResult
+    public func message(_ message: ChatMessage, to record: RunRecord) throws -> String? {
+        guard canMessage(record), let logPath = record.logPath else { return nil }
+        let messageID = UUID().uuidString
+        let message = try ChatAttachmentStore.retain(message, log: URL(fileURLWithPath: logPath), messageID: messageID)
+        // Answering is what the session waited for; the continued run saves this copy, so it must not carry the mark.
+        dismissAttention(record)
+        var record = record
+        record.attention = nil
+        if isActive(record) {
+            controls[record.routineID]?.send(message, id: messageID)
+        } else {
+            continueSession(record, with: message.text, messageID: messageID, attachments: message.attachments)
+        }
+        return messageID
     }
 }

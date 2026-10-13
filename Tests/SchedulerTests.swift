@@ -4,6 +4,8 @@ import XCTest
 private final class FakeControl: RunControl {
     var stopped = false
     var sent: [String] = []
+    var responses: [(String, SessionResponse)] = []
+    func respond(_ id: String, response: SessionResponse) { responses.append((id, response)) }
     func stop() { stopped = true }
     func send(_ message: String) { sent.append(message) }
 }
@@ -78,6 +80,53 @@ final class SchedulerTests: XCTestCase {
                               harness: .codex, enabled: enabled, prompt: "go", timeLimitMinutes: 30)
         scheduler.save(routine)
         return routine
+    }
+
+    func testAttachmentsReachRunningAndResumedSessionsAsRetainedFiles() throws {
+        let routine = addDailyRoutine()
+        let source = directory.appendingPathComponent("sample.txt")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("sample contents".utf8).write(to: source)
+        let message = ChatMessage(text: "", attachments: [try ChatAttachment.inspect(source)])
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("same-session")
+        let running = try XCTUnwrap(scheduler.active[routine.id])
+        XCTAssertNotNil(try scheduler.message(message, to: running))
+        XCTAssertEqual(launcher.controls[0].sent.count, 1)
+        XCTAssertTrue(launcher.controls[0].sent[0].contains("sample.txt"))
+        XCTAssertFalse(launcher.controls[0].sent[0].contains(source.path))
+        launcher.events[0].finished(.succeeded)
+        let finished = try XCTUnwrap(scheduler.allRecords().first)
+        XCTAssertNotNil(try scheduler.message(message, to: finished))
+        let resumed = try XCTUnwrap(launcher.specs.last)
+        XCTAssertEqual(resumed.resume, "same-session")
+        XCTAssertEqual(resumed.attachments.count, 1)
+        XCTAssertNotEqual(resumed.attachments[0].url, source)
+        XCTAssertEqual(try String(contentsOf: resumed.attachments[0].url, encoding: .utf8), "sample contents")
+    }
+
+    func testRequestsRemainPendingUntilAnIdentifiedAnswerAndDisappearAtFinish() throws {
+        let routine = addDailyRoutine(enabled: false)
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("provider-session")
+        let record = try XCTUnwrap(scheduler.active["report"])
+        let request = RequestPresentation.permission(title: "Allow command?", detail: "echo sample")
+        launcher.events[0].requests([request])
+        XCTAssertEqual(scheduler.current(record.id)?.requests, [request])
+        XCTAssertEqual(scheduler.current(record.id)?.attention, request.title)
+        _ = scheduler.message("Please continue", to: record)
+        XCTAssertTrue(launcher.controls[0].responses.isEmpty, "chat text is not an approval")
+        XCTAssertEqual(scheduler.current(record.id)?.attention, request.title)
+        scheduler.respond(to: "other-request", in: record, response: .init(choice: "allow"))
+        XCTAssertTrue(launcher.controls[0].responses.isEmpty)
+        scheduler.respond(to: request.id, in: record, response: .init(choice: "deny"))
+        XCTAssertEqual(launcher.controls[0].responses.count, 1)
+        XCTAssertEqual(launcher.controls[0].responses[0].0, request.id)
+        launcher.events[0].finished(.cancelled)
+        XCTAssertNil(scheduler.current(record.id)?.requests)
+        XCTAssertNil(scheduler.current(record.id)?.attention)
+        scheduler.respond(to: request.id, in: record, response: .init(choice: "allow"))
+        XCTAssertEqual(launcher.controls[0].responses.count, 1)
     }
 
     func testSavingAnEnabledRoutineSchedulesItsNextSlot() {
@@ -307,6 +356,28 @@ final class SchedulerTests: XCTestCase {
         XCTAssertEqual(launcher.specs.map(\.effort), ["high", "high"])
     }
 
+    func testContinuationKeepsCapturedModelDefaultEffortAndDirectoryAfterRoutineEdit() throws {
+        var routine = addDailyRoutine()
+        let directory = routine.workingDirectory
+        routine.model = nil
+        routine.effort = "low"
+        scheduler.save(routine)
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("thread-1")
+        launcher.events[0].metadata(SessionMetadata(model: "resolved-model", effort: "low"))
+        launcher.completions[0](.succeeded)
+        let finished = try XCTUnwrap(scheduler.history.records(for: routine.id).first)
+        XCTAssertEqual(finished.metadata?.model, "resolved-model")
+        routine.model = "different-model"
+        routine.effort = "high"
+        routine.workingDirectory = "/different-folder"
+        scheduler.save(routine)
+        scheduler.message("Continue", to: finished)
+        XCTAssertNil(launcher.specs.last?.model, "CLI default must remain unpinned")
+        XCTAssertEqual(launcher.specs.last?.effort, "low")
+        XCTAssertEqual(launcher.specs.last?.workingDirectory, directory)
+    }
+
     func testCodexRunTakesMessagesWhileRunningAndContinuesAfter() throws {
         let routine = addDailyRoutine()
         scheduler.run(routine, trigger: .manual)
@@ -355,12 +426,11 @@ final class SchedulerTests: XCTestCase {
         XCTAssertEqual(launcher.specs.count, 2, "no third launch")
     }
 
-    func testShellRoutineRunsItsCommandWithoutSkillScanning() throws {
+    func testShellRoutineRunsItsCommand() throws {
         var routine = addDailyRoutine()
         routine.harness = .shell
         routine.prompt = "echo PushNotification"
         scheduler.save(routine)
-        XCTAssertTrue(scheduler.requirements(of: routine).isEmpty)
         scheduler.run(routine, trigger: .manual)
         XCTAssertEqual(launcher.specs.first?.prompt, "echo PushNotification")
         XCTAssertEqual(launcher.specs.first?.mode, .screen)

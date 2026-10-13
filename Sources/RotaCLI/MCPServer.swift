@@ -48,7 +48,7 @@ struct MCPServer {
             Tool(name: "get_routine", method: "routines.get", description: "Show one routine.",
                  properties: ["id": id], required: ["id"]),
             Tool(name: "create_routine", method: "routines.create",
-             description: "Schedule a new routine in Rota. It runs unattended on its schedule with approvals bypassed, "
+             description: "Schedule a new routine in Rota. It runs on its schedule using the harness configuration, "
                     + "and Rota notifies the user that an agent added it. Give a prompt or a skill.",
                  properties: fields, required: ["id", "workingDirectory", "schedule"]),
             Tool(name: "update_routine", method: "routines.update",

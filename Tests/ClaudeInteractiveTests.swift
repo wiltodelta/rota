@@ -34,18 +34,12 @@ final class ClaudeInteractiveTests: XCTestCase {
     func testCommandLine() {
         let new = ClaudeInteractiveRun.arguments(session: "s1", resume: false, settings: "/c/s.json",
                                                  model: ["--model", "haiku"], prompt: "-start with a dash")
-        XCTAssertEqual(new, ["--session-id", "s1", "--settings", "/c/s.json", "--permission-mode",
-                             "bypassPermissions", "--model", "haiku", "--", "-start with a dash"])
+        XCTAssertEqual(new, ["--session-id", "s1", "--settings", "/c/s.json",
+                             "--model", "haiku", "--", "-start with a dash"])
         let resumed = ClaudeInteractiveRun.arguments(session: "s1", resume: true, settings: "/c/s.json", model: [],
                                                      prompt: "next")
         XCTAssertEqual(Array(resumed.prefix(2)), ["--resume", "s1"])
-        let script = ClaudeInteractiveRun.scriptText(executable: "/bin/claude", arguments: ["--", "it's"],
-                                                     directory: "/p q", exitFile: URL(fileURLWithPath: "/x/e"))
-        XCTAssertEqual(script, """
-            cd '/p q' || { print -r -- 1 > '/x/e'; exit 1 }
-            '/bin/claude' '--' 'it'\\''s'
-            print -r -- $? > '/x/e'
-            """)
+
     }
 
     func testHookMarksTheSessionThroughTheRunsCommand() throws {

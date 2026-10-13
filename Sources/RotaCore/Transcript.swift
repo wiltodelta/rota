@@ -21,6 +21,21 @@ public struct TranscriptItem: Equatable, Identifiable, Sendable {
     public var id: Int
     public var kind: Kind
     public var text: String
+    public var sourceID: String?
+    public var turnID: String?
+    public var phase: MessagePhase?
+    public var delivery: MessageDelivery?
+    public var model: String?
+    public var tool: SessionTool?
+    public var attachments: [ChatAttachment] = []
+
+    public init(id: Int, kind: Kind, text: String, turnID: String? = nil, model: String? = nil) {
+        self.id = id
+        self.kind = kind
+        self.text = text
+        self.turnID = turnID
+        self.model = model
+    }
 }
 
 /// Reads a run log into chat entries. Runners write the log with line prefixes:
@@ -129,6 +144,7 @@ public struct TranscriptTurn: Equatable, Identifiable, Sendable {
     /// Splits the items at each user message. Within a turn, everything up to the
     /// last tool call is work; the agent text and output after it are the answer.
     public static func group(_ items: [TranscriptItem]) -> [TranscriptTurn] {
+        if items.contains(where: { $0.turnID != nil }) { return structured(items) }
         var turns: [TranscriptTurn] = []
         var current = TranscriptTurn()
         var body: [TranscriptItem] = []
@@ -162,13 +178,40 @@ public struct TranscriptTurn: Equatable, Identifiable, Sendable {
         close()
         return turns
     }
+
+    private static func structured(_ items: [TranscriptItem]) -> [TranscriptTurn] {
+        var turns = group(items.filter { $0.turnID == nil })
+        var positions: [String: Int] = [:]
+        for item in items {
+            guard let id = item.turnID else { continue }
+            let index: Int
+            if let existing = positions[id] { index = existing } else {
+                index = turns.count
+                positions[id] = index
+                turns.append(TranscriptTurn())
+            }
+            switch item.kind {
+            case .user:
+                if turns[index].prompt == nil { turns[index].prompt = item } else {
+                    turns[index].work.append(item)
+                }
+            case .plan: turns[index].plan = item
+            case .error, .status: turns[index].notes.append(item)
+            default:
+                if item.kind == .tool || item.phase == .work { turns[index].work.append(item) } else {
+                    turns[index].answer.append(item)
+                }
+            }
+        }
+        return turns
+    }
 }
 
 /// One step of an agent's plan: Claude's `TodoWrite`, Codex's `turn/plan/updated`
 /// and Grok's ACP `plan` update all send the whole plan each time. In the log a
 /// plan is a block of `[plan] ` lines, one per step, marked done, doing or todo.
-public struct PlanStep: Equatable, Sendable {
-    public enum Status: String, Sendable { case pending = "todo", inProgress = "doing", completed = "done" }
+public struct PlanStep: Codable, Equatable, Sendable {
+    public enum Status: String, Codable, Sendable { case pending = "todo", inProgress = "doing", completed = "done" }
 
     public var status: Status
     public var text: String
@@ -204,27 +247,5 @@ public struct PlanStep: Equatable, Sendable {
             guard parts.count == 2, let status = Status(rawValue: String(parts[0])) else { return nil }
             return PlanStep(status: status, text: String(parts[1]))
         }
-    }
-}
-
-/// A message sent from the chat, shown faded as "Sending…" until the session's
-/// log has it: at once for Claude in print mode, which logs it on send; when
-/// Claude takes it for an interactive session, which may be after the turn.
-public struct Outgoing: Equatable, Sendable {
-    public let text: String
-    /// How many user messages with this text the log had when it was sent.
-    public let seen: Int
-
-    public init(text: String, seen: Int) {
-        self.text = text
-        self.seen = seen
-    }
-
-    public static func count(_ text: String, in items: [TranscriptItem]) -> Int {
-        items.filter { $0.kind == .user && $0.text == text }.count
-    }
-
-    public func delivered(in items: [TranscriptItem]) -> Bool {
-        Self.count(text, in: items) > seen
     }
 }

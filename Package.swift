@@ -20,8 +20,10 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0")
     ],
     targets: [
+        .target(name: "RotaPTY", path: "Sources/RotaPTY"),
         .target(
             name: "RotaCore",
+            dependencies: ["RotaPTY"],
             path: "Sources/RotaCore"
         ),
         .executableTarget(
@@ -46,7 +48,7 @@ let package = Package(
         ),
         .testTarget(
             name: "RotaTests",
-            dependencies: ["RotaCore"],
+            dependencies: ["RotaCore", "Rota"],
             path: "Tests"
         )
     ]

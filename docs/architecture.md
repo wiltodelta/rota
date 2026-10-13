@@ -4,7 +4,7 @@
 flowchart LR
     Tick[Scheduler.tick every 30 s] -->|slot due| Run[Scheduler.run]
     Run --> Launcher[ProcessLauncher]
-    Launcher -->|Claude| ClaudeTUI[ClaudeInteractiveRun: interactive claude in screen, transcript read back]
+    Launcher -->|Claude| ClaudeTUI[ClaudeInteractiveRun: controlling PTY, transcript read back]
     Launcher -->|Claude, untrusted folder| ClaudeRun[ClaudeStreamRun: claude -p, stream-json in and out]
     Launcher -->|Codex| CodexRun[CodexDaemonRun: JSON-RPC over WebSocket to the app-server daemon]
     Launcher -->|Grok| GrokRun[GrokACPRun: ACP over stdio through the shared leader]
@@ -25,10 +25,11 @@ flowchart LR
 - `Scheduler` owns the routines (`routines.json` in Application Support) and
   persists each routine's `nextFire`. A tick fires a due slot (a catch-up or a
   skip when it is late, below) and moves `nextFire` past now either way.
-- `Harness` holds everything per CLI: default path, headless arguments, launch
-  mode, chat arguments, and which capabilities (Chrome, phone push) it has.
-  `SkillRequirements` reads the routine's `.claude/skills/<id>/SKILL.md` for
-  markers of those capabilities.
+- `Harness` holds the CLI's default path, headless arguments, launch mode
+  and chat arguments. Rota does not scan prompts or skill files for tool
+  requirements or warn about compatibility when the harness changes. The
+  selected agent resolves tool requirements during the run. Claude's Chrome
+  launch flag follows the user's Claude settings, independently of skill text.
 - A routine's `model` and `effort` (nil leaves the CLI's default) travel only
   in `LaunchSpec`; each runner turns them into its own form, Claude
   `--model`/`--effort` and Grok `--model`/`--reasoning-effort` through
@@ -80,7 +81,7 @@ flowchart LR
   a new Terminal window sees, whatever started Rota: started by `rota` inside
   an agent session, Rota had passed that session's `CLAUDECODE`,
   `ANTHROPIC_BASE_URL` and super.engineering variables to every run. The
-  interactive run's once-a-second `screen` calls skip the login shell
+  legacy `screen` checks skip the login shell
   (`capture(..., loginShell: false)`, 0.04 s against 0.17 s a call).
 - Codex's app-server daemon and Grok's leader outlive the run that starts them
   and keep its folder and environment, so they start in the home folder with
@@ -115,24 +116,30 @@ flowchart LR
   always run in `/bin/zsh`, so Settings lists agents only.
 - `ClaudeStreamRun` runs Claude the way Claude Desktop does
   (read from its live `ps` on 2026-10-09): `claude -p --input-format
-  stream-json --output-format stream-json --verbose --permission-mode
-  bypassPermissions`. The prompt and each later message are user messages on
+  stream-json --output-format stream-json --verbose`. The prompt and each later message are user messages on
   stdin; a message sent mid-turn joins that turn; the `result` event ends the
   run and closing stdin lets Claude exit and save the session; the `system`
   `init` event carries the session id, and `--resume <id>` continues it. `-p`
   asks no folder-trust question. The session lives in Rota's process.
 - `ClaudeInteractiveRun` is the default for Claude (Settings > Agents), because
   only an interactive session loads computer use (`ClaudeUserSettings`). It
-  runs `claude --session-id <id> --settings <hooks> --permission-mode
-  bypassPermissions -- <prompt>` (`--resume <id>` to continue) in a detached
-  `screen` session, which gives it a terminal and lets Open in Terminal
-  attach. The chat is Claude's transcript, `~/.claude/projects/*/<id>.jsonl`,
+  runs `claude --session-id <id> --settings <hooks> -- <prompt>` (`--resume <id>` to continue) in a detached
+  controlling PTY owned by `PTYProcess`. Open in Terminal uses the bundled
+  `rota attach-terminal` client through a private 0600 Unix socket. Ctrl-] detaches
+  without stopping Claude; resizing the client resizes the PTY. A slow attachment
+  is disconnected after its output queue reaches 512 KiB, leaving the agent free
+  to continue. Terminal replay is bounded to 64 KiB. The child establishes its
+  own session and controlling terminal in a C shim before `execve`; Swift never
+  runs in the forked child. Rota drains terminal output and receives the actual
+  process exit status through `waitpid`. The chat is Claude's transcript, `~/.claude/projects/*/<id>.jsonl`,
   read from where it ended: assistant entries have the stream-json shape, a
   message typed mid-turn appears as a `queued_command` attachment, and
   `system`/`turn_duration` ends a turn (`ClaudeTranscript`, shapes from Claude
   Code 2.1.296 on 2026-10-11). Messages are typed in as a bracketed paste
-  (`screen -X stuff` passes `^`, `\`, `$` through as typed); once the last turn
-  ended with nothing typed since, the run types `/exit`. A `Notification` hook
+  directly into the PTY. Messages arriving during CLI startup remain pending
+  until Claude writes its initial prompt to the transcript, so startup cannot
+  silently discard the input. Once the last turn ended with nothing typed
+  since, the run types `/exit`. A `Notification` hook
   (permission or app-access prompt) marks the session needs-reply through
   `$ROTA_CLI notify`. Claude shows a folder-trust dialog nobody could answer,
   so a folder without `hasTrustDialogAccepted` (itself or its repository) runs
@@ -140,24 +147,58 @@ flowchart LR
   macOS attributes computer use to Rota (`responsible=com.wiltodelta.rota` in
   tccd's log), so Settings shows Rota's Accessibility and Screen Recording
   grants and asks for them.
+- Harness configuration owns permissions, sandbox policy, MCP servers, plugins
+  and skills. Rota passes transport flags, run identity and notification hooks,
+  plus model/effort only when the routine explicitly chooses them. It never
+  forces permission bypass or auto-approves a tool request. Codex command,
+  file-change and turn-scoped permission requests, Codex user questions, Grok
+  ACP tool permissions, Claude print-mode `can_use_tool` requests and its
+  `AskUserQuestion` forms wait for
+  an explicit answer in the chat. `SessionRequests` holds the original reply
+  closures on the run queue and validates the selected option before consuming
+  a request exactly once. Codex requests resolved by another client are removed
+  using `serverRequest/resolved`; Claude cancellations also dismiss their form.
+  Stop, timeout and disconnect invalidate outstanding choices. The request
+  broker never logs answer values; provider transcripts can still contain an
+  answer if the provider echoes it. Secret question fields use secure input.
+  Interactive Claude bridges `AskUserQuestion` through `PreToolUse` and one-time
+  tool permissions through `PermissionRequest`. Each run owns a 0600 Unix socket
+  (`ClaudeHookServer`) on its runner queue. The bundled `rota claude-hook` helper
+  reads the actual hook payload from stdin and waits for a response through
+  `ControlClient`; it never starts the app or routes to another session. Hook
+  session IDs are validated before creating a form. Question replies preserve
+  the original input and add answers keyed by the original question text;
+  permission replies never persist rules or change the permission mode. Client
+  EOF, stop and timeout invalidate pending choices. Bridge failures return an
+  explicit denial. Generated hook settings are unique per run and removed on
+  finish. The hook wait expires after 24 hours; native prompts outside those
+  hook events still use the attached Terminal. Managed/user hook policies are
+  respected. `LiveClaudeHookTests` verifies real interactive answers, one-time
+  permissions and cancellation when `ROTA_LIVE=1` and
+  `ROTA_LIVE_TRUSTED_FOLDER` names an already trusted checkout.
+  A permission prompt marks the session needs-reply; answering ordinary chat
+  text never approves a pending tool request.
 - Every run stays reachable while it works, which is the point of each runner
   (verified live 2026-10-09 with `ROTA_LIVE=1 swift test --filter LiveHarnessTests`):
   - `CodexDaemonRun` runs `codex app-server daemon start`, then speaks JSON-RPC
     to the daemon through `codex app-server proxy`, which pipes the daemon's
     Unix socket; the socket is WebSocket, so `WebSocketTransport` does the
     RFC 6455 handshake and frames (Network.framework would not stack TCP on a
-    Unix endpoint). `thread/start` with `approvalPolicy: never` and
-    `sandbox: danger-full-access`, then `turn/start`; `turn/completed` ends the
+    Unix endpoint). `thread/start` or `thread/resume` omits approval and sandbox
+    overrides, then `turn/start`; `turn/completed` ends the
     run; `send` is `turn/steer`, which joins the running turn. Codex's TUI could
     not be shown joining a live turn (`codex resume --remote` stalled behind its
     update prompt in a pty), so Rota offers the in-app field while running and
     `codex resume` after.
-  - `GrokACPRun` runs `grok agent --leader --always-approve stdio` and speaks
+  - `GrokACPRun` runs `grok agent --leader stdio` and speaks
     ACP: `session/new`, `session/prompt`, `session/update` chunks. The Grok TUI
-    has no leader mode for joining a live session, so messages go through
-    Rota's field as further `session/prompt`s, which Grok answers after the
-    current turn; the run ends when every prompt has returned, or the queued
-    answer would be lost with the connection.
+    has no leader mode for joining a live session. Rota sends text steering
+    through `_x.ai/interject` with `sessionId` and `text`, and waits for the
+    provider's queue acknowledgment (`result.status: queued` on the installed
+    leader) or an explicit `accepted` acknowledgment. Unknown replies remain
+    unconfirmed. The initial prompt and outstanding
+    acknowledgments must finish before the connection closes. Timed-out writes
+    remain unconfirmed and are never automatically retried.
   - `ScreenRun` writes a zsh script that runs the command with its output
     `tee`d to the log and writes `${pipestatus[1]}` to an exit file, starts it
     with `screen -dmS rota-<id>` (macOS ships screen 4.00, which has no
@@ -173,17 +214,66 @@ flowchart LR
   session id, appending to the same log: Claude `--resume <session id>`, Codex
   `thread/resume`, Grok `session/load` with its replayed updates ignored.
   Verified live 2026-10-09 by the `*Continues*` tests in `LiveHarnessTests`.
-- Runners write the log as chat lines (`Transcript`): `[you] ` before every
-  line of user text, `-> ` for a tool, `[rota: …]` for status, `[error] `;
-  everything else is the agent's text. `Transcript.parse` turns it into
-  items and `TranscriptTurn.group` into turns, split at each user message:
-  what comes up to a turn's last tool call is its work, folded behind one rule
-  in `ChatTranscript` (open while the turn runs), and the text after it is the
-  answer. The layout follows super.engineering's chat.
+- `RunJournal` writes normalized `SessionEvent` records beside each readable
+  log, at `<log>.events.jsonl`. Message, turn, and tool IDs remain separate from
+  display text. Claude partial events and completed snapshots share IDs;
+  Codex phases distinguish commentary and final answers; Grok chunks create a
+  new segment after tool activity. Tool updates retain input, output and status.
+  `SessionEventReader` incrementally reads complete JSONL records without
+  cutting off older messages; an incomplete final line waits, while a corrupt
+  complete line raises and is shown as an error. `SessionTranscript` projects
+  events into chat items, and `TranscriptTurn.group` respects their explicit
+  turn IDs. An unphased assistant segment followed by a tool becomes activity.
+  `TranscriptDocument`
+  assembles every visible turn into one attributed string in a read-only
+  `NSTextView`, hosted by `TranscriptScrollView`. Selection crosses paragraphs,
+  lists, code and messages; native Copy and Command-C copy the selected range.
+  UTF-16 offsets move with insertions before the selection, and appended
+  answers do not extend it. Refreshes preserve selection and scroll position;
+  automatic following pauses while text is selected. Messages use plain
+  speaker labels, and plans list each step's status as text. The rounded
+  composer keeps its model, run clock, Send and Stop controls.
+- `ChatMessage` carries text and `ChatAttachment` metadata. The composer accepts
+  file selection and file-URL drops, shows downsampled image previews and removable
+  file chips, and permits attachment-only messages. `Scheduler.message` retains
+  copies beside the log in `<stem>.attachments/<message-id>/<attachment-id>/` before
+  launching or steering. Missing files, folders, invalid IDs and size/count limits
+  fail before delivery; failed messages restore their attachments as well as text.
+  `LaunchSpec.attachments` carries retained files through a continuation. Claude
+  stream-json sends base64 image blocks, Codex sends `localImage` inputs on both
+  start and steer, and Grok sends ACP image blocks only when initialize advertises
+  `promptCapabilities.image`. Grok interject and interactive Claude receive text
+  references to retained files. Other formats use references under the harness's
+  existing tool permissions; attaching a file does not widen sandbox access.
+  A separate normalized `attachments` event leaves old user event decoding intact.
+  The transcript renders bounded thumbnails and native file links. Log retention
+  removes attachment copies with the readable log and event sidecar.
+- Delivery has an independent state keyed by message ID. A local row does not
+  confirm delivery. Claude print mode uses replayed user messages, interactive
+  Claude uses its transcript echoes, Codex validates the `turn/steer` reply's
+  turn ID, and Grok checks its interject acknowledgment. Writes without a
+  provider acknowledgment remain marked as sent or unconfirmed. The composer
+  can restore a rejected or cancelled message as an editable draft.
+- `RunRecord.configuration` captures requested model, effort and working
+  directory. Continuations reuse it even after routine edits, with legacy
+  records adopting it on their next continuation. Reported model/effort update
+  `RunRecord.metadata` and each new response's label without rewriting earlier
+  responses. Event-save failures are retained in `RunRecord.eventError` and
+  shown in the session; the readable log remains available.
+- Legacy sessions and shell output still use `Transcript.parse` over the
+  readable log. Before an old agent session continues, its full readable
+  history is imported once as a legacy event. History retention removes
+  the readable log, its event sidecar and retained attachment copies.
 - Agent text renders through `MarkdownBlock` (headings, list items, fenced
-  code, paragraphs; inline Markdown inside each), because SwiftUI `Text` draws
-  inline Markdown only. `Transcript.parse` keeps a fenced block with blank
-  lines in one message.
+  code, paragraphs; inline Markdown inside each) into native attributed text.
+  Headings use the body size with semibold weight; code uses the chosen
+  monospaced font and wraps inside the text column. `Transcript.parse` keeps
+  a fenced block with blank lines in one message. Separate selectable views
+  must not split the transcript: they prevent cross-block selection.
+- `TranscriptSelectionTests` imports the app target and exercises the actual
+  native text view. It copies through the view's advertised pasteboard types
+  into a private pasteboard, and checks selection after streamed appends,
+  inserted activity, font changes and shortening. No agent is launched.
 - Scheduling follows Claude Desktop's policy: a missed slot runs once late, as
   `RunTrigger.catchUp`, when under `missedRunGrace` (7 days) old, otherwise a
   skip is recorded; an overlap is skipped without a notification. Skips stay
@@ -204,7 +294,7 @@ flowchart LR
   `retryDelay` (60 s). A resume is continued in
   its session with `resumeMessage` ("Continue", shown in the chat as a
   message) once online, at most `resumeLimit` (2) times
-  per run (`RunRecord.resumes`). An interactive Claude whose screen session is
+  per run (`RunRecord.resumes`). A legacy interactive Claude whose screen session is
   still up (Rota crashed, Claude did not) is left alone, and shell commands are
   never rerun. On `willPowerOff` the app quits without its confirmation, so
   the system is not held up and the open runs are orphans for the next launch.
@@ -243,6 +333,13 @@ iTerm2 or another app as a document, Ghostty as a new instance with `-e`
 (it does not run a script handed to it), or in the macOS default terminal:
 the app that opens Unix executables, which "Make iTerm2 Default Term"
 changes while `.command` files stay with Terminal, then the `.command` handler. A live test checks `TERM_PROGRAM` in each installed one.
+Every terminal opens through `/usr/bin/open` with
+`ProcessLauncher.baseEnvironment`, including the fallback document opener.
+`NSWorkspace.OpenConfiguration.environment` only adds overrides, so omitting
+child-session variables there does not remove them. A newly launched terminal must not inherit the
+calling agent's `CLAUDE_CODE_CHILD_SESSION` or session id, which would disable
+Claude transcript saving in its future tabs. This does not change the
+environment of a terminal that is already running.
 
 Layout rules learned while measuring the narrowest window (820 pt):
 

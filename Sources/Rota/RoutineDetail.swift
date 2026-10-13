@@ -17,9 +17,6 @@ struct RoutineDetail: View {
             header
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
-            HarnessWarnings(routine: routine)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 10)
             Divider()
             List(records) { record in
                 Button {
