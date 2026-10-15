@@ -41,11 +41,13 @@ final class LiveHarnessTests: XCTestCase {
         let events = RunEvents(session: { id in
             session = id
             LiveSessionManifest.record(id, harness: harness, cwd: workingDirectory, folder: self.folder)
+            // Snapshot the assigned control on the callback's main queue before scheduling work.
+            let target = UncheckedSendable(control)
             if let stopAfter {
-                DispatchQueue.main.asyncAfter(deadline: .now() + stopAfter) { control?.stop() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + stopAfter) { target.value?.stop() }
             }
             guard let message else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { control?.send(message) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { target.value?.send(message) }
         }, finished: { result in
             outcome = result
             ended.fulfill()
