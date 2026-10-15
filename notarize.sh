@@ -19,6 +19,9 @@ VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/
 ZIP="Rota-v$VERSION-macOS.zip"
 
 if [[ "${1:-}" != "--zip-only" ]]; then
+    [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" == com.wiltodelta.rota ]] ||
+        { echo "error: notarization requires the release bundle id (RELEASE=1 ./create-app.sh)" >&2; exit 1; }
+    codesign --verify --deep --strict "$APP"
     # Read into a variable first: under pipefail, grep -q closing the pipe early
     # would fail the pipeline even on a match.
     SIGNATURE="$(codesign -dvv "$APP" 2>&1)"
@@ -27,7 +30,9 @@ if [[ "${1:-}" != "--zip-only" ]]; then
 
     # notarytool takes a zip; the ticket is stapled to the app itself, so the
     # release zip is built afterwards.
-    UPLOAD="$(mktemp -d)/upload.zip"
+    UPLOAD_DIR="$(mktemp -d)"
+    trap 'rm -rf "$UPLOAD_DIR"' EXIT
+    UPLOAD="$UPLOAD_DIR/upload.zip"
     ditto -c -k --keepParent "$APP" "$UPLOAD"
     xcrun notarytool submit "$UPLOAD" --keychain-profile "$PROFILE" ${KEYCHAIN_ARGS[@]+"${KEYCHAIN_ARGS[@]}"} --wait
     xcrun stapler staple "$APP"

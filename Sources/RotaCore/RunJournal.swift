@@ -7,6 +7,7 @@ final class RunJournal: @unchecked Sendable {
     private let output: FileHandle
     private let eventOutput: FileHandle
     private let events: RunEvents
+    private let trimsUserEcho: Bool
     private let lock = NSLock()
     private let startedAt = Date()
     let turnID = UUID().uuidString
@@ -25,6 +26,7 @@ final class RunJournal: @unchecked Sendable {
     init(output: FileHandle, events: RunEvents, spec: LaunchSpec, legacy: String?) throws {
         self.output = output
         self.events = events
+        trimsUserEcho = spec.mode == .claudeInteractive
         initialMessageID = spec.messageID
         let file = SessionEventReader.file(for: spec.log)
         if spec.resume == nil || !FileManager.default.fileExists(atPath: file.path) {
@@ -62,7 +64,7 @@ final class RunJournal: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard !closed else { return }
-        users.append(UserMessage(id: id, text: echo ?? message.fileReferenceText))
+        users.append(UserMessage(id: id, text: matchingText(echo ?? message.fileReferenceText)))
         emit(.user(id: id, text: message.text, delivery: .pending))
         if !message.attachments.isEmpty { emit(.attachments(id: id, files: message.attachments)) }
     }
@@ -71,6 +73,9 @@ final class RunJournal: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard let index = users.firstIndex(where: { $0.id == id }) else { return }
+        guard users[index].state != state else { return }
+        // The provider echo may arrive before a writer's completion callback.
+        guard state != .written || users[index].state == .pending else { return }
         users[index].state = state
         emit(.delivery(id: id, state: state))
     }
@@ -79,12 +84,18 @@ final class RunJournal: @unchecked Sendable {
     func confirmUser(_ text: String, queued: Bool = false) {
         lock.lock()
         defer { lock.unlock() }
+        let text = matchingText(text)
         guard let index = users.firstIndex(where: {
             $0.text == text && ($0.state == .pending || $0.state == .written)
         }) else { return }
         let state: MessageDelivery = queued ? .queued : .accepted
         users[index].state = state
         emit(.delivery(id: users[index].id, state: state))
+    }
+
+    /// Claude's interactive editor trims the submitted text; other protocols echo it literally.
+    private func matchingText(_ text: String) -> String {
+        trimsUserEcho ? text.trimmingCharacters(in: .whitespacesAndNewlines) : text
     }
 
     func line(_ text: String, structured: Bool = true) {
@@ -145,13 +156,7 @@ final class RunJournal: @unchecked Sendable {
             let data = try JSONEncoder().encode(SessionEvent(turnID: turnID, payload: payload))
             try eventOutput.write(contentsOf: data + Data("\n".utf8))
         } catch {
-            // No user content or serialized request is included in application logs.
-            Self.log.error("Could not save a session event: \(error.localizedDescription, privacy: .public)")
-            if !eventWriteFailed {
-                eventWriteFailed = true
-                let reason = error.localizedDescription
-                DispatchQueue.main.async { self.events.eventError(reason) }
-            }
+            reportWriteFailure(error)
         }
     }
 
@@ -163,8 +168,18 @@ final class RunJournal: @unchecked Sendable {
 
     private func write(_ text: String) {
         guard !closed else { return }
-        output.seekToEndOfFile()
-        output.write(Data((text + "\n").utf8))
+        do {
+            try output.seekToEnd()
+            try output.write(contentsOf: Data((text + "\n").utf8))
+        } catch { reportWriteFailure(error) }
+    }
+
+    private func reportWriteFailure(_ error: Error) {
+        Self.log.error("Could not save session history: \(error.localizedDescription, privacy: .private)")
+        guard !eventWriteFailed else { return }
+        eventWriteFailed = true
+        let reason = error.localizedDescription
+        DispatchQueue.main.async { self.events.eventError(reason) }
     }
 }
 

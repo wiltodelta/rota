@@ -70,10 +70,21 @@ public struct Routine: Codable, Identifiable, Equatable, Sendable {
         return !id.isEmpty && id.unicodeScalars.allSatisfy { $0.isASCII && allowed.contains($0) }
     }
 
+    /// Imported IDs may contain spaces or Unicode, but must remain a single safe file component.
+    public static func isSafeStorageID(_ id: String) -> Bool {
+        !id.isEmpty && id != "." && id != ".." && !id.contains("/") && !id.contains("\u{0}")
+    }
+
+    /// Keep storage portable across the case-insensitive volumes macOS commonly uses.
+    public static func storageIDKey(_ id: String) -> String {
+        id.folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
+    }
+
     /// Why the routine cannot be saved, or nil. The window, the `rota` command
     /// and the MCP tools share it; `checkingID` is off for an existing routine,
     /// which keeps the id it was imported with.
     public func problem(checkingID: Bool = true) -> String? {
+        if !checkingID, !Self.isSafeStorageID(id) { return "The routine id must be a safe file name." }
         if checkingID, id.isEmpty { return "Give the routine an id, such as weekly-report." }
         if checkingID, !Self.isValidID(id) {
             return "An id is lowercase letters, digits, - and _, such as weekly-report."

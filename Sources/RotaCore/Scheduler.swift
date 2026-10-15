@@ -64,8 +64,12 @@ public final class Scheduler {
     @ObservationIgnored public let history: RunHistory
     @ObservationIgnored let launcher: RoutineLaunching
     @ObservationIgnored var controls: [String: RunControl] = [:]
+    @ObservationIgnored var runTokens: [String: UUID] = [:]
+    /// Deleted runs keep their control alive until Stop completes its cleanup.
+    @ObservationIgnored var retiringControls: [UUID: RunControl] = [:]
+    @ObservationIgnored private var routinesReadable = true
     /// When each routine's current run started, a continued session included.
-    @ObservationIgnored private var runStarts: [String: Date] = [:]
+    @ObservationIgnored var runStarts: [String: Date] = [:]
     @ObservationIgnored private var timer: Timer?
 
     public init(location: StorageLocation, launcher: RoutineLaunching) {
@@ -75,15 +79,31 @@ public final class Scheduler {
         do {
             routines = try store.load()
         } catch {
+            routinesReadable = false
             lastError = "Could not read routines: \(error.localizedDescription)"
-            Self.log.error("Could not read routines: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("Could not read routines: \(error.localizedDescription, privacy: .private)")
+        }
+        do {
+            for routine in routines { _ = try history.loadRecords(for: routine.id) }
+        } catch {
+            lastError = "Could not read run history: \(error.localizedDescription)"
+            Self.log.error("Could not read run history: \(error.localizedDescription, privacy: .private)")
         }
     }
 
     /// Closes runs a previous launch left open and starts the 30-second tick.
     public func start() {
+        guard timer == nil else { return }
         // Runs the last launch left open were cut off: the Mac shut down, or Rota stopped.
-        for record in history.closeOrphans(routineIDs: routines.map(\.id), now: now())
+        let orphans: [RunRecord]
+        do {
+            orphans = try history.closeOrphans(routineIDs: routines.map(\.id), now: now())
+        } catch {
+            orphans = []
+            lastError = "Could not recover unfinished sessions: \(error.localizedDescription)"
+            Self.log.error("Could not recover unfinished sessions: \(error.localizedDescription, privacy: .private)")
+        }
+        for record in orphans
         where resumable(record) && !stillRunning(record) {
             pendingResumes[record.id] = record.routineID
         }
@@ -97,11 +117,14 @@ public final class Scheduler {
     }
 
     public func tick() {
-        // Offline (just woken, no Wi-Fi yet), a due slot waits rather than failing; it runs once online.
-        guard isOnline() else { return }
+        // Agent slots wait for their service; local shell commands do not require a network.
+        let online = isOnline()
         let current = now()
+        let previous = routines
+        var dueRoutines: [(Routine, Date)] = []
         var changed = false
         for index in routines.indices where routines[index].enabled {
+            if routines[index].harness.isAgent && !online { continue }
             guard let schedule = try? CronSchedule(routines[index].schedule) else { continue }
             guard let due = routines[index].nextFire else {
                 routines[index].nextFire = schedule.next(after: current, calendar: calendar)
@@ -111,7 +134,14 @@ public final class Scheduler {
             guard due <= current else { continue }
             routines[index].nextFire = schedule.next(after: current, calendar: calendar)
             changed = true
-            let routine = routines[index]
+            dueRoutines.append((routines[index], due))
+        }
+        if changed, !persist() {
+            routines = previous
+            return
+        }
+        // A due slot is durably advanced before any process or notification starts.
+        for (routine, due) in dueRoutines {
             if current.timeIntervalSince(due) > Self.missedRunGrace {
                 record(skipped: "missed the \(due.formatted(date: .abbreviated, time: .shortened)) slot",
                        routine: routine, at: current)
@@ -122,7 +152,6 @@ public final class Scheduler {
                 run(routine, trigger: current.timeIntervalSince(due) > 120 ? .catchUp : .scheduled)
             }
         }
-        if changed { persist() }
     }
 
     // MARK: Editing
@@ -131,8 +160,15 @@ public final class Scheduler {
         routines.first { $0.id == id }
     }
 
+    public func containsStorageID(_ id: String) -> Bool {
+        let key = Routine.storageIDKey(id)
+        return routines.contains { Routine.storageIDKey($0.id) == key }
+    }
+
     /// Adds or replaces a routine, recomputing its next slot from the saved schedule.
-    public func save(_ routine: Routine) {
+    @discardableResult
+    public func save(_ routine: Routine) -> Bool {
+        let previous = routines
         var routine = routine
         routine.nextFire = routine.enabled
             ? (try? CronSchedule(routine.schedule))?.next(after: now(), calendar: calendar)
@@ -142,213 +178,50 @@ public final class Scheduler {
         } else {
             routines.append(routine)
         }
-        persist()
+        guard persist() else { routines = previous; return false }
+        return true
     }
 
-    public func setEnabled(_ enabled: Bool, for id: String) {
-        guard var routine = routine(id) else { return }
+    @discardableResult
+    public func setEnabled(_ enabled: Bool, for id: String) -> Bool {
+        guard var routine = routine(id) else { return false }
         routine.enabled = enabled
-        save(routine)
+        return save(routine)
     }
 
-    public func delete(_ id: String) {
-        stop(id)
+    @discardableResult
+    public func delete(_ id: String) -> Bool {
+        let previous = routines
         routines.removeAll { $0.id == id }
+        guard persist() else { routines = previous; return false }
+        stop(id)
+        if let token = runTokens.removeValue(forKey: id), let control = controls.removeValue(forKey: id) {
+            retiringControls[token] = control
+        }
+        active[id] = nil
+        runStarts[id] = nil
+        sleptThrough.remove(id)
+        pendingResumes = pendingResumes.filter { $0.value != id }
+        pendingReruns[id] = nil
+        reruns[id] = nil
         history.removeAll(for: id)
-        persist()
+        historyVersion += 1
+        return true
     }
 
-    private func persist() {
+    private func persist() -> Bool {
+        guard routinesReadable else {
+            lastError = "Routines could not be read. Repair routines.json and reopen Rota before saving changes."
+            return false
+        }
         do {
             try store.save(routines)
+            return true
         } catch {
             lastError = "Could not save routines: \(error.localizedDescription)"
             Self.log.error("Could not save routines: \(error.localizedDescription, privacy: .public)")
+            return false
         }
-    }
-
-    // MARK: Running
-
-    public func run(_ routine: Routine, trigger: RunTrigger) {
-        guard active[routine.id] == nil else { return }
-        var record = RunRecord(routineID: routine.id, trigger: trigger, harness: routine.harness,
-                               startedAt: now(), outcome: .running)
-        let logURL = history.logFile(for: record)
-        record.logPath = logURL.path
-        start(record, spec: spec(for: routine, record: record, harness: routine.harness, prompt: routine.prompt,
-                                 log: logURL))
-    }
-
-    /// How `routine` runs `prompt` on `harness`: a new session, or `resume`'s.
-    private func spec(for routine: Routine, record: RunRecord, harness: Harness, prompt: String, log: URL,
-                      resume: String? = nil) -> LaunchSpec {
-        // A session started on another harness keeps that harness; the routine's model ids are not its.
-        let sameHarness = harness == routine.harness
-        // Only Claude reads ~/.claude.json, a file of hundreds of KB on a busy Mac.
-        let settings = harness == .claude ? claudeSettings() : ClaudeUserSettings()
-        let captured = resume == nil ? nil : record.configuration
-        var spec = LaunchSpec(
-            executable: executable(harness), prompt: prompt,
-            arguments: harness.arguments(settings: settings, resume: resume),
-            workingDirectory: captured?.workingDirectory ?? routine.workingDirectory,
-            environment: sessionEnvironment(record),
-            mode: harness.launchMode, timeout: routine.timeLimitMinutes.map { TimeInterval($0 * 60) },
-            log: log, resume: resume,
-            model: captured.map(\.model) ?? (sameHarness ? routine.model : nil),
-            effort: captured.map(\.effort) ?? (sameHarness ? routine.effort : nil))
-        if harness == .claude, claudeInteractive() {
-            if settings.trusts(spec.workingDirectory) {
-                spec.mode = .claudeInteractive
-            } else {
-                spec.notice = "ran with claude -p: Claude Code has not been trusted in this folder; "
-                    + "open Claude Code there once and trust it to run interactively, with computer use"
-            }
-        }
-        return spec
-    }
-
-    /// Launches `spec` as `record`, which becomes the routine's active run.
-    private func start(_ record: RunRecord, spec: LaunchSpec) {
-        var record = record
-        let id = record.routineID
-        if record.configuration == nil {
-            record.configuration = RunConfiguration(model: spec.model, effort: spec.effort,
-                                                     workingDirectory: spec.workingDirectory)
-        }
-        let events = RunEvents(
-            session: { [weak self] session in self?.attachSession(session, to: id) },
-            finished: { [weak self] outcome in self?.finish(id, outcome: outcome) },
-            metadata: { [weak self] value in self?.updateMetadata(value, routineID: id, recordID: record.id) },
-            eventError: { [weak self] reason in self?.eventWriteFailed(reason, routineID: id, recordID: record.id) },
-            requests: { [weak self] requests in self?.updateRequests(requests, routineID: id, recordID: record.id) })
-        do {
-            active[id] = record
-            runStarts[id] = now()
-            controls[id] = try launcher.launch(spec, events: events)
-            // The launch may already have reported the session (a runner that waits
-            // on a process spins the run loop), so save what is active, not the copy.
-            saveRecord(active[id] ?? record)
-            Self.log.info("Started \(id, privacy: .public) on \(record.harness.rawValue, privacy: .public)")
-        } catch {
-            active[id] = nil
-            record.outcome = .launchFailed(error.localizedDescription)
-            record.endedAt = now()
-            saveRecord(record)
-            if let routine = self.routine(id) { notifier?.runEnded(record, routine: routine) }
-        }
-    }
-
-    public func stop(_ id: String) {
-        controls[id]?.stop()
-    }
-
-    public func stopAll() {
-        controls.values.forEach { $0.stop() }
-    }
-
-    /// Every routine's sessions, newest first. Skipped slots stay in each
-    /// routine's own history: they have nothing to open.
-    public func allRecords() -> [RunRecord] {
-        routines.flatMap { history.records(for: $0.id) }.filter { !$0.isSkip }
-            .sorted { $0.startedAt > $1.startedAt }
-    }
-
-    /// Whether Rota can message `record`'s session now, running or finished.
-    public func canMessage(_ record: RunRecord) -> Bool {
-        guard record.sessionID != nil else { return false }
-        let running = isActive(record)
-        // While another run of the routine works, its finished sessions wait.
-        if !running && active[record.routineID] != nil { return false }
-        return record.harness.takesMessages
-    }
-
-    /// When `record`'s run started, while it runs: a continued session's run, not the session's first.
-    public func runStartedAt(_ record: RunRecord) -> Date? {
-        isActive(record) ? runStarts[record.routineID] : nil
-    }
-
-    public func isActive(_ record: RunRecord) -> Bool {
-        active[record.routineID]?.id == record.id
-    }
-
-    /// The terminal command for `record`'s session, with the harness's executable filled in.
-    public func terminalCommand(for record: RunRecord) -> (executable: String, arguments: [String])? {
-        if isActive(record), let command = controls[record.routineID]?.attachCommand, let program = command.first {
-            return (program, Array(command.dropFirst()))
-        }
-        guard let session = record.sessionID,
-              let (program, arguments) = record.harness.terminal(session: session, running: isActive(record))
-        else { return nil }
-        return (program ?? executable(record.harness), arguments)
-    }
-
-    func continueSession(_ record: RunRecord, with message: String, messageID: String = UUID().uuidString,
-                         attachments: [ChatAttachment] = []) {
-        guard let routine = routine(record.routineID), let session = record.sessionID,
-              let logPath = record.logPath else { return }
-        var record = record
-        record.outcome = .running
-        record.endedAt = nil
-        var launch = spec(for: routine, record: record, harness: record.harness, prompt: message,
-                          log: URL(fileURLWithPath: logPath), resume: session)
-        launch.messageID = messageID
-        launch.attachments = attachments
-        start(record, spec: launch)
-    }
-
-    private func eventWriteFailed(_ reason: String, routineID: String, recordID: UUID) {
-        guard var record = active[routineID], record.id == recordID else { return }
-        record.eventError = reason
-        active[routineID] = record
-        saveRecord(record)
-    }
-
-    private func updateMetadata(_ value: SessionMetadata, routineID: String, recordID: UUID) {
-        guard var record = active[routineID], record.id == recordID else { return }
-        record.metadata = SessionMetadata(model: value.model ?? record.metadata?.model,
-                                          effort: value.effort ?? record.metadata?.effort)
-        active[routineID] = record
-        saveRecord(record)
-    }
-
-    private func attachSession(_ session: String, to routineID: String) {
-        guard var record = active[routineID] else { return }
-        record.sessionID = session
-        active[routineID] = record
-        saveRecord(record)
-    }
-
-    private func finish(_ routineID: String, outcome: RunOutcome) {
-        guard var record = active[routineID] else { return }
-        record.outcome = outcome
-        record.endedAt = now()
-        if record.attention == record.requests?.first?.title { record.attention = nil }
-        record.requests = nil
-        active[routineID] = nil
-        controls[routineID] = nil
-        runStarts[routineID] = nil
-        saveRecord(record)
-        recover(record, sleptThrough: self.sleptThrough.remove(routineID) != nil)
-        Self.log.info("\(routineID, privacy: .public) ended: \(outcome.title, privacy: .public)")
-        if let routine = routine(routineID) { notifier?.runEnded(record, routine: routine) }
-        pauseAfterRepeatedFailures(routineID)
-    }
-
-    /// Turns a routine off once its last scheduled runs all failed, instead of
-    /// failing and notifying on every slot.
-    private func pauseAfterRepeatedFailures(_ routineID: String) {
-        guard let routine = routine(routineID), routine.enabled else { return }
-        // Skips are not failures of the routine: an overlap only means a long run.
-        let scheduled = history.records(for: routineID).filter { record in
-            guard record.trigger != .manual, record.outcome != .running else { return false }
-            if case .skipped = record.outcome { return false }
-            return true
-        }
-        let recent = scheduled.prefix(Self.failuresBeforePause)
-        guard recent.count == Self.failuresBeforePause, recent.allSatisfy({ $0.outcome.isFailure }) else { return }
-        setEnabled(false, for: routineID)
-        Self.log.warning("\(routineID, privacy: .public) paused after \(Self.failuresBeforePause) failures")
-        notifier?.routinePaused(routine, failures: Self.failuresBeforePause)
     }
 
     /// Marks `record`'s session read, now that the user has it open.
@@ -373,13 +246,17 @@ public final class Scheduler {
         if notify { notifier?.runEnded(record, routine: routine) }
     }
 
-    func saveRecord(_ record: RunRecord) {
+    @discardableResult
+    func saveRecord(_ record: RunRecord) -> Bool {
         do {
             try history.upsert(record)
         } catch {
             lastError = "Could not save run history: \(error.localizedDescription)"
+            Self.log.error("Could not save run history: \(error.localizedDescription, privacy: .private)")
+            return false
         }
         historyVersion += 1
+        return true
     }
 }
 
@@ -394,17 +271,25 @@ extension Scheduler {
 
     @discardableResult
     public func message(_ message: ChatMessage, to record: RunRecord) throws -> String? {
+        guard var record = current(record.id, routineID: record.routineID) else { return nil }
         guard canMessage(record), let logPath = record.logPath else { return nil }
+        guard !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !message.attachments.isEmpty else {
+            throw ControlError("The message needs text or an attachment.")
+        }
         let messageID = UUID().uuidString
         let message = try ChatAttachmentStore.retain(message, log: URL(fileURLWithPath: logPath), messageID: messageID)
         // Answering is what the session waited for; the continued run saves this copy, so it must not carry the mark.
         dismissAttention(record)
-        var record = record
         record.attention = nil
         if isActive(record) {
             controls[record.routineID]?.send(message, id: messageID)
         } else {
-            continueSession(record, with: message.text, messageID: messageID, attachments: message.attachments)
+            guard continueSession(record, with: message.text, messageID: messageID,
+                                  attachments: message.attachments) else {
+                let latest = current(record.id, routineID: record.routineID)
+                throw ControlError(lastError ?? latest?.outcome.title ?? "Could not continue the session.")
+            }
         }
         return messageID
     }

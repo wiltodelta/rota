@@ -67,7 +67,11 @@ func request(_ method: String, _ params: [String: Any] = [:]) throws -> Any {
         let deadline = Date().addingTimeInterval(20)
         while Date() < deadline {
             Thread.sleep(forTimeInterval: 0.5)
-            if let result = try? ControlClient.call(method, params) { return result }
+            do {
+                return try ControlClient.call(method, params)
+            } catch let error as ControlError where error == .notRunning {
+                continue
+            }
         }
         return try ControlClient.call(method, params)
     }
@@ -85,6 +89,10 @@ func launchRota() throws {
     // A data folder given to this command is the app's too, or it would open its usual one.
     if let directory = ProcessInfo.processInfo.environment["ROTA_DATA_DIR"] {
         configuration.environment = ["ROTA_DATA_DIR": directory]
+    }
+    if Bundle(url: app)?.bundleIdentifier?.hasSuffix(".dev") == true,
+       ProcessInfo.processInfo.environment["ROTA_TEST_DISABLE_NOTIFICATIONS"] == "1" {
+        configuration.environment["ROTA_TEST_DISABLE_NOTIFICATIONS"] = "1"
     }
     let opened = DispatchSemaphore(value: 0)
     NSWorkspace.shared.openApplication(at: app, configuration: configuration) { _, _ in opened.signal() }

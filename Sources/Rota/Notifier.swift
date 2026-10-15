@@ -22,7 +22,7 @@ final class Notifier: NSObject, RunNotifying, UNUserNotificationCenterDelegate {
         Bundle.main.bundleIdentifier == nil ? nil : UNUserNotificationCenter.current()
     }
 
-    func requestAuthorization() {
+    func configure() {
         guard let center else { return }
         center.delegate = self
         // A session's notification can be answered from the banner, as Messages' can.
@@ -30,6 +30,10 @@ final class Notifier: NSObject, RunNotifying, UNUserNotificationCenterDelegate {
                                                   textInputButtonTitle: "Send", textInputPlaceholder: "Reply")
         center.setNotificationCategories([UNNotificationCategory(identifier: Self.replyCategory, actions: [reply],
                                                                  intentIdentifiers: [])])
+    }
+
+    func requestAuthorization() {
+        guard let center else { return }
         center.requestAuthorization(options: [.alert, .sound]) { granted, error in
             if let error {
                 Self.log.error("Notification authorization failed: \(error.localizedDescription, privacy: .public)")
@@ -40,7 +44,7 @@ final class Notifier: NSObject, RunNotifying, UNUserNotificationCenterDelegate {
     }
 
     func runEnded(_ record: RunRecord, routine: Routine) {
-        guard let center, record.outcome.isFailure || (record.outcome == .succeeded && notifyOnSuccess())
+        guard center != nil, record.outcome.isFailure || (record.outcome == .succeeded && notifyOnSuccess())
         else { return }
         let content = UNMutableNotificationContent()
         content.title = routine.name
@@ -48,31 +52,31 @@ final class Notifier: NSObject, RunNotifying, UNUserNotificationCenterDelegate {
         if record.outcome.isFailure { content.sound = .default }
         // A skipped slot has no session to open; its routine shows it.
         content.userInfo = record.isSkip ? [Self.routineKey: routine.id] : [Self.sessionKey: record.id.uuidString]
-        center.add(UNNotificationRequest(identifier: record.id.uuidString, content: content, trigger: nil))
+        post(content, id: record.id.uuidString)
     }
 
     func routinePaused(_ routine: Routine, failures: Int) {
-        guard let center else { return }
+        guard center != nil else { return }
         let content = UNMutableNotificationContent()
         content.title = routine.name
         content.body = "Paused after \(failures) failed runs in a row. Turn it on again once it is fixed."
         content.sound = .default
         content.userInfo = [Self.routineKey: routine.id]
-        center.add(UNNotificationRequest(identifier: "paused-\(routine.id)", content: content, trigger: nil))
+        post(content, id: "paused-\(routine.id)")
     }
 
     func routineAdded(_ routine: Routine) {
-        guard let center else { return }
+        guard center != nil else { return }
         let content = UNMutableNotificationContent()
         content.title = routine.name
         let state = routine.enabled ? (ScheduleText.describe(routine.schedule) ?? routine.schedule) : "turned off"
         content.body = "Added by an agent: \(routine.harness.title), \(state)."
         content.userInfo = [Self.routineKey: routine.id]
-        center.add(UNNotificationRequest(identifier: "added-\(routine.id)", content: content, trigger: nil))
+        post(content, id: "added-\(routine.id)")
     }
 
     func sessionNotified(_ record: RunRecord?, routine: Routine?, title: String?, text: String, needsReply: Bool) {
-        guard let center else { return }
+        guard center != nil else { return }
         let content = UNMutableNotificationContent()
         content.title = title ?? routine?.name ?? "Rota"
         if needsReply { content.subtitle = "Needs your reply" }
@@ -80,11 +84,27 @@ final class Notifier: NSObject, RunNotifying, UNUserNotificationCenterDelegate {
         content.sound = .default
         if let record {
             content.userInfo = [Self.sessionKey: record.id.uuidString]
-            content.categoryIdentifier = Self.replyCategory
+            if record.harness.takesMessages { content.categoryIdentifier = Self.replyCategory }
         }
         let id = "notify-\(record?.id.uuidString ?? "rota")-\(UUID().uuidString)"
-        center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
-        Self.log.info("Notified from \(record?.routineID ?? "outside a routine", privacy: .public)")
+        post(content, id: id)
+        Self.log.info("Notification requested from \(record?.routineID ?? "outside a routine", privacy: .public)")
+    }
+
+    private func post(_ content: UNMutableNotificationContent, id: String) {
+        guard center != nil else { return }
+        // Audits exercise notification state without posting banners or requesting system grants.
+        if Bundle.main.bundleIdentifier?.hasSuffix(".dev") == true,
+           ProcessInfo.processInfo.environment["ROTA_TEST_DISABLE_NOTIFICATIONS"] == "1" { return }
+        Task { @MainActor in
+            do {
+                let center = UNUserNotificationCenter.current()
+                guard try await center.requestAuthorization(options: [.alert, .sound]) else { return }
+                try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+            } catch {
+                Self.log.error("Could not deliver a notification: \(error.localizedDescription, privacy: .private)")
+            }
+        }
     }
 
     nonisolated func userNotificationCenter(

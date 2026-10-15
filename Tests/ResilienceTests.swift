@@ -75,6 +75,26 @@ final class ResilienceTests: XCTestCase {
         XCTAssertEqual(scheduler.active["digest"]?.trigger, .catchUp)
     }
 
+    func testOfflineSlotsWaitOnlyForAgentHarnesses() throws {
+        for harness in Harness.allCases {
+            let routine = Routine(id: harness.rawValue, name: harness.rawValue, workingDirectory: directory.path,
+                                  schedule: "0 * * * *", harness: harness, enabled: true, prompt: "true")
+            XCTAssertTrue(scheduler.save(routine))
+        }
+        let original = scheduler.routines
+        clock = clock.addingTimeInterval(3 * 3600)
+        online = false
+        scheduler.tick()
+        XCTAssertEqual(launcher.specs.map(\.mode), [.screen])
+        for routine in original where routine.harness.isAgent {
+            XCTAssertEqual(scheduler.routine(routine.id)?.nextFire, routine.nextFire)
+        }
+        online = true
+        scheduler.networkBecameAvailable()
+        XCTAssertEqual(launcher.specs.count, Harness.allCases.count)
+        XCTAssertEqual(Set(launcher.specs.map(\.executable)), Set(Harness.allCases.map { "/bin/\($0.rawValue)" }))
+    }
+
     func testARunCutOffBySleepContinuesWhenTheNetworkIsBack() throws {
         let routine = add()
         startRun(routine)

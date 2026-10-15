@@ -23,7 +23,9 @@ flowchart LR
   of week OR when both are restricted; weekday 7 is Sunday) and finds the next
   fire time day by day, skipping wall-clock times a DST change removes.
 - `Scheduler` owns the routines (`routines.json` in Application Support) and
-  persists each routine's `nextFire`. A tick fires a due slot (a catch-up or a
+  persists each routine's `nextFire` before launching a due slot. A failed save
+  rolls back the change and prevents launch; create, edit, enable and delete also
+  report persistence failure before the UI or control API reports success. A tick fires a due slot (a catch-up or a
   skip when it is late, below) and moves `nextFire` past now either way.
 - `Harness` holds the CLI's default path, headless arguments, launch mode
   and chat arguments. Rota does not scan prompts or skill files for tool
@@ -35,7 +37,8 @@ flowchart LR
   `--model`/`--effort` and Grok `--model`/`--reasoning-effort` through
   `LaunchSpec.modelFlags`, Codex fields in `thread/start` and `turn/start`. A
   session continued on a harness the routine has since left runs without them. `ModelCatalog` lists the choices without
-  spending quota: Codex `model/list` with each model's efforts, `grok models`,
+  spending quota: Codex every page of `model/list` with each model's efforts (a failed page or
+  repeated cursor invalidates the catalog), `grok models`,
   and Claude's stream-json `initialize` control response (`models`). Claude
   choices show the CLI's versioned display names and model-specific efforts;
   family aliases keep their original IDs, and older versions use explicit IDs.
@@ -53,8 +56,15 @@ flowchart LR
   `ScheduleText.cron(fromRRule:anchor:)` converts where cron can say the same,
   and a rule without an hour, such as the default `FREQ=HOURLY;INTERVAL=24`,
   takes it from `next_run_at`). A Codex automation that continues a thread,
-  has no folder or has no cron equivalent is listed with the reason and cannot
-  be picked. Grok Build has nothing to import: its scheduler holds one
+  has no folder, has several folders or has no exact cron equivalent is listed with the reason and cannot
+  be picked. Import candidates keep their source identity separate from their
+  collision-free destination ID. Destination IDs are compared using the same
+  case-insensitive Unicode folding as the store, because differently cased IDs
+  can address the same history file on macOS. Existing imported IDs retain their
+  spelling; unsafe path components and duplicate storage identities are rejected.
+  SQLite schema and read errors are surfaced;
+  only an absent automations table means that database has no automations.
+  Grok Build has nothing to import: its scheduler holds one
   session's `/loop` tasks for at most seven days. `ScheduleText.describe` puts
   common cron shapes in words for the import list and the schedule field.
 - Other processes reach the scheduler through `ControlServer`, a Unix socket
@@ -87,7 +97,7 @@ flowchart LR
   an agent session, Rota had passed that session's `CLAUDECODE`,
   `ANTHROPIC_BASE_URL` and super.engineering variables to every run. The
   legacy `screen` checks skip the login shell
-  (`capture(..., loginShell: false)`, 0.04 s against 0.17 s a call).
+  (`capture(..., loginShell: false)`).
 - Codex's app-server daemon and Grok's leader outlive the run that starts them
   and keep its folder and environment, so they start in the home folder with
   no run variables (`ProcessLauncher.helperDirectory`). A leader started in a
@@ -98,20 +108,14 @@ flowchart LR
   (`shell_environment_policy.set.*`, verified live in the command's
   environment) or, for Grok, whose commands have no per-session environment,
   as a `_meta.rules` sentence naming the session and the `rota notify` command.
-- What a run can reach, checked live 2026-10-11 through Rota on each harness
-  (`GLOBAL`/`CHROME`/`COMPUTER` self-report, Claude's `system/init` tool list,
-  Codex `mcpServerStatus/list`, Grok session `events.jsonl`): all three load
-  the global instructions; Claude has 22 `mcp__claude-in-chrome__` tools from
-  `env.CLAUDE_CODE_ENABLE_CFC` in the user's settings, and Rota passes
-  `--chrome` when `claudeInChromeDefaultEnabled` in `~/.claude.json` is on
-  (`ClaudeUserSettings`: a run follows the user's settings, never a guess from
-  the prompt); in print mode it has no built-in computer use, which Claude Code
-  adds only to an interactive session, hence `ClaudeInteractiveRun`, where an
-  interactive run in a computer-use project listed 27 `mcp__computer-use__`
-  tools and answered `list_granted_applications`; Codex has its `computer-use`, `cua_repl` and
-  `node_repl` plugins (Chrome through them); Grok has `playwright` from
-  Claude's user config. Claude and Grok reach native apps through the
-  `cua-driver` skill, whose grants belong to CuaDriver.app, not Rota.
+- Browser and desktop access come from each provider's installed integrations,
+  plugins and configuration. An interactive Claude session can expose tools
+  absent from print mode, but interactive mode alone does not prove native
+  desktop access. Verify a browser through its own DOM result and native
+  desktop access through an image returned by a desktop tool. A browser
+  screenshot, shell driver or agent self-report does not prove native desktop
+  access in that session. Settings > Browsers and the opt-in capability check
+  retain this distinction; an unverified result is not a missing permission.
 - `ExecutableDiscovery` lists each agent CLI's installed copies: the PATH of a
   login shell started from an empty environment (an app opened from a terminal
   inherits that terminal's PATH, which put another tool's agent wrappers first
@@ -125,10 +129,13 @@ flowchart LR
   stdin; a message sent mid-turn joins that turn; the `result` event ends the
   run and closing stdin lets Claude exit and save the session; the `system`
   `init` event carries the session id, and `--resume <id>` continues it. `-p`
-  asks no folder-trust question. The session lives in Rota's process.
+  asks no folder-trust question. Writes use `PipeWriter`, so a provider that stops
+  reading cannot block Stop or request processing. A local completion is recorded
+  only after the entire message reaches the pipe and never replaces a stronger
+  provider delivery state. The session lives in Rota's process.
 - `ClaudeInteractiveRun` is the default for Claude (Settings > Agents), because
   only an interactive session loads computer use (`ClaudeUserSettings`). It
-  runs `claude --session-id <id> --settings <hooks> -- <prompt>` (`--resume <id>` to continue) in a detached
+  runs `claude --session-id <id> --settings <hooks>` (`--resume <id>` to continue) in a detached
   controlling PTY owned by `PTYProcess`. Open in Terminal uses the bundled
   `rota attach-terminal` client through a private 0600 Unix socket. Ctrl-] detaches
   without stopping Claude; resizing the client resizes the PTY. A slow attachment
@@ -137,11 +144,22 @@ flowchart LR
   own session and controlling terminal in a C shim before `execve`; Swift never
   runs in the forked child. Rota drains terminal output and receives the actual
   process exit status through `waitpid`. The chat is Claude's transcript, `~/.claude/projects/*/<id>.jsonl`,
-  read from where it ended: assistant entries have the stream-json shape, a
+  read from where it ended: long bracketed pastes use paired `pasted_content`
+  envelopes, which are decoded before confirming the original message. Matching
+  trims outer whitespace only for the interactive editor, preserving internal
+  line breaks and the original stored message;
+  assistant entries have the stream-json shape, a
   message typed mid-turn appears as a `queued_command` attachment, and
   `system`/`turn_duration` ends a turn (`ClaudeTranscript`, shapes from Claude
-  Code 2.1.296 on 2026-10-11). Messages are typed in as a bracketed paste
-  directly into the PTY. Messages arriving during CLI startup remain pending
+  Code 2.1.296 on 2026-10-11). `ClaudePromptEntry` recognizes the visible, empty
+  chat editor before entering the initial prompt, so task contents stay out of
+  argv. Setup dialogs are not answered. An unrecognized editor times out with a
+  setup error rather than entering the prompt into a different screen. Messages
+  are typed in as a bracketed paste
+  directly into the PTY. Its input uses the same nonblocking writer as provider
+  pipes: long prompts received from an output callback are queued until the
+  terminal reads, and delivery becomes locally written only at the full message
+  boundary. Messages arriving during CLI startup remain pending
   until Claude writes its initial prompt to the transcript, so startup cannot
   silently discard the input. Once the last turn ended with nothing typed
   since, the run types `/exit`. A `Notification` hook
@@ -165,7 +183,10 @@ flowchart LR
   using `serverRequest/resolved`; Claude cancellations also dismiss their form.
   Stop, timeout and disconnect invalidate outstanding choices. The request
   broker never logs answer values; provider transcripts can still contain an
-  answer if the provider echoes it. Secret question fields use secure input.
+  answer if the provider echoes it. `QuestionAnswerDraft` keeps option selections
+  separate from free text, so commas in labels and typing an additional answer
+  cannot discard selected options. Free-text and secret inputs have the original question as their
+  accessibility label; options retain the provider's labels. Secret question fields use secure input.
   Interactive Claude bridges `AskUserQuestion` through `PreToolUse` and one-time
   tool permissions through `PermissionRequest`. Each run owns a 0600 Unix socket
   (`ClaudeHookServer`) on its runner queue. The bundled `rota claude-hook` helper
@@ -191,7 +212,10 @@ flowchart LR
     RFC 6455 handshake and frames (Network.framework would not stack TCP on a
     Unix endpoint). `thread/start` or `thread/resume` omits approval and sandbox
     overrides, then `turn/start`; `turn/completed` ends the
-    run; `send` is `turn/steer`, which joins the running turn. Codex's TUI could
+    run; `send` is `turn/steer`, which joins the running turn. Stop during a pending
+    `turn/start` waits for its reply or `turn/started` notification and sends
+    exactly one `turn/interrupt`; disconnect cannot silently abandon a turn
+    accepted after Stop. A missing completion is reported in the log. Codex's TUI could
     not be shown joining a live turn (`codex resume --remote` stalled behind its
     update prompt in a pty), so Rota offers the in-app field while running and
     `codex resume` after.
@@ -212,7 +236,17 @@ flowchart LR
     before calling the run interrupted: the script writes it just before
     screen ends, and a command that ended between the two checks read as
     interrupted. `RunJournal` appends with
-    `seekToEndOfFile`, because tee writes the same file.
+    `seekToEnd()` and throwing writes, because tee writes the same file. Write
+    failures are reported once and retained as `eventError`.
+- `SchedulerRuns.swift` owns run lifecycle. Each launch or continuation gets a
+  fresh invocation token, independent of `RunRecord.id`; late callbacks cannot
+  finish a newer continuation or recreate deleted history. The running record
+  is saved before the launcher is called. Synchronous completion is supported.
+  Deletion retains the stopping control until its runner finishes, while its
+  callbacks no longer publish history. `stopRequestedAt` is persisted before
+  Stop and cleared only by a new invocation; startup closes these orphans as
+  cancelled, without automatic recovery. Other orphans become interrupted and
+  all obsolete provider requests are cleared.
 - A run is a session. `Scheduler.message(_:to:)` sends into a live session
   through its runner's `send`, or, for a finished one, `continueSession`
   starts a run of the same `RunRecord` with `LaunchSpec.resume` set to its
@@ -235,8 +269,18 @@ flowchart LR
   lists, code and messages; native Copy and Command-C copy the selected range.
   UTF-16 offsets move with insertions before the selection, and appended
   answers do not extend it. Refreshes preserve selection and scroll position;
-  automatic following pauses while text is selected. Messages use plain
-  speaker labels, and plans list each step's status as text. The rounded
+  automatic following pauses while text is selected. User messages have a plain
+  speaker label; answers omit the harness and model already shown in the composer.
+  Each turn's commentary, tools and latest plan stay collapsed behind one activity
+  link, including while running. Expanding it shows every plan step's status and
+  tool details; answers, run notes and message delivery errors remain visible.
+  Opening or closing activity preserves the viewport instead of triggering streaming auto-follow.
+  Turn spacers appear between exchanges, never after the final line, so following
+  the end still shows text in a short viewport with large chat text.
+  Document height ends at the last non-whitespace glyph, with vertical padding
+  bounded by the viewport's remaining space around that line. TextKit's trailing
+  layout fragments cannot leave a short transcript scrolled to an empty area.
+  The rounded
   composer keeps its model, run clock, Send and Stop controls.
 - `ChatMessage` carries text and `ChatAttachment` metadata. The composer accepts
   file selection and file-URL drops, shows downsampled image previews and removable
@@ -253,12 +297,17 @@ flowchart LR
   A separate normalized `attachments` event leaves old user event decoding intact.
   The transcript renders bounded thumbnails and native file links. Log retention
   removes attachment copies with the readable log and event sidecar.
+- `AppModel` keeps a `ChatDraft` for each session during this app launch.
+  Navigation retains text and attachments. A local retention or continuation
+  failure leaves the composer intact. Notification replies use the same
+  throwing message seam and preserve failed text in that session's draft.
 - Delivery has an independent state keyed by message ID. A local row does not
   confirm delivery. Claude print mode uses replayed user messages, interactive
   Claude uses its transcript echoes, Codex validates the `turn/steer` reply's
   turn ID, and Grok checks its interject acknowledgment. Writes without a
   provider acknowledgment remain marked as sent or unconfirmed. The composer
   can restore a rejected or cancelled message as an editable draft.
+  Repeated identical delivery acknowledgments do not append another event.
 - `RunRecord.configuration` captures requested model, effort and working
   directory. Continuations reuse it even after routine edits, with legacy
   records adopting it on their next continuation. Reported model/effort update
@@ -267,8 +316,8 @@ flowchart LR
   the reported model first, then the launch snapshot, and routine settings only
   for legacy records without a snapshot. Catalog titles take priority; Claude
   versioned IDs display as names such as Opus 5.5, with the original ID in a
-  tooltip. Unknown ID formats remain intact. The label may wrap to two lines at large
-  zoom instead of squeezing the Send or Stop control. Claude ID formatting
+  tooltip. Unknown ID formats remain intact. The label may wrap to two lines at minimum width
+  instead of squeezing the Send or Stop control. Claude ID formatting
   follows the [documented version scheme](https://platform.claude.com/docs/en/models/model-ids-and-versions).
   Event-save failures are retained in `RunRecord.eventError` and
   shown in the session; the readable log remains available.
@@ -293,11 +342,12 @@ flowchart LR
   Five failed scheduled runs in a row (`failuresBeforePause`; skips and manual
   runs do not count) turn the routine off and notify once.
 - `Resilience.swift`: the Mac cuts runs off, and Rota picks them up. `tick`
-  starts nothing while `isOnline` is false (`MacState` watches `NWPathMonitor`),
-  so a slot due on waking waits for the network. A run going when the Mac
+  starts no agent slot while `isOnline` is false (`MacState` watches `NWPathMonitor`),
+  so an agent slot due on waking waits for the network. Local Shell slots
+  remain independent of that gate. A run going when the Mac
   slept (`systemWillSleep`) that then fails or is interrupted, one that
   fails while offline or whose log ends on a network error (`NetworkFailure`),
-  and every agent run `closeOrphans` finds still open at launch (a shutdown, a
+  and every agent run `closeOrphans` finds still open without a saved Stop at launch (a shutdown, a
   crash), is queued in `pendingResumes`; an agent run that failed that way
   before it had a session goes to `pendingReruns` and runs again whole (twice
   at most in a row). Neither starts until `ServiceProbe` gets any HTTP answer
@@ -323,9 +373,13 @@ flowchart LR
   runner arms its timer only when `LaunchSpec.timeout` is set. The key replaced
   0.1's `timeoutMinutes`: `Routine.init(from:)` reads its 60, the default, as
   no limit and keeps any other value. An overlap is still skipped, so a long run never stacks.
-- `RunHistory` keeps the last 50 records per routine and deletes the logs of
-  the ones it drops. Runs left `running` by a previous launch become
-  `interrupted` at start.
+- `RunHistory` preserves every active conversation and up to 50 finished
+  conversations per routine, filling remaining space with skipped slots. It
+  validates routine IDs and unique run UUIDs when reading. A corrupt index is
+  never overwritten by an upsert. Retention writes the new index before removing
+  dropped artifacts, and deletes only resolved paths within its log root with
+  the expected `.log` suffix. Log names include the run UUID. Orphan recovery
+  raises on unreadable history rather than returning a partial success.
 
 ## App
 
@@ -337,72 +391,58 @@ Glass rules), and the main and settings windows as `NSWindow`s around
 back to `.accessory` when the last one closes. Window tabbing is off. The
 File menu holds New Routine and Import, the Routine menu Run Now, Stop and
 Edit Routine for `AppModel.selectedRoutine`; sheets open from `AppModel`
-flags so menus and buttons share them. `ChatTextSettings` saves font families
-and a base point size relative to app scale, keeping earlier point-size
-preferences compatible. `AppZoomSettings` saves 50–200% app scale, normalized
-in 10 percentage point steps, with Command-=, Command-Minus and Command-0
-(reset to 100%) in View. Chat text has its own Option-Command variants. Its
-rendered scale is `clamp(appScale * baseSize / 14, 0.5, 2)`, so the default
-14 pt body stays within 7–28 pt. Each chat step adds or subtracts
-`0.1 * appScale` to that effective scale, then stores the result divided by
-app scale. A chat reset restores an effective 14 pt and leaves app scale
-alone; changing app scale preserves the saved relative chat preference.
-`ZoomMenuItems` observes the preferences in a view so shortcut availability
-updates without reopening the menu. Increase and decrease are disabled at
-their effective limits. Settings > General shows app zoom, and Settings > Chat
-shows effective chat text size. Both use percentages with minus, plus and reset
-controls; their explanations distinguish interface scaling from text-only changes.
-`InterfaceTypography` resizes system font descriptors before drawing;
-`scaledFont` applies the coefficient to body, headline, callout, caption and
-explicit point sizes. Window content, settings, sheets and the menu bar panel
-use real fonts and reflow naturally. `InterfaceMetrics` scales spacing, padding,
-status dots, logos, card radii, outlines, editor heights and column widths.
-Content button geometry scales continuously, with a 20 pt minimum hit target;
-`InterfacePicker` draws selected values and chevrons in scaled points while
-using an AppKit button and `NSHostingMenu` with an inline picker for selection
-and checkmarks. The button exposes a native popup accessibility role and sizes
-its actual font and symbol, without hiding a control behind an overlay. Native
-switches use macOS control-size variants. Settings and the
-menu bar panel grow with app scale. Sheets are bounded by the parent window,
-and settings by the visible screen; their forms scroll before reaching those
-bounds. The split view preserves room for the detail at the 820 pt minimum
-window width instead of forcing a wider window. Transcript margins, list
-indents and paragraph spacing follow app scale independently of chat font size.
-Native transcript fonts and the composer use the same bounded effective chat
-size. No view or bitmap is stretched, so text draws at the display's native
-resolution. The system's menu rows and window chrome retain their native sizes.
-Native toolbar symbols use real scaled system fonts, with a 10 pt minimum,
-inside regular borderless controls. Content styles stay inside the split-view
-panes instead of propagating to the native toolbar. On macOS 26, shared toolbar
-backgrounds are hidden
-to prevent nested bezels. `FullScreenMenuSeparator` adds a visible native
-separator before AppKit's full-screen command; a trailing SwiftUI divider
-can disappear before AppKit appends that command.
-After transcript resizing, the scroll origin is constrained to the document
-with `NSClipView.constrainBoundsRect`, preserving visible text and selection.
-Typography keeps distinct roles: sidebar names use the system body style,
-metadata uses caption, and section headings use headline. Forms and supporting
-information retain system fonts; chat prose and code have separately chosen
-families, with code at 90% of the chat body size. App zoom preserves these
-relationships, while chat text size changes the transcript and composer
-without enlarging navigation. There is no separate sidebar font preference.
-The interaction follows the editor pattern: [VS Code separates window zoom
-from editor font size](https://code.visualstudio.com/docs/editing/getting-started/tips-and-tricks),
-and [IntelliJ IDEA applies IDE zoom to all UI elements](https://www.jetbrains.com/help/idea/ide-zoom-level.html)
-while keeping [editor font preferences separate](https://www.jetbrains.com/help/idea/configuring-colors-and-fonts.html).
-Their steps are not a common standard; Rota keeps the requested super.engineering
-steps and shortcuts. The reference comparison, evidence boundaries and the
-two-control decision are in [interface-scaling.md](interface-scaling.md).
-[WCAG Resize Text](https://www.w3.org/WAI/WCAG21/Understanding/resize-text)
-is a usability benchmark here: doubling text must preserve content and actions,
-including at intermediate scales. This is not a claim of WCAG conformance.
-For repeatable captures, `ROTA_OPEN_MAIN=1` opens the main window and
-`ROTA_WINDOW_WIDTH` / `ROTA_WINDOW_HEIGHT` choose its initial size, bounded
-below by the normal minimum. Use a separate development bundle and data folder.
-Verify main content at 820 pt in both appearances at 50%, 100% and 200%;
-also check sheets, settings, native menu selection, focus, hit targets and
-selection preservation. Use point geometry and real fonts instead of magnifying
-a rendered surface, matching [AppKit's high-resolution rendering model](https://developer.apple.com/library/archive/documentation/GraphicsAnimation/Conceptual/HighResolutionOSX/Introduction/Introduction.html).
+flags so menus and buttons share them.
+
+### Native interface and chat text
+
+Navigation, toolbar items, Settings tabs and content controls retain their
+standard macOS sizes. There is no global interface zoom setting or shortcut.
+`NSTabViewController` owns the Settings toolbar; the main window bridges both
+its native title and toolbar with a unified toolbar style. Native `Label`
+and SF Symbols inherit each control's normal font and layout.
+
+Drafts belong to their session for the current app launch. The status observer
+releases drafts whose routine has been deleted, using routine IDs already in
+memory rather than treating a failed history read as deletion.
+
+`ChatTextSettings` independently saves prose and code font families and a
+10-28 pt chat body size under `chatTextPointSize`, defaulting to 14 pt.
+On its first load, it migrates the old relative `chatFontSize` multiplied by
+normalized legacy `appZoomPercent` to preserve the visible chat size. That
+migration writes the new key once; future loads ignore the retired global
+preference. Legacy keys remain untouched. Nonfinite values reset to 14 pt.
+Code uses 90% of the body size with a 10 pt floor.
+
+`ZoomMenuItems` observes chat settings, exposing Option-Command-=,
+Option-Command-Minus and Option-Command-0 for increase, decrease and reset.
+Increase and decrease stop at the bounds. Settings > Chat provides the same
+controls. Transcript and composer fonts change together; toolbar, navigation,
+transcript margins, paragraph spacing, attachment cards and button frames do
+not grow with the chat text. Native text reflows without bitmap stretching.
+Resizing preserves selection and constrains the scroll origin to the document
+with `NSClipView.constrainBoundsRect`.
+
+`InterfaceTypography` resolves native font styles and enforces the 10 pt
+minimum for explicit sizes. `InterfaceMetrics` bounds sheets and forms to their
+parent window or visible screen. There is no interface-scale environment or
+transcript geometry multiplier. `InterfacePicker`
+retains its native popup accessibility role and menu. Primary form actions
+use the native prominent button style; only the chat's circular Send control
+chooses contrasting ink against the user's accent through `AccentInk`.
+
+Sheets are bounded by their parent window and Settings by the visible screen;
+forms scroll before exceeding those bounds. Settings keeps enough width for
+its five native tabs. The menu bar panel keeps its 340 pt width and semantic
+window background at 85% opacity. The composer reserves space for attachments,
+errors and provider questions, and the history retains a usable viewport.
+`FullScreenMenuSeparator` supplies the native separator before full screen.
+
+Verify the signed development bundle at the 820 pt minimum width in both
+appearances, with chat text at 10, 14 and 28 pt. Inspect native controls,
+Settings tabs, sheets, keyboard navigation, selection preservation and the
+last visible transcript line. The retired experiment and reference research
+are recorded in [interface-scaling.md](interface-scaling.md). Geometry checks
+alone do not establish visual quality or accessibility conformance.
 
 `ChatOpener` writes a `.command` file, which needs no Automation permission,
 and `TerminalLauncher` opens it in the terminal picked in Settings: Terminal,
@@ -420,7 +460,7 @@ environment of a terminal that is already running.
 
 Layout rules learned while measuring the narrowest window (820 pt):
 
-- Settings uses toolbar tabs: General, Chat, Agents and Integrations. CLI
+- Settings uses toolbar tabs: General, Chat, Agents, Integrations and Browsers. CLI
   selection and Claude's interactive mode belong to Agents; the rota command
   and MCP registration belong to Integrations. Forms cap their height at the
   screen's visible height minus 100 pt and scroll on shorter screens. The
@@ -431,7 +471,8 @@ Layout rules learned while measuring the narrowest window (820 pt):
   frame as well as controls against their parents. A window can pass the
   control checks while its bottom is hidden by the Dock.
 - Sessions are the main view: the sidebar lists them by day above the
-  routines, and `SessionView` is the chat with its composer. A routine's view
+  routines, and `SessionView` owns the chat layout, while `Composer.swift` owns message input
+  and its Send/Stop controls. A routine's view
   is its header and sessions; the settings form, used rarely, is a sheet
   (`EditRoutineSheet`). A `Form` is never inside a `ScrollView`: it scrolls
   itself and, nested, lays out at its ideal width and overflows. Inside the old
@@ -502,10 +543,30 @@ Chrome identity in native `listTabs` results comes from the provider's
 
 ### Composer model-label verification
 
-The readable model label was rendered in the signed development bundle at
-820 pt, in light and dark appearances, at 50%, 100% and 200% app zoom. Native
-bounds kept it inside the composer and clear of Send. At 200%, its two-line
-height was measured and the complete harness and model names were visible.
-The text contrast passed in both appearances. The model-source and formatting
-tests passed; a disposable mutation reverting to the raw ID failed the
-readable-name assertion. No real agent was started for these checks.
+Readable model labels preserve the provider's actual model identity, immutable
+launch settings or routine fallback in that order. Longer IDs wrap within the
+composer without displacing Send. Verify labels in the signed development
+bundle at minimum width in both appearances. Formatting and source-selection
+tests cover these rules; a disposable mutation reverting to the raw ID failed
+the readable-name assertion. Earlier captures under the retired global zoom
+experiment are historical evidence, not verification of the current layout.
+
+### Transport ownership
+
+`ControlServer` keeps each nonblocking socket and its bounded input/output
+queues in one connection object on the control queue. A reply targets that
+object, never a reused descriptor. Startup refuses an existing live listener
+or regular file. `FileDescriptorIO` suppresses SIGPIPE at the shared descriptor
+boundary. Provider `LineTransport` and `WebSocketTransport` use `PipeWriter` to
+queue nonblocking writes; a provider that stops reading cannot block the run
+queue or Stop. A write failure closes the peer and fails pending requests.
+`JSONRPCPeer` closes once, and requests after close fail without writing.
+Close frames end the WebSocket peer; notifications after close are discarded.
+The upgrade validates status, WebSocket headers and the nonce-derived accept
+value. JSON-RPC boolean IDs cannot acknowledge numeric request IDs. Claude
+stream input uses the same writer and message-boundary completion mechanism.
+`ProcessLauncher.capture` reads nonblocking output and follows the direct
+process lifetime. Its injected deadline kills an unresponsive short command;
+a descendant holding stdout cannot keep the caller waiting for EOF.
+
+Repeatable verification and cleanup: [verification.md](verification.md).

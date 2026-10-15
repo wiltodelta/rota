@@ -13,10 +13,10 @@ struct ImportSheet: View {
     @State private var harness: Harness?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: metrics(12)) {
-            Text("Import Routines").scaledFont(.headline)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Import Routines").interfaceFont(.headline)
             Text("Rota copies the routines you pick from other apps, turned off.")
-                .scaledFont(.callout)
+                .interfaceFont(.callout)
                 .foregroundStyle(Color.secondaryText)
             if let scans {
                 List {
@@ -32,10 +32,10 @@ struct ImportSheet: View {
                         }
                     }
                 }
-                .frame(minHeight: metrics(180), idealHeight: metrics.sheetHeight(360))
+                .frame(minHeight: 180, idealHeight: metrics.sheetHeight(360))
             } else {
                 ProgressView("Looking for routines\u{2026}")
-                    .frame(maxWidth: .infinity, minHeight: metrics(180))
+                    .frame(maxWidth: .infinity, minHeight: 180)
             }
             InterfacePicker("Run on", value: harness?.title ?? "The same agent as in its app", selection: $harness) {
                 Text("The same agent as in its app").tag(Harness?.none)
@@ -50,23 +50,23 @@ struct ImportSheet: View {
                       : "\(stillOn) of them are still on in their apps. Turn them off there before turning "
                         + "them on here, or both apps will run them.",
                       systemImage: "exclamationmark.triangle.fill")
-                    .scaledFont(.callout)
+                    .interfaceFont(.callout)
                     .foregroundStyle(Color.warningText)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: metrics(8)) {
-                Spacer(minLength: metrics(8))
+            HStack(spacing: 8) {
+                Spacer(minLength: 8)
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button(chosen.isEmpty ? "Import" : "Import \(chosen.count) Routine\(chosen.count == 1 ? "" : "s")") {
                     importChosen()
                 }
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(InterfaceButtonStyle(prominent: true))
+                .buttonStyle(.borderedProminent)
                 .disabled(chosen.isEmpty)
             }
         }
-        .padding(metrics(20))
+        .padding(20)
         .frame(width: metrics.sheetWidth(600))
         .task {
             let found = await Task.detached(priority: .userInitiated) { RoutineImport.scanAll() }.value
@@ -79,21 +79,21 @@ struct ImportSheet: View {
     private var stillOn: Int { candidates.filter { chosen.contains($0.id) && $0.onInSource }.count }
 
     private func importable(_ scan: ImportScan) -> [String] {
-        scan.candidates.filter { $0.unsupported == nil && model.scheduler.routine($0.routine.id) == nil }.map(\.id)
+        scan.candidates.filter { $0.unsupported == nil && !model.scheduler.containsStorageID($0.routine.id) }.map(\.id)
     }
 
     private func sectionHeader(_ scan: ImportScan) -> some View {
         let ids = importable(scan)
         let all = !ids.isEmpty && Set(ids).isSubset(of: chosen)
-        return HStack(spacing: metrics(8)) {
+        return HStack(spacing: 8) {
             Text(scan.source.title)
-            Spacer(minLength: metrics(8))
+            Spacer(minLength: 8)
             if !ids.isEmpty {
                 Button(all ? "Select None" : "Select All") {
                     if all { chosen.subtract(ids) } else { chosen.formUnion(ids) }
                 }
                 .buttonStyle(.link)
-                .scaledFont(.callout)
+                .interfaceFont(.callout)
             }
         }
     }
@@ -102,6 +102,11 @@ struct ImportSheet: View {
         var first: String?
         for candidate in candidates where chosen.contains(candidate.id) {
             var routine = candidate.routine
+            guard !model.scheduler.containsStorageID(routine.id) else {
+                model.scheduler.lastError = "A routine with id \(routine.id) was added while this import was open. "
+                    + "Reopen Import Routines and choose again."
+                return
+            }
             if let harness, harness != candidate.source.harness {
                 // Model ids belong to the agent they came from.
                 routine.harness = harness
@@ -109,7 +114,7 @@ struct ImportSheet: View {
                 routine.effort = nil
             }
             routine.enabled = false
-            model.scheduler.save(routine)
+            guard model.scheduler.save(routine) else { return }
             first = first ?? routine.id
         }
         model.selection = first.map { .routine($0) }
@@ -120,28 +125,27 @@ struct ImportSheet: View {
 /// One importable routine: its name, schedule in words, folder, and whether it
 /// is still on in its app, already in Rota, or cannot be imported.
 private struct ImportRow: View {
-    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     let candidate: ImportCandidate
     @Binding var chosen: Set<String>
 
     var body: some View {
-        let inRota = model.scheduler.routine(candidate.routine.id) != nil
+        let inRota = model.scheduler.containsStorageID(candidate.routine.id)
         Toggle(isOn: Binding(
             get: { chosen.contains(candidate.id) },
             set: { if $0 { chosen.insert(candidate.id) } else { chosen.remove(candidate.id) } }
         )) {
-            HStack(alignment: .firstTextBaseline, spacing: metrics(8)) {
-                VStack(alignment: .leading, spacing: metrics(2)) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(candidate.routine.name)
-                    Text(detail).scaledFont(.caption).foregroundStyle(Color.secondaryText)
+                    Text(detail).interfaceFont(.caption).foregroundStyle(Color.secondaryText)
                     if let reason = candidate.unsupported {
-                        Text(reason).scaledFont(.caption).foregroundStyle(Color.errorText)
+                        Text(reason).interfaceFont(.caption).foregroundStyle(Color.errorText)
                     }
                 }
-                Spacer(minLength: metrics(8))
+                Spacer(minLength: 8)
                 if inRota {
-                    Tag(text: "In Rota", color: Color.secondaryText)
+                    Tag(text: "ID already used", color: Color.secondaryText)
                 } else if candidate.onInSource {
                     Tag(text: "On in \(candidate.source.title)", color: Color.warningText)
                 }
@@ -162,16 +166,15 @@ private struct ImportRow: View {
 
 /// A small capsule label for a row's state.
 private struct Tag: View {
-    @Environment(\.interfaceMetrics) private var metrics
     let text: String
     let color: Color
 
     var body: some View {
         Text(text)
-            .scaledFont(.caption)
+            .interfaceFont(.caption)
             .foregroundStyle(color)
-            .padding(.horizontal, metrics(6))
-            .padding(.vertical, metrics(2))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
             .background(color.opacity(0.12), in: Capsule())
     }
 }
@@ -184,7 +187,7 @@ struct NewRoutineSheet: View {
     @State private var draft = Routine(id: "", name: "", workingDirectory: "", schedule: "0 9 * * 1-5",
                                        enabled: true, prompt: "")
 
-    private var identifierTaken: Bool { model.scheduler.routine(draft.id) != nil }
+    private var identifierTaken: Bool { model.scheduler.containsStorageID(draft.id) }
 
     var body: some View {
         // A taken id is said under its field.
@@ -197,13 +200,13 @@ struct NewRoutineSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Add") {
                     if draft.name.isEmpty { draft.name = draft.id }
-                    model.scheduler.save(draft)
+                    guard model.scheduler.save(draft) else { return }
                     model.selection = .routine(draft.id)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
                 .accessibilityIdentifier("addRoutine")
-                .buttonStyle(InterfaceButtonStyle(prominent: true))
+                .buttonStyle(.borderedProminent)
                 .disabled(problem != nil || identifierTaken)
             }
         }
@@ -228,35 +231,33 @@ struct NewRoutineSheet: View {
 
 /// A sheet's title above its form, as the import sheet has.
 struct SheetTitle: View {
-    @Environment(\.interfaceMetrics) private var metrics
     let text: String
 
     var body: some View {
         Text(text)
-            .scaledFont(.headline)
-            .padding(.horizontal, metrics(20))
-            .padding(.top, metrics(18))
+            .interfaceFont(.headline)
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
     }
 }
 
 /// A sheet's button row, with what still keeps it from saving on the left.
 struct SheetButtons<Buttons: View>: View {
-    @Environment(\.interfaceMetrics) private var metrics
     let problem: String?
     @ViewBuilder let buttons: Buttons
 
     var body: some View {
-        HStack(spacing: metrics(8)) {
+        HStack(spacing: 8) {
             if let problem {
                 Text(problem)
-                    .scaledFont(.callout)
+                    .interfaceFont(.callout)
                     .foregroundStyle(Color.secondaryText)
                     .lineLimit(2)
                     .accessibilityIdentifier("sheetProblem")
             }
-            Spacer(minLength: metrics(12))
+            Spacer(minLength: 12)
             buttons
         }
-        .padding(metrics(16))
+        .padding(16)
     }
 }

@@ -12,8 +12,6 @@ enum SidebarItem: Hashable {
 struct MainWindow: View {
     @Environment(AppModel.self) private var model
 
-    private var metrics: InterfaceMetrics { InterfaceMetrics(scale: model.appZoom.scale) }
-
     private var records: [RunRecord] {
         _ = model.scheduler.historyVersion
         return model.scheduler.allRecords()
@@ -37,13 +35,12 @@ struct MainWindow: View {
             sidebar(records, width: sidebarWidth)
         } detail: {
             detail(records)
-                .appZoom()
-                .frame(minWidth: min(metrics(520), width - sidebarWidth - 1))
+                .frame(minWidth: min(520, width - sidebarWidth - 1))
         }
         .navigationTitle("Rota")
         .toolbar { toolbarItems }
-        .sheet(isPresented: $model.presentingImport) { ImportSheet().appZoom() }
-        .sheet(isPresented: $model.presentingNew) { NewRoutineSheet().appZoom() }
+        .sheet(isPresented: $model.presentingImport) { ImportSheet() }
+        .sheet(isPresented: $model.presentingNew) { NewRoutineSheet() }
         .alert("Rota", isPresented: Binding(
             get: { model.scheduler.lastError != nil },
             set: { if !$0 { model.scheduler.lastError = nil } }
@@ -66,19 +63,19 @@ struct MainWindow: View {
                             SessionRow(record: record).tag(SidebarItem.session(record.id))
                         }
                     } header: {
-                        Text(group.title).scaledFont(.headline).foregroundStyle(Color.secondaryText)
+                        Text(group.title).interfaceFont(.headline).foregroundStyle(Color.secondaryText)
                     }
                 }
                 Section {
                     ForEach(model.scheduler.routines) { routine in
-                        HStack(spacing: metrics(8)) {
+                        HStack(spacing: 8) {
                             StatusDot(routine: routine)
-                            Text(routine.name).scaledFont(.body).lineLimit(1)
+                            Text(routine.name).interfaceFont(.body).lineLimit(1)
                         }
                         .tag(SidebarItem.routine(routine.id))
                     }
                 } header: {
-                    Text("Routines").scaledFont(.headline).foregroundStyle(Color.secondaryText)
+                    Text("Routines").interfaceFont(.headline).foregroundStyle(Color.secondaryText)
                 }
             }
             .overlay {
@@ -92,11 +89,10 @@ struct MainWindow: View {
                     }
                 }
             }
-            .appZoom()
             .frame(maxWidth: sidebarWidth)
-            .navigationSplitViewColumnWidth(min: min(240, metrics(240)),
-                                            ideal: min(metrics(280), sidebarWidth),
-                                            max: min(metrics(360), sidebarWidth))
+            .navigationSplitViewColumnWidth(min: 240,
+                                            ideal: min(280, sidebarWidth),
+                                            max: min(360, sidebarWidth))
     }
 
     @ToolbarContentBuilder
@@ -118,8 +114,6 @@ struct MainWindow: View {
             .help("\(model.sidebarVisible ? "Hide" : "Show") the sidebar (Control-Command-S)")
             .accessibilityIdentifier("toggleSidebar")
             .buttonStyle(.borderless)
-            .font(.system(size: max(10, 14 * model.appZoom.scale)))
-            .controlSize(.regular)
         }
     }
 
@@ -131,16 +125,12 @@ struct MainWindow: View {
             .help("Import routines from Claude Desktop or Codex")
             .accessibilityIdentifier("import")
             .buttonStyle(.borderless)
-            .font(.system(size: max(10, 14 * model.appZoom.scale)))
-            .controlSize(.regular)
             Button { model.presentingNew = true } label: {
                 Label("New Routine", systemImage: "plus")
             }
             .help("New Routine")
             .accessibilityIdentifier("newRoutine")
             .buttonStyle(.borderless)
-            .font(.system(size: max(10, 14 * model.appZoom.scale)))
-            .controlSize(.regular)
         }
     }
 
@@ -217,29 +207,28 @@ struct DayGroup {
 }
 
 private struct SessionRow: View {
-    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
 
     var body: some View {
-        HStack(spacing: metrics(8)) {
+        HStack(spacing: 8) {
             Group {
                 if record.outcome == .running {
                     // A working session spins, as in super.engineering's list.
-                    ProgressView().controlSize(.mini).frame(width: metrics(8), height: metrics(8))
+                    ProgressView().controlSize(.mini).frame(width: 8, height: 8)
                 } else {
                     dot(color, size: 8)
                 }
             }
             .accessibilityElement()
             .accessibilityLabel(record.outcome.title)
-            VStack(alignment: .leading, spacing: metrics(1)) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(model.scheduler.routine(record.routineID)?.name ?? record.routineID)
-                    .scaledFont(.body)
+                    .interfaceFont(.body)
                     .fontWeight(record.isUnread ? .semibold : .regular)
                     .lineLimit(1)
                 Text(details)
-                    .scaledFont(.caption)
+                    .interfaceFont(.caption)
                     .foregroundStyle(Color.secondaryText)
                     .lineLimit(1)
             }
@@ -262,10 +251,10 @@ private struct SessionRow: View {
             // The selected row's accent fill hides a blue or green dot.
             .overlay {
                 if model.selection == .session(record.id) {
-                    Circle().strokeBorder(.white, lineWidth: metrics(1.5))
+                    Circle().strokeBorder(.white, lineWidth: 1.5)
                 }
             }
-            .frame(width: metrics(size), height: metrics(size))
+            .frame(width: size, height: size)
     }
 
     private var details: String {

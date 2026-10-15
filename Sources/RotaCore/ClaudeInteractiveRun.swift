@@ -21,6 +21,8 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     private var partial = Data()
     /// The prompt is in the log already; its transcript entry is skipped once.
     private var promptPending = true
+    private var startup = ClaudePromptEntry()
+    private var initialPromptWritten = false
     /// Input arriving during CLI startup waits for its first transcript entry.
     private var startupMessages: [(ChatMessage, String)] = []
     /// Messages typed in and not yet seen in the transcript.
@@ -63,11 +65,9 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         return run
     }
 
-    /// The `claude` arguments: a new session under `session`, or the resumed one,
-    /// then the prompt after `--`, so a prompt starting with a dash stays a prompt.
-    static func arguments(session: String, resume: Bool, settings: String, model: [String],
-                          prompt: String) -> [String] {
-        [resume ? "--resume" : "--session-id", session, "--settings", settings] + model + ["--", prompt]
+    /// Only configuration goes on argv. The initial message uses the owned terminal input.
+    static func arguments(session: String, resume: Bool, settings: String, model: [String]) -> [String] {
+        [resume ? "--resume" : "--session-id", session, "--settings", settings] + model
     }
 
     /// Per-run hooks collect question answers and one-time permissions through Rota.
@@ -96,8 +96,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     private func launch(settings: URL, folder: URL) throws {
         settingsFile = settings
         let arguments = Self.arguments(session: session, resume: spec.resume != nil, settings: settings.path,
-                                       model: spec.modelFlags(effortFlag: "--effort"),
-                                       prompt: spec.chatMessage.fileReferenceText)
+                                       model: spec.modelFlags(effortFlag: "--effort"))
         if let existing = Self.transcriptFile(session) {
             transcript = existing
             offset = (try? FileManager.default.attributesOfItem(atPath: existing.path)[.size] as? UInt64) ?? 0
@@ -111,20 +110,44 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         do {
             let terminal = try PTYTerminal(process: process, queue: queue, folder: folder)
             self.terminal = terminal
-            process.output = { [weak terminal] data in terminal?.publish(data) }
+            process.output = { [weak self, weak terminal] data in
+                terminal?.publish(data)
+                self?.enterInitialPrompt(after: data)
+            }
         } catch {
             process.terminate()
             process.start()
             throw error
         }
         self.process = process
+        process.inputFailed = { [weak self] in
+            self?.end(as: .launchFailed("Could not write to Claude's terminal."))
+        }
         process.exited = { [weak self] status in self?.finish(status: status) }
         process.start()
         journal.session(session)
+        queue.asyncAfter(deadline: .now() + 30) { [weak self] in
+            guard let self, !self.initialPromptWritten else { return }
+            self.end(as: .launchFailed("Claude did not show its empty chat field. "
+                + "Open Claude Code in this folder to finish its setup, then try again."))
+        }
         if let timeout = spec.timeout {
             queue.asyncAfter(deadline: .now() + timeout) { [weak self] in self?.end(as: .timedOut) }
         }
         queue.async { self.poll() }
+    }
+
+    private func enterInitialPrompt(after data: Data) {
+        guard !initialPromptWritten, stopReason == nil, startup.receive(data) else { return }
+        initialPromptWritten = true
+        startup = ClaudePromptEntry()
+        let prompt = spec.chatMessage.fileReferenceText
+        guard type("\u{1B}[200~" + prompt + "\u{1B}[201~\r", completed: {
+            self.journal.delivery(self.spec.messageID, .written)
+        }) else {
+            journal.delivery(spec.messageID, .failed("Could not write to Claude's terminal."))
+            return end(as: .launchFailed("Could not write the initial message to Claude's terminal."))
+        }
     }
 
     /// Claude's transcript of `session`, in whichever project folder it keeps it.
@@ -159,9 +182,9 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         let ended = turnEnded
         unanswered += 1
         turnEnded = false
-        if type("\u{1B}[200~" + message.fileReferenceText + "\u{1B}[201~") && type("\r") {
-            journal.delivery(id, .written)
-        } else {
+        if !type("\u{1B}[200~" + message.fileReferenceText + "\u{1B}[201~\r", completed: {
+            self.journal.delivery(id, .written)
+        }) {
             unanswered -= 1
             turnEnded = ended
             journal.delivery(id, .failed("Could not write to Claude's terminal."))
@@ -266,7 +289,12 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     }
 
     @discardableResult
-    private func type(_ text: String) -> Bool { process?.write(Data(text.utf8)) ?? false }
+    private func type(_ text: String, completed: (() -> Void)? = nil) -> Bool {
+        let completed = UncheckedSendable(completed)
+        return process?.write(Data(text.utf8), completed: { [weak self] in
+            self?.queue.async { completed.value?() }
+        }) ?? false
+    }
 
     private func end(as reason: RunOutcome) {
         guard !journal.isFinished, stopReason == nil else { return }
@@ -302,11 +330,35 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     }
 }
 
+/// Recognizes the CLI's empty chat editor, never an authentication or trust choice.
+/// Retains split UTF-8 and ANSI sequences across reads. Unexpected renderers fail closed.
+struct ClaudePromptEntry {
+    private var buffer = Data()
+
+    mutating func receive(_ data: Data) -> Bool {
+        buffer.append(data)
+        if buffer.count > 65_536 { buffer.removeFirst(buffer.count - 65_536) }
+        let terminal = lossyUTF8(buffer)
+        let text = terminal.replacingOccurrences(
+            of: "\u{1B}\\[[0-?]*[ -/]*[@-~]", with: "", options: .regularExpression)
+        // New sessions suggest a task; resumed editors can be completely blank.
+        // Setup choices also use the arrow, so require the editor's two borders
+        // and its visible cursor after the CLI has finished drawing the frame.
+        guard let shown = terminal.range(of: "\u{1B}[?25h", options: .backwards),
+              let hidden = terminal.range(of: "\u{1B}[?25l", options: .backwards),
+              shown.lowerBound > hidden.lowerBound else { return false }
+        let editor = #"─{5,}[\r\n\s]*❯[\s\u00A0]*(?:Try\s*["“][^\r\n]*)?[\r\n\s]+─{5,}"#
+        return text.range(of: editor, options: .regularExpression) != nil
+    }
+}
+
 /// One entry of Claude's session transcript, as the interactive run reads it.
 /// Assistant entries have the stream-json shape `StreamJSONFormatter` reads; a
 /// message typed while Claude worked shows up as a `queued_command` attachment
 /// rather than a user entry; `system`/`turn_duration` closes a turn.
 enum ClaudeTranscript: Equatable {
+    private static let pastedContentRegex = try? NSRegularExpression(
+        pattern: #"\A\s*<pasted_content id="([^"\r\n]+)">\r?\n([\s\S]*)\r?\n</pasted_content id="\1">\s*\z"#)
     case user(String)
     case queued(String)
     case assistant(model: String?, text: String?)
@@ -345,9 +397,22 @@ enum ClaudeTranscript: Equatable {
     /// What the user typed, without the tool results and command echoes Claude files under the user role.
     static func userText(_ entry: [String: Any]) -> String? {
         let content = (entry["message"] as? [String: Any])?["content"]
-        if let text = content as? String { return text.hasPrefix("<") ? nil : text }
-        let parts = (content as? [[String: Any]])?.filter { $0["type"] as? String == "text" }
-            .compactMap { $0["text"] as? String } ?? []
-        return parts.isEmpty ? nil : parts.joined(separator: "\n")
+        let text: String
+        if let value = content as? String {
+            text = value
+        } else {
+            let parts = (content as? [[String: Any]])?.filter { $0["type"] as? String == "text" }
+                .compactMap { $0["text"] as? String } ?? []
+            guard !parts.isEmpty else { return nil }
+            text = parts.joined(separator: "\n")
+        }
+        // Long bracketed pastes are wrapped in the interactive provider transcript.
+        // Match the whole envelope and its paired ID before removing provider markup.
+        if let regex = pastedContentRegex,
+           let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+           let body = Range(match.range(at: 2), in: text) {
+            return String(text[body])
+        }
+        return text.hasPrefix("<") ? nil : text
     }
 }

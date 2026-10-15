@@ -8,9 +8,11 @@ final class PTYProcess: @unchecked Sendable {
     private let terminalFD: Int32
     private let queue: DispatchQueue
     private var reader: DispatchSourceRead?
+    private var writer: PipeWriter?
     private var closed = false
     var output: ((Data) -> Void)?
     var exited: ((Int32) -> Void)?
+    var inputFailed: (() -> Void)?
 
     init(executable: String, arguments: [String], directory: String, environment: [String: String],
          queue: DispatchQueue) throws {
@@ -34,6 +36,23 @@ final class PTYProcess: @unchecked Sendable {
         }
         pid = child
         terminalFD = descriptor
+        let input = dup(descriptor)
+        guard input >= 0 else {
+            let failure = errno
+            kill(-child, SIGKILL)
+            var status: Int32 = 0
+            while waitpid(child, &status, 0) < 0 && errno == EINTR {}
+            Darwin.close(descriptor)
+            throw ControlError("Could not open terminal input: " + String(cString: strerror(failure)))
+        }
+        let writer = PipeWriter(FileHandle(fileDescriptor: input, closeOnDealloc: true))
+        writer.failed = { [weak self] in
+            self?.queue.async { [weak self] in
+                self?.inputFailed?()
+                self?.terminate()
+            }
+        }
+        self.writer = writer
     }
 
     /// Start only after callbacks are installed, including for children that exit immediately.
@@ -58,18 +77,10 @@ final class PTYProcess: @unchecked Sendable {
     }
 
     @discardableResult
-    func write(_ data: Data) -> Bool {
-        guard !closed else { return false }
-        return data.withUnsafeBytes { bytes in
-            var offset = 0
-            while offset < bytes.count {
-                let count = Darwin.write(terminalFD, bytes.baseAddress! + offset, bytes.count - offset)
-                if count < 0 && errno == EINTR { continue }
-                guard count > 0 else { return false }
-                offset += count
-            }
-            return true
-        }
+    func write(_ data: Data, completed: (() -> Void)? = nil) -> Bool {
+        guard !closed, let writer else { return false }
+        writer.send(data, completed: completed)
+        return true
     }
 
     func resize(rows: UInt16, columns: UInt16) {
@@ -83,10 +94,7 @@ final class PTYProcess: @unchecked Sendable {
 
     private func read() {
         guard !closed else { return }
-        // Nonblocking only while draining; writes retain their complete-message semantics.
-        let flags = fcntl(terminalFD, F_GETFL)
-        _ = fcntl(terminalFD, F_SETFL, flags | O_NONBLOCK)
-        defer { _ = fcntl(terminalFD, F_SETFL, flags) }
+        // Both descriptor copies stay nonblocking; output callbacks can enqueue input safely.
         var bytes = [UInt8](repeating: 0, count: 16_384)
         while true {
             let count = Darwin.read(terminalFD, &bytes, bytes.count)
@@ -99,6 +107,8 @@ final class PTYProcess: @unchecked Sendable {
     private func close() {
         guard !closed else { return }
         closed = true
+        writer?.close()
+        writer = nil
         reader?.cancel()
         reader = nil
     }

@@ -2,6 +2,62 @@
 import XCTest
 
 final class SessionEventTests: XCTestCase {
+    func testInteractiveClaudeConfirmsTrimmedEchoWithoutChangingStoredMessage() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        for mode in [LaunchMode.claudeInteractive, .claudeStream] {
+            let url = folder.appendingPathComponent("\(mode).log")
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+            let original = "  Keep the internal\nline break, Привет.\n"
+            let spec = LaunchSpec(executable: "/bin/echo", prompt: original, arguments: [],
+                                  workingDirectory: folder.path, environment: [:], mode: mode, timeout: nil, log: url)
+            let journal = try RunJournal(output: FileHandle(forWritingTo: url),
+                                         events: RunEvents(session: { _ in }, finished: { _ in }),
+                                         spec: spec, legacy: nil)
+            journal.delivery(spec.messageID, .written)
+            journal.user(ChatMessage(text: original), id: "steer")
+            journal.delivery("steer", .written)
+            journal.confirmUser("Keep the internal\nline break, Привет.")
+            journal.confirmUser("Keep the internal line break, Привет.")
+            let reader = SessionEventReader()
+            XCTAssertTrue(try reader.read(from: SessionEventReader.file(for: url)))
+            XCTAssertEqual(reader.transcript.items.filter { $0.kind == .user }.map(\.delivery),
+                           mode == .claudeInteractive ? [.accepted, .written] : [.written, .written])
+            journal.confirmUser("Keep the internal\nline break, Привет.")
+            XCTAssertTrue(try reader.read(from: SessionEventReader.file(for: url)))
+            let users = reader.transcript.items.filter { $0.kind == .user }
+            XCTAssertEqual(users.map(\.text), [original, original])
+            XCTAssertEqual(users.map(\.delivery), mode == .claudeInteractive
+                           ? [.accepted, .accepted] : [.written, .written])
+            journal.finish(.succeeded)
+        }
+    }
+
+    func testALateLocalWriteCannotDowngradeProviderAcceptance() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("session.log")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        let spec = LaunchSpec(executable: "/bin/echo", prompt: "Fixture", arguments: [], workingDirectory: folder.path,
+                              environment: [:], mode: .claudeStream, timeout: nil, log: url)
+        let journal = try RunJournal(output: FileHandle(forWritingTo: url),
+                                     events: RunEvents(session: { _ in }, finished: { _ in }), spec: spec, legacy: nil)
+        journal.confirmUser("Fixture")
+        journal.delivery(spec.messageID, .accepted)
+        journal.delivery(spec.messageID, .written)
+        let rows = try String(contentsOf: SessionEventReader.file(for: url), encoding: .utf8).split(separator: "\n")
+        let deliveries = try rows.map { try JSONDecoder().decode(SessionEvent.self, from: Data($0.utf8)) }
+            .filter { if case .delivery = $0.payload { return true }; return false }
+        XCTAssertEqual(deliveries.count, 1,
+                       "repeated provider deltas do not append the same acknowledgment")
+        let reader = SessionEventReader()
+        XCTAssertTrue(try reader.read(from: SessionEventReader.file(for: url)))
+        XCTAssertEqual(reader.transcript.items.first?.delivery, .accepted)
+        journal.finish(.succeeded)
+    }
+
     private func event(_ payload: SessionEvent.Payload, turn: String = "turn-1") -> SessionEvent {
         SessionEvent(turnID: turn, payload: payload)
     }

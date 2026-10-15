@@ -1,12 +1,10 @@
 import AppKit
 import RotaCore
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// One session as a chat: the routine's prompt, what the agent said and did,
 /// and the user's messages, with a field to write the next one.
 struct SessionView: View {
-    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
     let routine: Routine
@@ -28,13 +26,14 @@ struct SessionView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-                .padding(.horizontal, metrics(20))
-                .padding(.vertical, metrics(12))
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
             Divider()
             if let reason = current.eventError {
-                Label("Could not save session events: " + reason, systemImage: "exclamationmark.triangle.fill")
-                    .scaledFont(.callout)
-                    .padding(metrics(12))
+                Label("Could not save session history: " + reason,
+                               systemImage: "exclamationmark.triangle.fill")
+                    .interfaceFont(.callout)
+                    .padding(12)
             }
             if let question = current.attention, current.requests?.isEmpty != false {
                 AttentionBanner(text: question, canReply: model.scheduler.canMessage(current)) {
@@ -46,14 +45,17 @@ struct SessionView: View {
                     model.scheduler.respond(to: request.id, in: current, response: response)
                 }
                 .id(request.id)
+                .layoutPriority(1)
             }
             let items = conversationItems
-            ChatTranscript(items: items, running: running, record: record)
-            Composer(record: current, routine: routine, failedMessage: Self.failedMessage(in: items)) { message, id in
+            ChatTranscript(items: items, running: running)
+                .frame(minHeight: 44)
+            Composer(record: current, routine: routine, draft: model.draft(for: record),
+                     failedMessage: Self.failedMessage(in: items)) { message, id in
                 outbox.append((id, message))
             }
         }
-        .frame(minWidth: min(520, metrics(520)), maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(routine.name)
         .task(id: RefreshKey(record: record.id, running: running, version: model.scheduler.historyVersion)) {
             if readerID != record.id {
@@ -100,27 +102,31 @@ struct SessionView: View {
     }
 
     private var header: some View {
-        HStack(spacing: metrics(12)) {
-            VStack(alignment: .leading, spacing: metrics(2)) {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(record.startedAt.formatted(date: .abbreviated, time: .shortened))
-                    .scaledFont(.callout)
-                Text([record.harness.title, record.trigger == .catchUp ? "missed slot, run late" : nil,
-                      record.outcome.title].compactMap { $0 }.joined(separator: " \u{00B7} "))
-                    .scaledFont(.caption)
-                    .foregroundStyle(record.outcome.isFailure ? Color.errorText : Color.secondaryText)
+                    .interfaceFont(.callout)
+                Text([record.trigger == .catchUp ? "missed slot, run late" : nil,
+                      current.outcome.title].compactMap { $0 }.joined(separator: " \u{00B7} "))
+                    .interfaceFont(.caption)
+                    .foregroundStyle(current.outcome.isFailure ? Color.errorText : Color.secondaryText)
             }
-            Spacer(minLength: metrics(8))
+            Spacer(minLength: 8)
             if let path = record.logPath {
-                Button("Show Log in Finder", systemImage: "folder") {
+                Button {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                } label: {
+                    Label("Show Log in Finder", systemImage: "folder")
                 }
                 .labelStyle(.iconOnly)
                 .help("Show log in Finder")
             }
             if model.scheduler.terminalCommand(for: record) != nil {
-                Button(running ? "Open in Terminal" : "Continue in Terminal", systemImage: "terminal") {
+                Button {
                     ChatOpener.open(record, workingDirectory: routine.workingDirectory, scheduler: model.scheduler,
                                     terminal: model.settings.terminalApp)
+                } label: {
+                    Label(running ? "Open in Terminal" : "Continue in Terminal", systemImage: "terminal")
                 }
                 .accessibilityIdentifier("openTerminal")
                 .labelStyle(.iconOnly)
@@ -128,7 +134,9 @@ struct SessionView: View {
             }
             // A session that takes messages has Stop beside its field.
             if running && !model.scheduler.canMessage(record) {
-                Button("Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }
+                Button { model.scheduler.stop(routine.id) } label: {
+                    Label("Stop", systemImage: "stop.fill")
+                }
                     .accessibilityIdentifier("stopSession")
             }
         }
@@ -165,289 +173,35 @@ struct SessionView: View {
     }
 }
 
-/// The field under the chat, as super.engineering draws it: one rounded gray
-/// box holding the message and, under it, what the session runs on, Stop while
-/// it runs, and Send. Return sends, Option-Return starts a new line. It talks to
-/// the live session where the harness allows it, continues a finished session
-/// otherwise, and says where to go when neither works.
-struct Composer: View {
-    @Environment(\.interfaceMetrics) private var metrics
-    @Environment(AppModel.self) private var model
-    let record: RunRecord
-    let routine: Routine
-    let failedMessage: ChatMessage?
-    /// Called with each message sent, so the chat can show it until the session does.
-    let sent: (ChatMessage, String) -> Void
-    @State var text = ""
-    @State var attachments: [ChatAttachment] = []
-    @State private var choosingFiles = false
-    @State private var attachmentError: String?
-    @FocusState private var focused: Bool
-
-    private var running: Bool { model.scheduler.isActive(record) }
-    private var canSend: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty }
-
-    var body: some View {
-        Group {
-            if model.scheduler.canMessage(record) {
-                box
-            } else if let note {
-                Text(note)
-                    .scaledFont(.callout)
-                    .foregroundStyle(Color.secondaryText)
-                    .frame(maxWidth: .infinity)
-            }
-        }
-        // The chat's column, so the box lines up with the messages above it.
-        .padding(.horizontal, metrics(24))
-        .padding(.top, metrics(6))
-        .padding(.bottom, metrics(16))
-        .frame(maxWidth: metrics(760))
-        .frame(maxWidth: .infinity)
-        .background(Color(nsColor: .textBackgroundColor))
-        .task(id: record.id) { focused = true }
-        .fileImporter(isPresented: $choosingFiles, allowedContentTypes: [.item],
-                      allowsMultipleSelection: true) { result in
-            do { try addAttachments(result.get()) } catch { attachmentError = error.localizedDescription }
-        }
-        .onDrop(of: [UTType.fileURL.identifier], isTargeted: nil) { providers in
-            guard model.scheduler.canMessage(record) else { return false }
-            for provider in providers {
-                _ = provider.loadObject(ofClass: URL.self) { url, error in
-                    Task { @MainActor in
-                        do {
-                            if let error { throw error }
-                            if let url { try addAttachments([url]) }
-                        } catch { attachmentError = error.localizedDescription }
-                    }
-                }
-            }
-            return !providers.isEmpty
-        }
-    }
-
-    private var box: some View {
-        VStack(alignment: .leading, spacing: metrics(10)) {
-            if let failedMessage, text.isEmpty, attachments.isEmpty {
-                HStack(spacing: metrics(8)) {
-                    Label("Message not delivered", systemImage: "exclamationmark.triangle.fill")
-                    Spacer(minLength: metrics(8))
-                    Button("Restore Message") {
-                        text = failedMessage.text; attachments = failedMessage.attachments; focused = true
-                    }
-                        .accessibilityIdentifier("restoreMessage")
-                }
-                .scaledFont(.callout)
-            }
-            if let attachmentError {
-                Label(attachmentError, systemImage: "exclamationmark.triangle.fill")
-                    .scaledFont(.callout).accessibilityIdentifier("attachmentError")
-            }
-            if !attachments.isEmpty {
-                ChatAttachmentStrip(files: attachments) { id in attachments.removeAll { $0.id == id } }
-            }
-            TextField(placeholder, text: $text, axis: .vertical)
-                .font(model.chatText.body(scale: model.appZoom.scale))
-                .lineLimit(2...8)
-                .textFieldStyle(.plain)
-                .focused($focused)
-                .onSubmit(send)
-                .help("\(effect) Return sends, Option-Return starts a new line.")
-                .accessibilityIdentifier("composer")
-            HStack(spacing: metrics(8)) {
-                Button { choosingFiles = true } label: { Image(systemName: "paperclip") }
-                    .frame(width: metrics.target(28), height: metrics.target(28))
-                    .help("Attach files and images (up to 10 files, 20 MB each)")
-                    .accessibilityLabel("Attach Files…")
-                    .accessibilityIdentifier("attachFiles")
-                HStack(spacing: metrics(5)) {
-                    HarnessLogo(harness: record.harness)
-                    Text(ModelLabel.name(harness: record.harness, routine: routine,
-                                         models: model.settings.models, record: record))
-                        .foregroundStyle(Color.primary.opacity(0.82))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .truncationMode(.middle)
-                        .help(ModelLabel.modelID(harness: record.harness, routine: routine, record: record)
-                              ?? record.harness.title)
-                        .accessibilityIdentifier("composerModel")
-                    if let effort = record.metadata?.effort ?? record.configuration?.effort {
-                        Text(effort.capitalized).foregroundStyle(Color.secondaryText)
-                    }
-                }
-                .scaledFont(.callout)
-                .foregroundStyle(Color.secondaryText)
-                .lineLimit(1)
-                Spacer(minLength: metrics(8))
-                // As super.engineering's: while the session works, its clock, and Stop in Send's
-                // place until there is something to send.
-                if running, let since = model.scheduler.runStartedAt(record) {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text(Self.clock(context.date.timeIntervalSince(since)))
-                            .scaledFont(.callout).monospacedDigit()
-                            .foregroundStyle(Color.secondaryText)
-                    }
-                }
-                if running && !canSend {
-                    StopRingButton { model.scheduler.stop(record.routineID) }
-                        .help("Stop the session")
-                        .accessibilityLabel("Stop")
-                        .accessibilityIdentifier("composerStop")
-                } else {
-                    RoundButton(symbol: "arrow.up", filled: canSend, fill: Color.accentColor,
-                                foreground: canSend ? .white : Color.secondaryText, action: send)
-                        .disabled(!canSend)
-                        .keyboardShortcut(.return, modifiers: .command)
-                        .help("Send (Return)")
-                        .accessibilityLabel("Send")
-                        .accessibilityIdentifier("send")
-                }
-            }
-        }
-        .padding(.horizontal, metrics(16))
-        .padding(.top, metrics(14))
-        .padding(.bottom, metrics(10))
-        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: metrics(20)))
-        .overlay {
-            RoundedRectangle(cornerRadius: metrics(20))
-                .strokeBorder(focused ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.08),
-                              lineWidth: metrics(focused ? 1.5 : 1))
-        }
-        .contentShape(RoundedRectangle(cornerRadius: metrics(20)))
-        .onTapGesture { focused = true }
-    }
-
-    /// "0:21", "12:05", "1:02:05".
-    static func clock(_ interval: TimeInterval) -> String {
-        let seconds = max(0, Int(interval))
-        let minutes = String(format: "%02d", seconds / 60 % 60)
-        let rest = String(format: "%02d", seconds % 60)
-        return seconds >= 3600 ? "\(seconds / 3600):\(minutes):\(rest)" : "\(seconds / 60):\(rest)"
-    }
-
-    private var placeholder: String {
-        running ? "Message the running session" : "Continue this session"
-    }
-
-    /// What sending does here, which differs by harness and state.
-    private var effect: String {
-        guard running else { return "Sends a new turn in this session." }
-        return "Joins the current turn when the harness accepts it."
-    }
-
-    /// Why there is no field.
-    private var note: String? {
-        switch record.harness {
-        case .shell:
-            return running ? "Open in Terminal to type into the command." : nil
-        default:
-            return model.scheduler.active[record.routineID] != nil && !running
-                ? "Another session of this routine is running." : nil
-        }
-    }
-
-    private func addAttachments(_ urls: [URL]) throws {
-        let new = try urls.filter { url in !attachments.contains { $0.url == url } }.map(ChatAttachment.inspect)
-        guard attachments.count + new.count <= 10 else {
-            throw AttachmentError.invalid("Attach up to 10 files per message.")
-        }
-        attachments += new
-        attachmentError = nil
-    }
-
-    private func send() {
-        let message = ChatMessage(text: text.trimmingCharacters(in: .whitespacesAndNewlines), attachments: attachments)
-        guard canSend else { return }
-        do {
-            guard let id = try model.scheduler.message(message, to: record) else { return }
-            sent(message, id)
-            text = ""
-            attachments = []
-            attachmentError = nil
-        } catch { attachmentError = error.localizedDescription }
-    }
-}
-
-/// Stop while the session works: a square in a circle, an arc running round it.
-private struct StopRingButton: View {
-    @Environment(\.interfaceMetrics) private var metrics
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            TimelineView(.animation) { context in
-                let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2
-                ZStack {
-                    Circle().fill(Color.primary.opacity(0.08))
-                    Image(systemName: "stop.fill")
-                        .scaledFont(size: 11, weight: .bold)
-                        .foregroundStyle(Color.errorText)
-                    Circle()
-                        .trim(from: 0, to: 0.28)
-                        .stroke(Color.orange, style: StrokeStyle(lineWidth: metrics(2), lineCap: .round))
-                        .rotationEffect(.degrees(turn * 360))
-                        .padding(metrics(1))
-                }
-                .frame(width: metrics.target(28), height: metrics.target(28))
-            }
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-/// A 28 pt circular icon button, as the composer's Send and Stop: filled when
-/// it acts, an outlined circle when it waits, as super.engineering's Send does.
-private struct RoundButton: View {
-    @Environment(\.interfaceMetrics) private var metrics
-    let symbol: String
-    let filled: Bool
-    let fill: Color
-    let foreground: Color
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .scaledFont(size: 13, weight: .bold)
-                .foregroundStyle(foreground)
-                .frame(width: metrics.target(28), height: metrics.target(28))
-                .background(filled ? fill : .clear, in: Circle())
-                .overlay { if !filled { Circle().strokeBorder(Color.secondary.opacity(0.5)) } }
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 /// What the session asked the user, above its chat until they answer or dismiss it.
 /// A session that takes no message (a command, or one whose routine runs again)
 /// cannot be answered here, so the banner asks for a look and a Done instead.
 private struct AttentionBanner: View {
-    @Environment(\.interfaceMetrics) private var metrics
     let text: String
     let canReply: Bool
     let dismiss: () -> Void
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: metrics(10)) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: metrics(2)) {
-                Text(canReply ? "Needs your reply" : "Needs your attention").scaledFont(.callout, weight: .semibold)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(canReply ? "Needs your reply" : "Needs your attention").interfaceFont(.callout, weight: .semibold)
                     .accessibilityIdentifier("attentionBanner")
-                Text(text).scaledFont(.callout).textSelection(.enabled)
+                Text(text).interfaceFont(.callout).textSelection(.enabled)
             }
-            Spacer(minLength: metrics(8))
+            Spacer(minLength: 8)
             Button(canReply ? "Dismiss" : "Done", action: dismiss)
                 .help(canReply ? "Clear the mark without replying" : "Clear the mark")
                 .accessibilityIdentifier("dismissAttention")
         }
-        .padding(.horizontal, metrics(14))
-        .padding(.vertical, metrics(10))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         // A card inside the column: an edge-to-edge band shows through the translucent sidebar.
-        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: metrics(10)))
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
         // The chat's column, so the card lines up with the messages under it.
-        .padding(.horizontal, metrics(24))
-        .padding(.top, metrics(12))
-        .frame(maxWidth: metrics(760))
+        .padding(.horizontal, 24)
+        .padding(.top, 12)
+        .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)
     }
 }
@@ -455,7 +209,6 @@ private struct AttentionBanner: View {
 /// A harness's own mark (`HarnessLogos.xcassets`, sources in `docs/harness-logos.md`):
 /// Claude in its orange, the others in the text color; a shell gets the terminal glyph.
 struct HarnessLogo: View {
-    @Environment(\.interfaceMetrics) private var metrics
     let harness: Harness
 
     var body: some View {
@@ -471,7 +224,8 @@ struct HarnessLogo: View {
         }
         .foregroundStyle(harness == .claude ? Color(red: 0xD9 / 255, green: 0x77 / 255, blue: 0x57 / 255)
                          : Color.primary)
-        .frame(width: metrics(14), height: metrics(14))
+        .frame(width: 14,
+               height: 14)
         .accessibilityHidden(true)
     }
 }

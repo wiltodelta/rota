@@ -16,11 +16,14 @@ WORK="$(mktemp -d /tmp/rota-ui-work.XXXXXX)"
 export ROTA_DATA_DIR="$WORK/data"
 SUPPORT="$ROTA_DATA_DIR"
 LOGS="$ROTA_DATA_DIR/Logs"
-DOMAIN="com.wiltodelta.rota.dev"
-APP="$PWD/Rota.app"
+DOMAIN="${ROTA_UI_BUNDLE_ID:-com.wiltodelta.rota.dev}"
+export ROTA_BUNDLE_ID="$DOMAIN"
+APP="${ROTA_UI_APP:-$PWD/Rota.app}"
 DRIVER="$WORK/driver"
 LIVE="${1:-}"
 FAILURES=0
+DEFAULTS_BACKUP="$WORK/defaults.plist"
+defaults export "$DOMAIN" "$DEFAULTS_BACKUP" >/dev/null || exit 1
 
 pass() { echo "ok    $1"; }
 fail() { echo "FAIL  $1"; FAILURES=$((FAILURES + 1)); }
@@ -28,20 +31,22 @@ check() { if "$@" >/dev/null 2>&1; then pass "${*: -1}"; else fail "${*: -1}"; f
 
 # Only the build under test, by its full path: never the installed app.
 quit_rota() {
-    pkill -f "$APP/Contents/MacOS/Rota" || true
-    while pgrep -f "$APP/Contents/MacOS/Rota" >/dev/null; do sleep 0.5; done
+    "$DRIVER" quit "$APP"
 }
 
 cleanup() {
-    quit_rota
-    defaults delete "$DOMAIN" >/dev/null 2>&1 || true
+    quit_rota || return 1
+    python3 scripts/restore-defaults.py "$DOMAIN" "$DEFAULTS_BACKUP" || return 1
     rm -rf "$WORK"
 }
 
 # LaunchServices can refuse to open an app that has just quit (error -600), so try again.
 # The data folder goes along, since an app opened by LaunchServices does not inherit the shell's environment.
 open_rota() {
-    for _ in 1 2 3; do open --env "ROTA_DATA_DIR=$ROTA_DATA_DIR" "$@" "$APP" && return 0; sleep 2; done
+    for _ in 1 2 3; do
+        open --env "ROTA_DATA_DIR=$ROTA_DATA_DIR" --env ROTA_TEST_DISABLE_NOTIFICATIONS=1 "$@" "$APP" && return 0
+        sleep 2
+    done
     return 1
 }
 
@@ -68,12 +73,16 @@ session_value() {
         "$SUPPORT/runs/$1.json" "$2"
 }
 
-./create-app.sh >/dev/null
+if [[ -z "${ROTA_UI_APP:-}" ]]; then ./create-app.sh >/dev/null; fi
+ACTUAL_DOMAIN="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")"
+[[ "$ACTUAL_DOMAIN" == "$DOMAIN" && "$DOMAIN" == *.dev ]] ||
+    { echo "error: UI checks require the matching development bundle id" >&2; exit 1; }
 swiftc -O scripts/ui-driver.swift -o "$DRIVER"
 mkdir -p "$OUT" "$WORK/project"
-quit_rota
+[[ "$("$DRIVER" processes)" == '[]' ]] ||
+    { echo "error: another development build with this bundle id is running; use an isolated audit bundle" >&2; exit 1; }
 defaults delete "$DOMAIN" >/dev/null 2>&1 || true
-trap cleanup EXIT
+trap 'check_exit=$?; cleanup || check_exit=1; exit "$check_exit"' EXIT
 
 # The terminal a process runs in: the app among its ancestors.
 terminal_of() {
@@ -156,7 +165,7 @@ for appearance in light dark; do
     capture "UI check $appearance" "$appearance-finished"
 
     # A session that asks for a reply shows it until it is answered or dismissed.
-    Rota.app/Contents/Helpers/rota notify --session "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[0]["id"])' "$SUPPORT/runs/ui-shell-$appearance.json")" \
+    "$APP/Contents/Helpers/rota" notify --session "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[0]["id"])' "$SUPPORT/runs/ui-shell-$appearance.json")" \
         --needs-reply "Approve the weekly report?" >/dev/null && pass "notify needs reply" || fail "notify needs reply"
     sleep 1.5
     # A command takes no reply, so the banner asks for a look and a Done.
@@ -194,13 +203,15 @@ for appearance in light dark; do
     # The menu bar panel: each routine is a button that opens its latest session.
     open_rota --env "ROTA_APPEARANCE=$appearance" --env ROTA_OPEN_PANEL=1
     sleep 4
-    panel_id="$(/usr/bin/log show --last 10s --info --predicate 'subsystem == "com.wiltodelta.rota" && category == "app"' \
-        | grep -io 'window [0-9]*' | tail -1 | awk '{print $2}')"
+    panel_id="$("$DRIVER" wid --panel)"
     [[ -n "$panel_id" ]] && screencapture -x -o -l "$panel_id" "$OUT/$appearance-panel.png" \
         && pass "captured $appearance-panel" || fail "captured $appearance-panel"
     "$DRIVER" tree | grep -q "AXButton  UI check $appearance | Shell" && pass "panel row is a button" \
         || fail "panel row is a button"
-    "$DRIVER" press "UI check $appearance"; sleep 2
+    # AX may report failure when the action closes the panel and invalidates its element.
+    # The resulting window, below, determines whether the action worked.
+    "$DRIVER" press "UI check $appearance" || true
+    sleep 2
     "$DRIVER" tree | grep -q "AXWindow  UI check $appearance" && pass "panel row opens its session" \
         || fail "panel row opens its session"
     quit_rota

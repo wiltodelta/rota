@@ -4,11 +4,8 @@ import AppKit
 @MainActor
 final class TranscriptScrollView: NSScrollView, NSTextViewDelegate {
     private var firstUpdate = true
+    private var preserveViewportOnNextUpdate = false
     var activityToggled: ((Int) -> Void)?
-    var interfaceScale: Double = 1 {
-        didSet { if oldValue != interfaceScale { fitText() } }
-    }
-
     let transcript: NSTextView
 
     init() {
@@ -30,8 +27,8 @@ final class TranscriptScrollView: NSScrollView, NSTextViewDelegate {
         text.textContainer?.heightTracksTextView = false
         text.textContainer?.lineFragmentPadding = 0
         text.backgroundColor = .textBackgroundColor
-        text.linkTextAttributes = [.foregroundColor: NSColor.linkColor,
-                                   .underlineStyle: NSUnderlineStyle.single.rawValue]
+        // Activity links use quiet caption colors; document links keep the system link color.
+        text.linkTextAttributes = [:]
         text.setAccessibilityIdentifier("chatTranscript")
         text.setAccessibilityLabel("Chat transcript")
         text.delegate = self
@@ -50,12 +47,24 @@ final class TranscriptScrollView: NSScrollView, NSTextViewDelegate {
         guard let text = documentView as? NSTextView, let container = text.textContainer,
               let layout = text.layoutManager else { return }
         let width = contentSize.width
-        let inset = min(width / 4, max(24 * interfaceScale, (width - 712 * interfaceScale) / 2))
-        text.textContainerInset = NSSize(width: inset, height: 20 * interfaceScale)
+        let inset = min(width / 4, max(24, (width - 712) / 2))
+        text.textContainerInset = NSSize(width: inset, height: text.textContainerInset.height)
         container.containerSize = NSSize(width: max(1, width - 2 * inset), height: CGFloat.greatestFiniteMagnitude)
         layout.ensureLayout(for: container)
+        // Layout bookkeeping can extend past the final glyph. Scroll to content, not blank paragraphs.
+        let last = (text.string as NSString)
+            .rangeOfCharacter(from: .whitespacesAndNewlines.inverted, options: .backwards)
+        let end: CGRect
+        if last.location == NSNotFound {
+            end = .zero
+        } else {
+            let glyphs = layout.glyphRange(forCharacterRange: last, actualCharacterRange: nil)
+            end = layout.boundingRect(forGlyphRange: glyphs, in: container)
+        }
+        let verticalInset = min(20, max(0, (contentSize.height - end.height) / 2))
+        text.textContainerInset = NSSize(width: inset, height: verticalInset)
         let size = NSSize(width: width,
-                          height: max(contentSize.height, layout.usedRect(for: container).maxY + 40 * interfaceScale))
+                          height: max(contentSize.height, end.maxY + 2 * verticalInset))
         if text.frame.size != size { text.setFrameSize(size) }
         scrollViewport(to: contentView.bounds.origin)
     }
@@ -73,8 +82,9 @@ final class TranscriptScrollView: NSScrollView, NSTextViewDelegate {
         let old = transcript.string
         let ranges = transcript.selectedRanges.map { $0.rangeValue }
         let origin = contentView.bounds.origin
-        let follow = firstUpdate || (ranges.allSatisfy { $0.length == 0 }
-                                     && contentView.bounds.maxY >= transcript.frame.maxY - 60)
+        let follow = !preserveViewportOnNextUpdate && (firstUpdate || (ranges.allSatisfy { $0.length == 0 }
+                                      && contentView.bounds.maxY >= transcript.frame.maxY - 60))
+        preserveViewportOnNextUpdate = false
         transcript.textStorage?.setAttributedString(document)
         fitText()
         let translate = Self.selectionTranslation(replacing: old, with: document.string)
@@ -116,6 +126,7 @@ final class TranscriptScrollView: NSScrollView, NSTextViewDelegate {
     func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
         let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
         if url?.scheme == "rota-activity", let id = url?.host.flatMap(Int.init) {
+            preserveViewportOnNextUpdate = true
             activityToggled?(id)
             return true
         }

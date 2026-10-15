@@ -58,6 +58,7 @@ final class AppSettings {
 
     func setExecutable(_ path: String?, for harness: Harness) {
         executables[harness.rawValue] = path
+        refreshInstalled()
     }
 
     @ObservationIgnored private var refreshing: Task<Void, Never>?

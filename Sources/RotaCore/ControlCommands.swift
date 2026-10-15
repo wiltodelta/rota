@@ -70,13 +70,13 @@ extension Scheduler {
 
     private func create(_ params: [String: Any]) throws -> Routine {
         let id = try value(params, "id", as: String.self)
-        guard routine(id) == nil else { throw ControlError("A routine \(id) exists; update it instead.") }
+        guard !containsStorageID(id) else { throw ControlError("A routine \(id) exists; update it instead.") }
         // Like a routine made in the window, it runs on its schedule from the start.
         var routine = Routine(id: id, name: id, workingDirectory: "", schedule: "", harness: .claude,
                               enabled: true, prompt: "")
         try apply(params, to: &routine)
         try validate(routine)
-        save(routine)
+        guard save(routine) else { throw ControlError(lastError ?? "Could not save the routine.") }
         notifier?.routineAdded(routine)
         return self.routine(id) ?? routine
     }
@@ -85,13 +85,13 @@ extension Scheduler {
         var routine = try existing(params)
         let harness = routine.harness
         try apply(params, to: &routine)
-        if routine.harness != harness, params["model"] == nil, params["effort"] == nil {
+        if routine.harness != harness {
             // Model ids belong to the harness they came from.
-            routine.model = nil
-            routine.effort = nil
+            if params["model"] == nil { routine.model = nil }
+            if params["effort"] == nil { routine.effort = nil }
         }
         try validate(routine, checkingID: false)
-        save(routine)
+        guard save(routine) else { throw ControlError(lastError ?? "Could not save the routine.") }
         return self.routine(routine.id) ?? routine
     }
 
@@ -130,20 +130,25 @@ extension Scheduler {
 
     private func enable(_ params: [String: Any]) throws -> Routine {
         let routine = try existing(params)
-        setEnabled(try value(params, "enabled", as: Bool.self), for: routine.id)
+        guard setEnabled(try value(params, "enabled", as: Bool.self), for: routine.id) else {
+            throw ControlError(lastError ?? "Could not save the routine.")
+        }
         return try existing(params)
     }
 
     private func stopNow(_ params: [String: Any]) throws -> [String: Any] {
         let routine = try existing(params)
         guard active[routine.id] != nil else { throw ControlError("\(routine.id) is not running.") }
-        stop(routine.id)
+        guard stop(routine.id) else {
+            throw ControlError("The stop was requested, but its intent could not be saved. "
+                + (lastError ?? "Check run history before restarting Rota."))
+        }
         return ["stopping": routine.id]
     }
 
     private func remove(_ params: [String: Any]) throws -> [String: Any] {
         let routine = try existing(params)
-        delete(routine.id)
+        guard delete(routine.id) else { throw ControlError(lastError ?? "Could not delete the routine.") }
         return ["deleted": routine.id]
     }
 
@@ -209,7 +214,10 @@ extension Scheduler {
             throw ControlError(record.harness.isAgent ? "That session cannot take a message now."
                                : "A shell session takes no messages.")
         }
-        message(text, to: record)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ControlError("The message needs text.")
+        }
+        _ = try message(ChatMessage(text: text), to: record)
         return describe(active[record.routineID] ?? record)
     }
 
@@ -219,7 +227,9 @@ extension Scheduler {
         defer { try? file.close() }
         let size = (try? file.seekToEnd()) ?? 0
         // UTF-8 takes up to four bytes a character.
-        let start = size > UInt64(characters * 4) ? size - UInt64(characters * 4) : 0
+        let budget = UInt64(max(characters, 1)).multipliedReportingOverflow(by: 4)
+        let bytes = budget.overflow ? UInt64.max : budget.partialValue
+        let start = size > bytes ? size - bytes : 0
         try? file.seek(toOffset: start)
         let text = lossyUTF8(file.readDataToEndOfFile())
         return (String(text.suffix(characters)), start > 0 || text.count > characters)
@@ -248,7 +258,8 @@ extension Scheduler {
             return number.boolValue as? T
         }
         if T.self == Int.self, let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() {
-            return number.intValue as? T
+            guard let integer = number as? Int else { throw ControlError("\(key) should be an integer.") }
+            return integer as? T
         }
         if T.self == String.self, let text = raw as? String { return text as? T }
         let expected = T.self == Int.self ? "a number" : T.self == Bool.self ? "true or false" : "text"

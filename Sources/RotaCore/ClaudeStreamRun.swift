@@ -14,7 +14,8 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     private let journal: RunJournal
     private let queue = DispatchQueue(label: "com.wiltodelta.rota.claude")
     private var process: Process?
-    private var input: FileHandle?
+    private var input: PipeWriter?
+    private var pendingWrites = Set<String>()
     private var buffer = Data()
     private let mapper = ClaudeEventMapper()
     private var stopReason: RunOutcome?
@@ -24,9 +25,11 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         self.journal = journal
     }
 
-    static func start(_ spec: LaunchSpec, journal: RunJournal) throws -> ClaudeStreamRun {
+    static func start(_ spec: LaunchSpec, journal: RunJournal) -> ClaudeStreamRun {
         let run = ClaudeStreamRun(spec: spec, journal: journal)
-        try run.launch()
+        run.queue.async {
+            do { try run.launch() } catch { run.journal.finish(.launchFailed(error.localizedDescription)) }
+        }
         return run
     }
 
@@ -78,9 +81,13 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         }
         try process.run()
         self.process = process
-        input = stdin.fileHandleForWriting
-        try input?.write(contentsOf: message)
-        journal.delivery(spec.messageID, .written)
+        let input = PipeWriter(stdin.fileHandleForWriting)
+        input.failed = { [weak self] in
+            guard let self else { return }
+            self.queue.async { self.writeFailed() }
+        }
+        self.input = input
+        writeMessage(message, id: spec.messageID)
         if let session = spec.resume { journal.session(session) }
         if let timeout = spec.timeout {
             queue.asyncAfter(deadline: .now() + timeout) { [weak self] in self?.end(as: .timedOut) }
@@ -94,18 +101,36 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     func send(_ message: ChatMessage, id: String) {
         queue.async {
             self.journal.user(message, id: id, echo: message.claudeText)
-            guard !self.journal.isFinished, let input = self.input else {
+            guard !self.journal.isFinished, self.input != nil else {
                 return self.journal.delivery(id, .failed("The session is ending."))
             }
             self.journal.line(Transcript.userLines(message.fileReferenceText), structured: false)
             do {
-                try input.write(contentsOf: Self.userMessage(message))
-                self.journal.delivery(id, .written)
+                self.writeMessage(try Self.userMessage(message), id: id)
             } catch {
                 self.journal.delivery(id, .failed(error.localizedDescription))
                 self.journal.line("[rota: message not delivered: \(error.localizedDescription)]")
             }
         }
+    }
+
+    private func writeMessage(_ data: Data, id: String) {
+        pendingWrites.insert(id)
+        input?.send(data) { [weak self] in
+            guard let self else { return }
+            self.queue.async {
+                self.pendingWrites.remove(id)
+                self.journal.delivery(id, .written)
+            }
+        }
+    }
+
+    private func writeFailed() {
+        let initialFailed = pendingWrites.contains(spec.messageID)
+        for id in pendingWrites { journal.delivery(id, .failed("Claude's input connection closed.")) }
+        pendingWrites.removeAll()
+        input = nil
+        if initialFailed { end(as: .launchFailed("Could not send the initial message to Claude.")) }
     }
 
     func respond(_ id: String, response: SessionResponse) {
@@ -196,7 +221,7 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         if let error { response["error"] = error } else { response["response"] = result }
         do {
             let data = try JSONSerialization.data(withJSONObject: ["type": "control_response", "response": response])
-            try input?.write(contentsOf: data + Data("\n".utf8))
+            input?.send(data + Data("\n".utf8))
         } catch { journal.line("[error] Could not send the permission response: " + error.localizedDescription) }
     }
 
@@ -208,21 +233,26 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         }
         requests.cancelAll()
         journal.finish(stopReason ?? (failed ? .failed(exitCode: 1) : .succeeded))
-        try? input?.close()
+        input?.close()
         input = nil
     }
 
     private func exited(status: Int32) {
         // Normally the result came first; an exit without one is a crash or a refusal to start.
         requests.cancelAll(notifyProvider: false)
+        input?.close()
+        input = nil
         journal.finish(stopReason ?? (status == 0 ? .succeeded : .failed(exitCode: status)))
         Self.log.info("claude exited with \(status)")
     }
 
     private func end(as reason: RunOutcome) {
-        guard !journal.isFinished, let process, process.isRunning else { return }
+        guard !journal.isFinished, stopReason == nil else { return }
         requests.cancelAll()
         stopReason = reason
+        input?.close()
+        input = nil
+        guard let process, process.isRunning else { return journal.finish(reason) }
         process.terminate()
         let pid = process.processIdentifier
         DispatchQueue.global().asyncAfter(deadline: .now() + 10) {

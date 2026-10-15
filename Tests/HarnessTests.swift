@@ -315,7 +315,7 @@ final class ScheduleTextTests: XCTestCase {
         func cron(_ rule: String) -> String? { ScheduleText.cron(fromRRule: rule, anchor: anchor, calendar: calendar) }
         XCTAssertEqual(cron("FREQ=HOURLY;INTERVAL=24;BYMINUTE=0"), "0 9 * * *")
         XCTAssertEqual(cron("FREQ=HOURLY;INTERVAL=1;BYMINUTE=15"), "15 * * * *")
-        XCTAssertEqual(cron("FREQ=HOURLY;INTERVAL=6;BYMINUTE=0"), "0 */6 * * *")
+        XCTAssertEqual(cron("FREQ=HOURLY;INTERVAL=6;BYMINUTE=0"), "0 3-23/6 * * *")
         XCTAssertEqual(cron("FREQ=DAILY;BYHOUR=10;BYMINUTE=30"), "30 10 * * *")
         XCTAssertEqual(cron("RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;BYHOUR=8;BYMINUTE=5"), "5 8 * * 1,3,5")
         XCTAssertEqual(cron("FREQ=WEEKLY"), "30 9 * * 3")
@@ -330,6 +330,42 @@ final class ScheduleTextTests: XCTestCase {
     func testIdentifiersKeepEveryScript() {
         XCTAssertEqual(RoutineImport.identifier(from: "Weekly SEO: report"), "weekly-seo-report")
         XCTAssertEqual(RoutineImport.identifier(from: "Отчёт по SEO"), "отчёт-по-seo")
+    }
+
+    func testImportChoicesHaveIndependentSourceAndDestinationIdentities() throws {
+        func candidate(_ source: ImportSource, _ id: String) -> ImportCandidate {
+            let routine = Routine(id: "weekly-report", name: "Weekly report", workingDirectory: "/tmp",
+                                  schedule: "0 9 * * 1", prompt: "Review the report.")
+            return ImportCandidate(routine: routine, source: source, onInSource: false, sourceID: id)
+        }
+        let scans = RoutineImport.uniqueIdentifiers([
+            ImportScan(source: .claudeDesktop, candidates: [candidate(.claudeDesktop, "claude-task")]),
+            ImportScan(source: .codex, candidates: [candidate(.codex, "codex-a"), candidate(.codex, "codex-b")])
+        ])
+        let choices = scans.flatMap(\.candidates)
+        XCTAssertEqual(Set(choices.map(\.id)).count, 3)
+        XCTAssertEqual(Set(choices.map(\.routine.id)).count, 3)
+        XCTAssertEqual(choices.map(\.routine.id), ["weekly-report", "weekly-report-2", "weekly-report-3"])
+        XCTAssertEqual(choices[1].id, "codex:codex-a")
+        var upper = choices[0]
+        upper.routine.id = "WEEKLY-REPORT"
+        let mixed = RoutineImport.uniqueIdentifiers([
+            ImportScan(source: .claudeDesktop, candidates: [choices[0], upper])])
+        XCTAssertEqual(mixed[0].candidates.map(\.routine.id), ["weekly-report", "WEEKLY-REPORT-2"])
+    }
+
+    func testRRuleConversionPreservesAnchorsAndRejectsLostConstraints() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let anchor = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 10, day: 7,
+                                                                     hour: 9, minute: 7)))
+        func cron(_ rule: String) -> String? { ScheduleText.cron(fromRRule: rule, anchor: anchor, calendar: calendar) }
+        XCTAssertEqual(cron("FREQ=MINUTELY;INTERVAL=15"), "7-59/15 * * * *")
+        for rule in ["FREQ=DAILY;BYHOUR=9;BYMINUTE=oops", "FREQ=DAILY;BYHOUR=24", "FREQ=DAILY;BYMINUTE=60",
+                     "FREQ=MINUTELY;INTERVAL=15;BYMINUTE=10", "FREQ=MINUTELY;BYHOUR=9",
+                     "FREQ=DAILY;FREQ=WEEKLY;BYHOUR=9", "FREQ=WEEKLY;BYDAY=MO,,FR;BYHOUR=9"] {
+            XCTAssertNil(cron(rule), rule)
+        }
     }
 }
 
@@ -383,7 +419,7 @@ final class CodexAutomationsImportTests: XCTestCase {
         XCTAssertEqual(digest.routine.effort, "high")
         XCTAssertFalse(digest.routine.enabled)
         XCTAssertTrue(digest.onInSource)
-        XCTAssertNil(digest.unsupported)
+        XCTAssertNotNil(digest.unsupported, "a single-folder routine cannot preserve multiple project folders")
         XCTAssertFalse(candidates[1].onInSource)
         XCTAssertNotNil(candidates[1].unsupported, "a thread follow-up is not a routine")
         XCTAssertNotNil(candidates[2].unsupported, "a monthly rule has no cron here")
@@ -398,6 +434,18 @@ final class CodexAutomationsImportTests: XCTestCase {
         process.waitUntilExit()
         defer { try? FileManager.default.removeItem(at: url) }
         XCTAssertEqual(try CodexAutomationsImport.candidates(from: url), [])
+    }
+
+    func testASchemaMismatchIsAnErrorRatherThanAnEmptyImport() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("rota-codex-\(UUID()).db")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        process.arguments = [url.path, "CREATE TABLE automations (id TEXT);"]
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+        XCTAssertThrowsError(try CodexAutomationsImport.candidates(from: url))
     }
 }
 

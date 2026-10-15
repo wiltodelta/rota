@@ -2,16 +2,22 @@
 // Synthetic clicks and keystrokes did not reach the app's windows from scripts,
 // but AXPress and AXValue do. Usage: swift scripts/ui-driver.swift <command> ...
 //
+//   processes                    list running builds with the selected bundle identity
+//   quit <exact-app-path>         quit only that owned build
+//   activate                      activate the selected app
 //   tree [depth]                 print roles, titles and identifiers of the windows
 //   press <id-or-title>          press the first button with that identifier or title
 //   set <id> <text>              set a text field's value
 //   value <id>                   print an element's value
+//   rect <id>                    print its accessibility frame in screen points
 //   exists <id-or-title>         exit 0 if an element with that identifier or title exists
 //   select <text> [n]            select the nth row (default first) containing that text
 //   choose <popup-id> <item>     pick an item from a pop-up button's menu
 //   window <title> <w> <h>       move a window to (100, 100) and resize it
 //   wid <title>                  print the window number of the window with that title
 //   focus <id>                   activate Rota and focus that element
+//   scroll <id> top|bottom       scroll the owned area containing that control
+//   reveal <id>                  scroll until that owned control is visible
 //   key return|option-return     post the key to Rota's process
 //   confirm-iterm <text>         answer iTerm2's "OK to run" for a script path containing text
 //   gate                         list offscreen windows and clipped or overflowing elements
@@ -26,9 +32,42 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
+let arguments = Array(CommandLine.arguments.dropFirst())
+let applications = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+    .filter { !$0.isTerminated }
+if arguments.first == "processes" {
+    let rows = applications.map { ["pid": String($0.processIdentifier),
+                                  "path": $0.bundleURL?.resolvingSymlinksInPath().path ?? ""] }
+    let data = try JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys])
+    print(String(decoding: data, as: UTF8.self))
+    exit(0)
+}
+if arguments.first == "quit" {
+    guard arguments.count == 2 else { fail("quit <exact-app-path>") }
+    let expected = URL(fileURLWithPath: arguments[1]).resolvingSymlinksInPath()
+    guard applications.allSatisfy({ $0.bundleURL?.resolvingSymlinksInPath() == expected }) else {
+        fail("Another build has this bundle id; refusing to quit it")
+    }
+    applications.forEach { _ = $0.terminate() }
+    let deadline = Date().addingTimeInterval(10)
+    func stillOwned(_ app: NSRunningApplication) -> Bool {
+        kill(app.processIdentifier, 0) == 0
+            && NSRunningApplication(processIdentifier: app.processIdentifier)?.bundleURL?.resolvingSymlinksInPath()
+                == expected
+    }
+    while applications.contains(where: stillOwned), Date() < deadline {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    }
+    applications.filter(stillOwned).forEach { _ = $0.forceTerminate() }
+    let forcedDeadline = Date().addingTimeInterval(5)
+    while applications.contains(where: stillOwned), Date() < forcedDeadline {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    }
+    guard !applications.contains(where: stillOwned) else { fail("The owned audit app did not quit") }
+    exit(0)
+}
 // The newest live instance: right after a relaunch the list can still hold the one that just quit.
-guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
-    .filter({ !$0.isTerminated })
+guard let app = applications
     .max(by: { ($0.launchDate ?? .distantPast) < ($1.launchDate ?? .distantPast) }) else {
     fail("Rota is not running")
 }
@@ -80,14 +119,21 @@ func dump(_ element: AXUIElement, depth: Int, max: Int) {
     children(element).forEach { dump($0, depth: depth + 1, max: max) }
 }
 
-let arguments = Array(CommandLine.arguments.dropFirst())
 switch arguments.first {
+case "activate":
+    app.activate()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
 case "tree":
     let max = arguments.count > 1 ? Int(arguments[1]) ?? 12 : 12
     windows().forEach { dump($0, depth: 0, max: max) }
 case "press":
     guard arguments.count == 2 else { fail("press <id-or-title>") }
-    guard let button = find({ matches($0, arguments[1]) && (attribute($0, kAXRoleAttribute) as String?) != "AXWindow" })
+    guard let button = find({ element in
+        guard matches(element, arguments[1]) else { return false }
+        var actions: CFArray?
+        return AXUIElementCopyActionNames(element, &actions) == .success
+            && (actions as? [String])?.contains(kAXPressAction) == true
+    })
     else { fail("no element \(arguments[1])") }
     let result = AXUIElementPerformAction(button, kAXPressAction as CFString)
     guard result == .success else { fail("press failed: \(result.rawValue)") }
@@ -105,6 +151,12 @@ case "value":
 case "exists":
     guard arguments.count == 2 else { fail("exists <id-or-title>") }
     exit(find({ matches($0, arguments[1]) }) == nil ? 1 : 0)
+case "rect":
+    guard arguments.count == 2, let element = find({ matches($0, arguments[1]) }),
+          let rect = frame(element) else { fail("no element frame") }
+    let data = try JSONSerialization.data(withJSONObject: ["x": rect.minX, "y": rect.minY,
+        "width": rect.width, "height": rect.height], options: [.sortedKeys])
+    print(String(decoding: data, as: UTF8.self))
 case "select":
     guard arguments.count >= 2 else { fail("select <text> [nth match, from 1]") }
     let text = arguments[1]
@@ -125,7 +177,10 @@ case "choose":
     // read the value back and try again.
     guard arguments.count == 3 else { fail("choose <popup-id> <item>") }
     for _ in 0..<3 {
-        guard let popup = find({ matches($0, arguments[1]) }) else { fail("no element \(arguments[1])") }
+        guard let element = find({ matches($0, arguments[1]) }),
+              let popup = find(in: element, first: {
+                  (attribute($0, kAXRoleAttribute) as String?) == "AXPopUpButton"
+              }) else { fail("no pop-up button \(arguments[1])") }
         if (attribute(popup, kAXValueAttribute) as String?) == arguments[2] { exit(0) }
         AXUIElementPerformAction(popup, kAXPressAction as CFString)
         Thread.sleep(forTimeInterval: 0.6)
@@ -137,7 +192,8 @@ case "choose":
         }
         Thread.sleep(forTimeInterval: 0.6)
     }
-    guard let popup = find({ matches($0, arguments[1]) }),
+    guard let element = find({ matches($0, arguments[1]) }),
+          let popup = find(in: element, first: { (attribute($0, kAXRoleAttribute) as String?) == "AXPopUpButton" }),
           (attribute(popup, kAXValueAttribute) as String?) == arguments[2] else { fail("could not choose \(arguments[2])") }
 case "window":
     guard arguments.count == 4, let width = Double(arguments[2]), let height = Double(arguments[3]),
@@ -201,6 +257,9 @@ case "key":
     // Keystrokes posted to Rota's process reach its key window even when System
     // Events keystrokes do not. Focus the target first with `focus`.
     guard arguments.count == 2 else { fail("key return|option-return|shift-return|control-return") }
+    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
+          let focused: AXUIElement = attribute(root, kAXFocusedUIElementAttribute),
+          matches(focused, "composer") else { fail("Rota's composer is not focused; refusing to type") }
     let modifiers: [String: CGEventFlags] = ["option-return": .maskAlternate, "shift-return": .maskShift,
                                              "control-return": .maskControl]
     let flags = modifiers[arguments[1]] ?? []
@@ -215,6 +274,60 @@ case "focus":
     app.activate()
     let result = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
     guard result == .success else { fail("focus failed: \(result.rawValue)") }
+case "scroll", "reveal":
+    let revealing = arguments[0] == "reveal"
+    guard (revealing && arguments.count == 2)
+            || (arguments.count == 3 && ["top", "bottom"].contains(arguments[2])) else {
+        fail("reveal <id> | scroll <id> top|bottom")
+    }
+    guard
+          let area = find({ element in
+              (attribute(element, kAXRoleAttribute) as String?) == "AXScrollArea"
+                  && find(in: element, first: { matches($0, arguments[1]) }) != nil
+          }), let bar: AXUIElement = attribute(area, kAXVerticalScrollBarAttribute) else {
+        fail("no owned scroll area")
+    }
+    app.activate()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else {
+        fail("Rota is not active")
+    }
+    var settable = DarwinBoolean(false)
+    AXUIElementIsAttributeSettable(bar, kAXValueAttribute as CFString, &settable)
+    guard settable.boolValue else { fail("scroll position is read-only") }
+    func setPosition(_ position: Double) {
+        let target = NSNumber(value: position)
+        let result = AXUIElementSetAttributeValue(bar, kAXValueAttribute as CFString, target)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        guard let value: NSNumber = attribute(bar, kAXValueAttribute),
+              abs(value.doubleValue - target.doubleValue) < 0.001 else {
+            fail("scroll position did not change (AX result \(result.rawValue))")
+        }
+    }
+    if revealing {
+        var lower = 0.0
+        var upper = 1.0
+        for _ in 0..<12 {
+            guard let element = find({ matches($0, arguments[1]) }),
+                  let visible = frame(area), let control = frame(element),
+                  let value: NSNumber = attribute(bar, kAXValueAttribute) else { fail("no control to reveal") }
+            if visible.insetBy(dx: -1, dy: -1).contains(control) { break }
+            if control.minY < visible.minY { upper = value.doubleValue } else { lower = value.doubleValue }
+            setPosition((lower + upper) / 2)
+        }
+    } else {
+        setPosition(arguments[2] == "top" ? 0 : 1)
+    }
+    guard let element = find({ matches($0, arguments[1]) }),
+          let visible = frame(area), let control = frame(element) else { fail("no scrolled control frame") }
+    func coordinates(_ rect: CGRect) -> [String: Double] {
+        ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height]
+    }
+    if revealing && !visible.insetBy(dx: -1, dy: -1).contains(control) { fail("control is still clipped") }
+    let value: NSNumber = attribute(bar, kAXValueAttribute) ?? 0
+    let data = try JSONSerialization.data(withJSONObject: ["area": coordinates(visible),
+        "control": coordinates(control), "value": value], options: [.sortedKeys])
+    print(String(decoding: data, as: UTF8.self))
 case "confirm-iterm":
     // iTerm2 asks "OK to run <script>?" before running an opened script; answer
     // for scripts whose path contains the text, and leave its setting alone.
@@ -232,13 +345,23 @@ case "confirm-iterm":
 case "wid":
     guard arguments.count == 2 else { fail("wid <title>") }
     let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+    let expected = windows().first { (attribute($0, kAXTitleAttribute) as String?) == arguments[1] }.flatMap(frame)
     guard let entry = list.first(where: {
-        ($0[kCGWindowOwnerPID as String] as? Int32) == app.processIdentifier
-            && ($0[kCGWindowName as String] as? String) == arguments[1]
+        guard ($0[kCGWindowOwnerPID as String] as? Int32) == app.processIdentifier,
+              let bounds = $0[kCGWindowBounds as String] as? NSDictionary,
+              let actual = CGRect(dictionaryRepresentation: bounds) else { return false }
+        if arguments[1] == "--panel" {
+            return ($0[kCGWindowLayer as String] as? Int ?? 0) > 0 && actual.width > 100 && actual.height > 40
+        }
+        if ($0[kCGWindowName as String] as? String) == arguments[1] { return true }
+        // WindowServer can omit titles; resolve against the target app's AX window.
+        guard let expected else { return false }
+        return abs(actual.minX - expected.minX) < 1 && abs(actual.minY - expected.minY) < 1
+            && abs(actual.width - expected.width) < 1 && abs(actual.height - expected.height) < 1
     }) else { fail("no window \(arguments[1])") }
     print(entry[kCGWindowNumber as String] ?? "")
 default:
-    fail("usage: tree | press | set | value | exists | select | choose | window | wid | gate | focus | key | confirm-iterm")
+    fail("usage: processes | quit | activate | tree | press | set | value | rect | exists | select | choose | window | wid | gate | focus | scroll | reveal | key | confirm-iterm")
 }
 
 func frame(_ element: AXUIElement) -> CGRect? {

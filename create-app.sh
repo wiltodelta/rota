@@ -52,6 +52,7 @@ rm -rf "$APP_DIR/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices" \
     "$APP_DIR/Contents/Frameworks/Sparkle.framework/XPCServices"
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents/MacOS/$BIN"
 cp ".build/artifacts/sparkle/Sparkle/LICENSE" "$APP_DIR/Contents/Resources/Sparkle LICENSE.txt"
+cp LICENSE "$APP_DIR/Contents/Resources/Rota LICENSE.txt"
 
 # The `rota` command (and `rota mcp`), which agents and terminals use to manage
 # routines through the running app. Settings link it into ~/.local/bin.
@@ -63,9 +64,11 @@ cp "$BIN_DIR/RotaCLI" "$APP_DIR/Contents/Helpers/rota"
 # are drawn by scripts/draw-icon.py. Needs Xcode 26+ on a macOS 26 host.
 # Absolute paths: actool resolves relative ones against its long-lived agent's
 # working directory, not this script's.
+ICON_INFO="$(mktemp -t rota-icon)"
+trap 'rm -f "$ICON_INFO"' EXIT
 xcrun actool "$PWD/App Icon.icon" "$PWD/MenuIcons.xcassets" "$PWD/HarnessLogos.xcassets" --compile "$PWD/$APP_DIR/Contents/Resources" \
     --platform macosx --minimum-deployment-target "$MACOS_MIN" --app-icon "App Icon" \
-    --output-partial-info-plist "$(mktemp -t rota-icon)" >/dev/null
+    --output-partial-info-plist "$ICON_INFO" >/dev/null
 ICON_PLIST="	<key>CFBundleIconFile</key>
 	<string>App Icon</string>
 	<key>CFBundleIconName</key>

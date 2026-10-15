@@ -31,7 +31,7 @@ struct RotaApp: App {
                 }
             }
             RoutineCommands()
-            // App zoom and chat text size have independent shortcuts.
+            // Chat text size has its own shortcuts.
             CommandGroup(after: .toolbar) {
                 SidebarToggleCommand()
                 Divider()
@@ -62,7 +62,7 @@ struct RoutineCommands: Commands {
             }
             .keyboardShortcut("r")
             .disabled(routine == nil || running)
-            Button("Stop") { routine.map { model.scheduler.stop($0.id) } }
+            Button("Stop") { if let routine { model.scheduler.stop(routine.id) } }
                 .keyboardShortcut(".")
                 .disabled(!running)
             Divider()
@@ -110,7 +110,21 @@ final class AppModel {
     }
     let settings = AppSettings()
     let chatText = ChatTextSettings()
-    let appZoom = AppZoomSettings()
+    @ObservationIgnored private var drafts: [UUID: ChatDraft] = [:]
+
+    /// View identity changes during navigation; drafts belong to the session instead.
+    func draft(for record: RunRecord) -> ChatDraft {
+        if let draft = drafts[record.id] { return draft }
+        let draft = ChatDraft(routineID: record.routineID)
+        drafts[record.id] = draft
+        return draft
+    }
+
+    func discardDraftsForDeletedRoutines() {
+        let retained = Set(scheduler.routines.map(\.id))
+        drafts = drafts.filter { retained.contains($0.value.routineID) }
+    }
+
     private let notifier = Notifier()
     @ObservationIgnored var openMainWindow: () -> Void = {}
     @ObservationIgnored var openSettingsWindow: () -> Void = {}
@@ -126,7 +140,7 @@ final class AppModel {
         scheduler.claudeInteractive = { settings.claudeInteractive }
         notifier.notifyOnSuccess = { settings.notifyOnSuccess }
         scheduler.notifier = notifier
-        notifier.requestAuthorization()
+        notifier.configure()
         notifier.open = { [weak self] in self?.showMainWindow(selecting: $0) }
         notifier.reply = { [weak self] session, text in self?.reply(text, to: session) }
         let helper = AgentAccess.helper()
@@ -135,8 +149,19 @@ final class AppModel {
 
     /// Answers a session from its notification's Reply field, as its composer would.
     func reply(_ text: String, to session: UUID) {
-        guard let record = scheduler.current(session) else { return }
-        scheduler.message(text, to: record)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let record = scheduler.current(session) else { return }
+        do {
+            guard try scheduler.message(ChatMessage(text: text), to: record) != nil else {
+                throw ControlError("The session could not accept the reply.")
+            }
+        } catch {
+            let draft = draft(for: record)
+            draft.text = [draft.text, text].filter { !$0.isEmpty }.joined(separator: "\n\n")
+            scheduler.lastError = "Could not send the notification reply. It is in the session's draft. "
+                + error.localizedDescription
+            showMainWindow(selecting: .session(session))
+        }
     }
 
     func showMainWindow(selecting item: SidebarItem? = nil) {
@@ -146,12 +171,15 @@ final class AppModel {
 
     /// A routine's latest session, or the routine itself before its first run.
     func latest(of routineID: String) -> SidebarItem {
-        scheduler.history.records(for: routineID).first.map { .session($0.id) } ?? .routine(routineID)
+        scheduler.history.records(for: routineID).first(where: { !$0.isSkip })
+            .map { .session($0.id) } ?? .routine(routineID)
     }
 
     func showSettings() {
         openSettingsWindow()
     }
+
+    func requestNotificationAuthorization() { notifier.requestAuthorization() }
 }
 
 @MainActor
@@ -185,9 +213,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             addShowMenuAction(to: button)
         }
-        panel = MenuBarPanelController(rootView: MenuBarContent().appZoom().environment(model),
-                                       size: NSSize(width: 340 * model.appZoom.scale, height: 300))
-        observePanelZoom()
+        panel = MenuBarPanelController(rootView: MenuBarContent().environment(model),
+                                       size: NSSize(width: 340, height: 300))
         model.openMainWindow = { [weak self] in self?.showMainWindow() }
         model.openSettingsWindow = { [weak self] in self?.showSettingsWindow() }
         observeStatus()
@@ -222,6 +249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             try server.start()
             controlServer = server
         } catch {
+            scheduler.lastError = "Could not start Rota's command connection: \(error.localizedDescription)"
             Logger(subsystem: "com.wiltodelta.rota", category: "control")
                 .error("Control socket failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -280,6 +308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func updateStatusItem() {
+        model.discardDraftsForDeletedRoutines()
         guard let button = statusItem.button else { return }
         let running = model.scheduler.active.count
         // Template images from scripts/draw-icon.py: the dial when idle, a solid disc while running.
@@ -324,7 +353,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let menu = NSMenu()
         menu.addItem(item("Open Rota", symbol: "macwindow", action: #selector(openMainFromMenu)))
         menu.addItem(item("Settings\u{2026}", symbol: "gearshape", action: #selector(showSettingsWindow), key: ","))
-        menu.addItem(item("Check for Updates\u{2026}", symbol: "arrow.triangle.2.circlepath",
+        let updateTitle = Updater.shared.pendingVersion.map { "Install Update \($0)\u{2026}" }
+            ?? "Check for Updates\u{2026}"
+        menu.addItem(item(updateTitle, symbol: "arrow.triangle.2.circlepath",
                           action: #selector(checkForUpdates)))
         menu.addItem(.separator())
         // The standard selector lets macOS 26+ give the item its system icon.
@@ -368,24 +399,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func checkForUpdates() { Updater.shared.checkForUpdates() }
 
     // MARK: Windows
-
-    private func observePanelZoom() {
-        withObservationTracking {
-            _ = model.appZoom.percent
-        } onChange: { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                let shown = self.panel.isShown
-                self.panel.close()
-                let width = min(340 * self.model.appZoom.scale,
-                                (NSScreen.main?.visibleFrame.width ?? 1024) - 16)
-                self.panel = MenuBarPanelController(rootView: MenuBarContent().appZoom().environment(self.model),
-                                                    size: NSSize(width: width, height: 300))
-                if shown, let button = self.statusItem.button { self.panel.show(relativeTo: button) }
-                self.observePanelZoom()
-            }
-        }
-    }
 
     private func showMainWindow() {
         panel.close()

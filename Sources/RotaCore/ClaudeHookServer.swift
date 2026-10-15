@@ -55,8 +55,7 @@ final class ClaudeHookServer: @unchecked Sendable {
         let fd = Darwin.accept(listener, nil, nil)
         guard fd >= 0 else { return }
         _ = fcntl(fd, F_SETFL, O_NONBLOCK)
-        var noSignal: Int32 = 1
-        _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
+        FileDescriptorIO.suppressBrokenPipe(fd)
         let client = Client()
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         source.setEventHandler { [weak self] in self?.read(fd) }

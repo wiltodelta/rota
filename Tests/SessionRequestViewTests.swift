@@ -34,12 +34,13 @@ final class SessionRequestViewTests: XCTestCase {
         }
         for (name, request) in fixtures {
             for (theme, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
-                try render(request, name: name + "-" + theme, appearance: appearance, folder: folder)
+                try render(request, name: "\(name)-\(theme)", appearance: appearance, folder: folder)
             }
         }
     }
 
-    private func render(_ request: SessionRequest, name: String, appearance: NSAppearance.Name, folder: URL) throws {
+    private func render(_ request: SessionRequest, name: String, appearance: NSAppearance.Name,
+                        folder: URL) throws {
         let hosting = NSHostingView(rootView: SessionRequestView(request: request) { _ in })
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 520, height: 500),
                               styleMask: [.titled], backing: .buffered, defer: false)

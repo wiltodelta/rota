@@ -3,6 +3,44 @@ import XCTest
 import Darwin
 
 final class PTYProcessTests: XCTestCase {
+    func testLongInputFromTheReadCallbackIsQueuedUntilTheChildReads() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let gate = folder.appendingPathComponent("read-now")
+        let program = """
+            import os, sys, time, tty
+            tty.setraw(0)
+            print('READY', flush=True)
+            while not os.path.exists(sys.argv[1]):
+                time.sleep(0.001)
+            value = sys.stdin.buffer.read(1000000)
+            print('COMPLETE' if value == b'x' * 1000000 else 'CORRUPTED', flush=True)
+            """
+        let queue = DispatchQueue(label: "rota.test.long-pty-input")
+        let process = try PTYProcess(executable: "/usr/bin/python3", arguments: ["-c", program, gate.path],
+                                    directory: folder.path,
+                                    environment: ProcessLauncher.baseEnvironment(), queue: queue)
+        defer { queue.sync { process.forceKill() } }
+        let ended = expectation(description: "the child received the complete input")
+        nonisolated(unsafe) var output = Data()
+        nonisolated(unsafe) var sent = false
+        process.output = { data in
+            output.append(data)
+            if !sent && lossyUTF8(output).contains("READY") {
+                sent = true
+                XCTAssertTrue(process.write(Data(repeating: 120, count: 1_000_000)))
+                // This runs only when input processing did not block the terminal queue.
+                try? Data().write(to: gate)
+            }
+        }
+        process.exited = { status in XCTAssertEqual(status, 0); ended.fulfill() }
+        process.start()
+        wait(for: [ended], timeout: 5)
+        XCTAssertTrue(sent)
+        XCTAssertTrue(lossyUTF8(output).contains("COMPLETE"), lossyUTF8(output))
+    }
+
     func testControllingTerminalUnicodeInputAndRealExitStatus() throws {
         let queue = DispatchQueue(label: "rota.test.pty")
         let ended = expectation(description: "child exited")

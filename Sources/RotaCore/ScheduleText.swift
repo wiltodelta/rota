@@ -85,6 +85,9 @@ public enum ScheduleText {
         /// BYHOUR as written, else the anchor's hour.
         var hour: String?
         var setsHour: Bool
+        var setsMinute: Bool
+        var anchorMinute: Int?
+        var anchorHour: Int?
         /// BYDAY as cron weekdays.
         var days: String?
         var anchorWeekday: Int?
@@ -94,12 +97,19 @@ public enum ScheduleText {
             for pair in text.replacingOccurrences(of: "RRULE:", with: "").split(separator: ";") {
                 let keyValue = pair.split(separator: "=", maxSplits: 1).map(String.init)
                 guard keyValue.count == 2 else { return nil }
-                parts[keyValue[0].uppercased()] = keyValue[1].uppercased()
+                let key = keyValue[0].uppercased()
+                guard parts[key] == nil else { return nil }
+                parts[key] = keyValue[1].uppercased()
             }
             let supported: Set<String> = ["FREQ", "INTERVAL", "BYMINUTE", "BYHOUR", "BYDAY", "WKST"]
             guard let frequency = parts["FREQ"], Set(parts.keys).isSubset(of: supported),
                   let interval = Int(parts["INTERVAL"] ?? "1"), interval >= 1 else { return nil }
             let filled = anchor.map { calendar.dateComponents([.hour, .minute, .weekday], from: $0) }
+            if let minute = parts["BYMINUTE"], Int(minute).map({ (0...59).contains($0) }) != true { return nil }
+            if let hour = parts["BYHOUR"] {
+                let values = hour.split(separator: ",", omittingEmptySubsequences: false)
+                guard values.allSatisfy({ Int($0).map { (0...23).contains($0) } == true }) else { return nil }
+            }
             if let byDay = parts["BYDAY"] {
                 guard let converted = ScheduleText.cronWeekdays(byDay) else { return nil }
                 days = converted
@@ -109,17 +119,27 @@ public enum ScheduleText {
             minute = parts["BYMINUTE"].flatMap(Int.init) ?? filled?.minute ?? 0
             hour = parts["BYHOUR"] ?? filled?.hour.map(String.init)
             setsHour = parts["BYHOUR"] != nil
+            setsMinute = parts["BYMINUTE"] != nil
+            anchorMinute = filled?.minute
+            anchorHour = filled?.hour
             anchorWeekday = filled?.weekday.map { $0 - 1 }
         }
 
         var minutelyCron: String? {
-            guard 60 % interval == 0, !setsHour, days == nil else { return nil }
-            return interval == 1 ? "* * * * *" : "*/\(interval) * * * *"
+            guard 60 % interval == 0, !setsHour, !setsMinute, days == nil else { return nil }
+            if interval == 1 { return "* * * * *" }
+            guard let anchorMinute else { return nil }
+            let offset = anchorMinute % interval
+            return "\(offset == 0 ? "*/\(interval)" : "\(offset)-59/\(interval)") * * * *"
         }
 
         var hourlyCron: String? {
             if interval < 24, 24 % interval == 0, !setsHour {
-                return "\(minute) \(interval == 1 ? "*" : "*/\(interval)") * * \(days ?? "*")"
+                if interval == 1 { return "\(minute) * * * \(days ?? "*")" }
+                guard let anchorHour else { return nil }
+                let offset = anchorHour % interval
+                let hours = offset == 0 ? "*/\(interval)" : "\(offset)-23/\(interval)"
+                return "\(minute) \(hours) * * \(days ?? "*")"
             }
             guard let hour, days == nil else { return nil }
             if interval == 24 { return "\(minute) \(hour) * * *" }
@@ -138,7 +158,8 @@ public enum ScheduleText {
     /// `MO,WE,FR` as `1,3,5`.
     static func cronWeekdays(_ byDay: String) -> String? {
         let codes = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]
-        let indexes = byDay.split(separator: ",").map { codes.firstIndex(of: String($0)) }
+        let indexes = byDay.split(separator: ",", omittingEmptySubsequences: false)
+            .map { codes.firstIndex(of: String($0)) }
         guard !indexes.isEmpty, !indexes.contains(nil) else { return nil }
         return indexes.compactMap { $0.map(String.init) }.joined(separator: ",")
     }

@@ -82,6 +82,12 @@ final class CronScheduleTests: XCTestCase {
         }
     }
 
+    func testRangesRejectExtraOrMissingEndpoints() {
+        for minute in ["1--2", "1-2-", "-1-2", "1-x-2", "1-2-3", "1-", "+1"] {
+            XCTAssertThrowsError(try CronSchedule("\(minute) * * * *"), minute)
+        }
+    }
+
     func testUpcomingReturnsConsecutiveTimes() throws {
         let times = try CronSchedule("0 10 * * *").upcoming(after: date("2026-10-09 11:00"), count: 3,
                                                            calendar: calendar)

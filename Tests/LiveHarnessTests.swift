@@ -190,7 +190,9 @@ final class LiveHarnessTests: XCTestCase {
         let ended = expectation(description: "permission run ended")
         nonisolated(unsafe) var control: RunControl?
         nonisolated(unsafe) var requested = false
-        let events = RunEvents(session: { _ in }, finished: { outcome in
+        let events = RunEvents(session: { id in
+            LiveSessionManifest.record(id, harness: .claude, cwd: self.folder.path, folder: self.folder)
+        }, finished: { outcome in
             XCTAssertEqual(outcome, .succeeded)
             ended.fulfill()
         }, requests: { requests in
@@ -217,7 +219,9 @@ final class LiveHarnessTests: XCTestCase {
         let ended = expectation(description: "question answered")
         nonisolated(unsafe) var control: RunControl?
         nonisolated(unsafe) var requested = false
-        let events = RunEvents(session: { _ in }, finished: { outcome in
+        let events = RunEvents(session: { id in
+            LiveSessionManifest.record(id, harness: .claude, cwd: self.folder.path, folder: self.folder)
+        }, finished: { outcome in
             XCTAssertEqual(outcome, .succeeded)
             ended.fulfill()
         }, requests: { requests in

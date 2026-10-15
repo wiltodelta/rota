@@ -33,13 +33,39 @@ final class ClaudeInteractiveTests: XCTestCase {
 
     func testCommandLine() {
         let new = ClaudeInteractiveRun.arguments(session: "s1", resume: false, settings: "/c/s.json",
-                                                 model: ["--model", "haiku"], prompt: "-start with a dash")
+                                                 model: ["--model", "haiku"])
         XCTAssertEqual(new, ["--session-id", "s1", "--settings", "/c/s.json",
-                             "--model", "haiku", "--", "-start with a dash"])
-        let resumed = ClaudeInteractiveRun.arguments(session: "s1", resume: true, settings: "/c/s.json", model: [],
-                                                     prompt: "next")
+                             "--model", "haiku"])
+        let resumed = ClaudeInteractiveRun.arguments(session: "s1", resume: true, settings: "/c/s.json", model: [])
         XCTAssertEqual(Array(resumed.prefix(2)), ["--resume", "s1"])
 
+    }
+
+    func testLargePastedMessageIsReadWithoutItsProviderEnvelope() {
+        let message = "Read the synthetic report.\nKeep every line and punctuation, Привет."
+        // Claude Code 2.1.296 recorded a long bracketed paste in this envelope.
+        let pasted = "\n\n<pasted_content id=\"fixture\">\n" + message
+            + "\n</pasted_content id=\"fixture\">\n"
+        XCTAssertEqual(entry(["type": "user", "message": ["content": pasted]]), .user(message))
+        XCTAssertEqual(entry(["type": "user", "message": ["content": [
+            ["type": "text", "text": pasted]]]]), .user(message))
+        XCTAssertEqual(entry(["type": "user", "message": ["content": "<command-name>/exit</command-name>"]]), .other)
+    }
+
+    func testInitialPromptWaitsForTheEmptyChatEditorAcrossChunks() {
+        var entry = ClaudePromptEntry()
+        XCTAssertFalse(entry.receive(Data("❯ Log in\r\n❯ Yes, trust this folder\r\n❯ Try again".utf8)))
+        // The CLI positions the quote with CSI rather than emitting a space.
+        let ready = Data(("\u{1B}[?25l─────\r\n❯\u{A0}Try\u{1B}[7G\"a sample task\""
+            + "\r\n─────\u{1B}[?25h").utf8)
+        XCTAssertFalse(entry.receive(ready.prefix(5)))
+        XCTAssertTrue(entry.receive(ready.dropFirst(5)))
+    }
+
+    func testResumedEditorCanBeBlankButAHiddenCursorIsNotReady() {
+        var entry = ClaudePromptEntry()
+        XCTAssertFalse(entry.receive(Data("\u{1B}[?25l─────\r\u{1B}[1B❯\u{A0}\r\u{1B}[1B─────".utf8)))
+        XCTAssertTrue(entry.receive(Data("\u{1B}[?25h".utf8)))
     }
 
     func testHookMarksTheSessionThroughTheRunsCommand() throws {

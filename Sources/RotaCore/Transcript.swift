@@ -138,7 +138,7 @@ public struct TranscriptTurn: Equatable, Identifiable, Sendable {
     /// The turn's latest plan: each update replaces the one before.
     public var plan: TranscriptItem?
 
-    public var id: Int { prompt?.id ?? work.first?.id ?? answer.first?.id ?? notes.first?.id ?? -1 }
+    public var id: Int { prompt?.id ?? work.first?.id ?? answer.first?.id ?? notes.first?.id ?? plan?.id ?? -1 }
     public var toolCount: Int { work.filter { $0.kind == .tool }.count }
 
     /// Splits the items at each user message. Within a turn, everything up to the

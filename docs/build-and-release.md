@@ -17,7 +17,8 @@ rather than editing its output.
 `create-app.sh` signs with the team's Developer ID Application identity when
 the keychain has it (hardened runtime, and with `RELEASE=1` a secure
 timestamp); without it the bundle is signed ad hoc and macOS treats every
-build as a new app. `RELEASE=1 ./create-app.sh && ./notarize.sh` notarizes,
+build as a new app. A release refuses ad hoc signing. `notarize.sh` verifies
+the production bundle ID and its complete signature before uploading. `RELEASE=1 ./create-app.sh && ./notarize.sh` notarizes,
 staples, and writes `Rota-vX.Y.Z-macOS.zip`.
 
 Rota is not sandboxed and ships no entitlements file. The hardened runtime
@@ -36,7 +37,7 @@ profile, `RELEASE=1 ./create-app.sh`, `./notarize.sh`, then the Sparkle
 `appcast.xml` (this release only, EdDSA-signed, with the tag body embedded as
 Markdown release notes), and the GitHub Release with the zip, the appcast, the
 tag's first line as its title and its body as the notes. CI refuses a
-lightweight tag, one without a body, and one that is not `vX.Y.Z` or not above
+lightweight tag or one without a body before reading signing secrets, and one that is not `vX.Y.Z` or not above
 every earlier tag: Sparkle offers only a higher version. Branch and pull request builds are
 signed ad hoc and uploaded as a workflow artifact.
 
@@ -55,7 +56,7 @@ gentle reminders: a scheduled check that finds an update while Rota is not in
 front publishes `pendingVersion` instead of opening a window. `create-app.sh`
 copies `Sparkle.framework` into `Contents/Frameworks`, adds the
 `@executable_path/../Frameworks` rpath, removes its XPC services (they exist
-for sandboxed apps), ships its MIT license, and signs `Autoupdate`,
+for sandboxed apps), ships Sparkle's MIT license and Rota's Apache 2.0 license, and signs `Autoupdate`,
 `Updater.app`, the framework and the app in that order. One EdDSA key serves
 every app of the team; `SUPublicEDKey` in `create-app.sh` is its public half,
 and `SURequireSignedFeed` makes the app reject a feed that is not signed with
@@ -82,3 +83,15 @@ gh release download vX.Y.Z -R wiltodelta/rota -p "*.zip" -D /tmp/asset-check && 
 Unregister the extracted copy before deleting it
 (`/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u /tmp/asset-check/app/Rota.app`):
 LaunchServices keeps a deleted copy registered under the bundle id otherwise.
+
+## Local publication gate
+
+Run `bash maintain.sh`, then the isolated UI and live checks described in
+[verification.md](verification.md). Verify the assembled bundle with
+`codesign --verify --deep --strict Rota.app`, its helper and license notices.
+A local build does not prove compilation with the CI runner's Xcode. Review
+that run before publishing. CI runs Swift and audit preference tests on macOS 15
+before the macOS 26 packaging job; the older host does not compile Icon Composer
+assets. This runtime test job is required before release signing and publishing.
+Tagging, uploading and publishing remain separate,
+explicit release actions; never move an existing release tag.

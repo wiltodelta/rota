@@ -14,21 +14,10 @@ struct GeneralSettings: View {
         @Bindable var settings = model.settings
         Form {
             Section {
-                LabeledContent("App zoom") {
-                    ScaleControls(name: "App Zoom", identifier: "appZoom", value: model.appZoom.scale,
-                                  canDecrease: model.appZoom.percent > AppZoomSettings.range.lowerBound,
-                                  canIncrease: model.appZoom.percent < AppZoomSettings.range.upperBound,
-                                  decrease: { model.appZoom.decrease() }, increase: { model.appZoom.increase() },
-                                  reset: { model.appZoom.reset() })
-                }
-            } header: {
-                Text("Appearance")
-            } footer: {
-                Text("Scales interface text, icons, and controls. Adjust chat text separately in Chat.")
-                    .foregroundStyle(Color.secondaryText)
-            }
-            Section {
                 Toggle("Notify when a run succeeds", isOn: $settings.notifyOnSuccess)
+                    .onChange(of: settings.notifyOnSuccess) { _, on in
+                        if on { model.requestNotificationAuthorization() }
+                    }
             } footer: {
                 Text("Failed and skipped runs always notify.")
                     .foregroundStyle(Color.secondaryText)
@@ -56,7 +45,8 @@ struct GeneralSettings: View {
                     get: { Updater.shared.automaticallyChecks },
                     set: { Updater.shared.automaticallyChecks = $0 }
                 ))
-                Button("Check for Updates\u{2026}") { Updater.shared.checkForUpdates() }
+                Button(Updater.shared.pendingVersion.map { "Install Update \($0)\u{2026}" }
+                       ?? "Check for Updates\u{2026}") { Updater.shared.checkForUpdates() }
             } header: {
                 Text("Updates")
             } footer: {
@@ -170,7 +160,6 @@ private struct PermissionRow: View {
 /// Picks which installed copy of an agent CLI runs: the first one found, one
 /// of the others, or any file chosen in an open panel.
 private struct ExecutablePicker: View {
-    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     let harness: Harness
     private static let chooseTag = "\u{0}choose"
@@ -180,7 +169,7 @@ private struct ExecutablePicker: View {
         let installed = settings.installed[harness] ?? []
         let chosen = settings.chosenExecutable(for: harness)
         let effective = settings.executable(for: harness)
-        VStack(alignment: .leading, spacing: metrics(4)) {
+        VStack(alignment: .leading, spacing: 4) {
             InterfacePicker(harness.title, value: chosen.map(Self.display)
                             ?? (installed.first.map { "Automatic (\(Self.display($0.path)))" } ?? "Automatic"),
                             selection: Binding(
@@ -209,11 +198,11 @@ private struct ExecutablePicker: View {
             Label("Not installed. Install \(harness.commandName) or choose its file.",
                   systemImage: "xmark.circle.fill")
                 .foregroundStyle(Color.errorText)
-                .scaledFont(.caption)
+                .interfaceFont(.caption)
         } else if let version = installed.first(where: { $0.path == effective })?.version {
             Label(version, systemImage: "checkmark.circle.fill")
                 .labelStyle(StatusLabelStyle())
-                .scaledFont(.caption)
+                .interfaceFont(.caption)
         }
     }
 
@@ -231,7 +220,6 @@ private struct ExecutablePicker: View {
             .deletingLastPathComponent)
         guard panel.runModal() == .OK, let url = panel.url else { return }
         model.settings.setExecutable(url.path, for: harness)
-        model.settings.refreshInstalled()
     }
 
     static func display(_ path: String) -> String {
@@ -273,7 +261,7 @@ private struct AgentAccessSection: View {
                 }
             }
             if let problem {
-                Text(problem).scaledFont(.caption).foregroundStyle(Color.errorText)
+                Text(problem).interfaceFont(.caption).foregroundStyle(Color.errorText)
             }
         } header: {
             Text("Routines from agents")
@@ -380,9 +368,8 @@ private struct TerminalPicker: View {
 
 /// A green check before secondary text, as the status under a picker reads.
 private struct StatusLabelStyle: LabelStyle {
-    @Environment(\.interfaceMetrics) private var metrics
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: metrics(4)) {
+        HStack(spacing: 4) {
             configuration.icon.foregroundStyle(.green)
             configuration.title.foregroundStyle(Color.secondaryText)
         }
@@ -391,7 +378,6 @@ private struct StatusLabelStyle: LabelStyle {
 
 /// Font, monospaced font and size of the chat, with a sample in them.
 private struct ChatTextSection: View {
-    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     @State private var families: [String] = []
     @State private var monospaced: [String] = []
@@ -412,22 +398,22 @@ private struct ChatTextSection: View {
             }
             LabeledContent("Text size") {
                 ScaleControls(name: "Chat Text Size", identifier: "chatZoom",
-                              value: text.effectiveScale(appScale: model.appZoom.scale),
-                              canDecrease: text.canDecrease(appScale: model.appZoom.scale),
-                              canIncrease: text.canIncrease(appScale: model.appZoom.scale),
-                              decrease: { text.smaller(appScale: model.appZoom.scale) },
-                              increase: { text.bigger(appScale: model.appZoom.scale) },
-                              reset: { text.reset(appScale: model.appZoom.scale) })
+                              value: text.scale,
+                              canDecrease: text.canDecrease,
+                              canIncrease: text.canIncrease,
+                              decrease: { text.smaller() },
+                              increase: { text.bigger() },
+                              reset: { text.reset() })
             }
-            VStack(alignment: .leading, spacing: metrics(6)) {
-                Text("Clicks are down 8% week over week.").font(text.body(scale: model.appZoom.scale))
-                Text("$ git log --oneline -5").font(text.code(scale: model.appZoom.scale))
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Clicks are down 8% week over week.").font(text.body())
+                Text("$ git log --oneline -5").font(text.code())
                     .foregroundStyle(Color.secondaryText)
             }
-            .padding(.vertical, metrics(4))
+            .padding(.vertical, 4)
             .accessibilityLabel("Sample")
         } header: {
-            Text("Chat text").scaledFont(.headline)
+            Text("Chat text").interfaceFont(.headline)
         } footer: {
             Text("Changes messages and the composer without resizing interface controls.")
                 .foregroundStyle(Color.secondaryText)
@@ -439,9 +425,8 @@ private struct ChatTextSection: View {
     }
 }
 
-/// The same percentage controls for app zoom and the chat's rendered text size.
+/// Percentage controls for the chat's text size.
 private struct ScaleControls: View {
-    @Environment(\.interfaceMetrics) private var metrics
     let name: String
     let identifier: String
     let value: Double
@@ -452,7 +437,7 @@ private struct ScaleControls: View {
     let reset: () -> Void
 
     var body: some View {
-        HStack(spacing: metrics(8)) {
+        HStack(spacing: 8) {
             Button(action: decrease) { Image(systemName: "minus") }
                 .accessibilityLabel("Decrease \(name)")
                 .accessibilityIdentifier("\(identifier)Decrease")
@@ -460,7 +445,7 @@ private struct ScaleControls: View {
             Text(value, format: .percent.precision(.fractionLength(0)))
                 .monospacedDigit()
                 .foregroundStyle(Color.primary)
-                .frame(width: metrics(64))
+                .frame(width: 64)
                 .accessibilityIdentifier("\(identifier)Percent")
             Button(action: increase) { Image(systemName: "plus") }
                 .accessibilityLabel("Increase \(name)")

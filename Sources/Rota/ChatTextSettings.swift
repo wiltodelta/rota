@@ -1,16 +1,13 @@
 import AppKit
 import SwiftUI
 
-/// The chat's text: one family for messages, a monospaced one for commands and
-/// output, and one base size both follow. App zoom scales this and the system
-/// sizes used by the sidebar and forms independently of this preference.
+/// Independent chat fonts and point size. Native navigation and controls keep
+/// their standard sizes when the chat text changes.
 @MainActor
 @Observable
 final class ChatTextSettings {
     static let defaultSize: Double = 14
-    static let scales: ClosedRange<Double> = 0.5...2
-    /// Stored size is relative to app zoom, so it can compensate at either limit.
-    static let sizes: ClosedRange<Double> = (defaultSize * 0.25)...(defaultSize * 4)
+    static let sizes: ClosedRange<Double> = 10...28
 
     private let defaults: UserDefaults
 
@@ -28,7 +25,7 @@ final class ChatTextSettings {
         didSet {
             let clamped = Self.normalize(size)
             if clamped != size { size = clamped }
-            defaults.set(size, forKey: "chatFontSize")
+            defaults.set(size, forKey: "chatTextPointSize")
         }
     }
 
@@ -36,33 +33,28 @@ final class ChatTextSettings {
         self.defaults = defaults
         family = defaults.string(forKey: "chatFontFamily") ?? ""
         codeFamily = defaults.string(forKey: "chatCodeFontFamily") ?? ""
-        let stored = defaults.double(forKey: "chatFontSize")
-        size = Self.normalize(stored == 0 ? Self.defaultSize : stored)
+        if let stored = defaults.object(forKey: "chatTextPointSize") as? Double {
+            size = Self.normalize(stored)
+        } else {
+            // Preserve the visible chat size once when retiring global interface zoom.
+            let legacy = defaults.double(forKey: "chatFontSize")
+            let percent = defaults.object(forKey: "appZoomPercent") as? Int ?? 100
+            let bounded = min(max(percent, 50), 200)
+            let appScale = (Double(bounded) / 10).rounded() / 10
+            size = Self.normalize((legacy == 0 ? Self.defaultSize : legacy) * appScale)
+            defaults.set(size, forKey: "chatTextPointSize")
+        }
     }
 
-    func body(scale: Double) -> Font { font(family, size: effectiveSize(appScale: scale)) }
-    func code(scale: Double) -> Font { codeFont(size: effectiveSize(appScale: scale) * 0.9) }
+    var scale: Double { size / Self.defaultSize }
+    var canIncrease: Bool { size < Self.sizes.upperBound - 1e-7 }
+    var canDecrease: Bool { size > Self.sizes.lowerBound + 1e-7 }
 
-    func effectiveScale(appScale: Double) -> Double {
-        min(max(size / Self.defaultSize * appScale, Self.scales.lowerBound), Self.scales.upperBound)
-    }
-
-    func effectiveSize(appScale: Double) -> Double { Self.defaultSize * effectiveScale(appScale: appScale) }
-
-    func canIncrease(appScale: Double) -> Bool { effectiveScale(appScale: appScale) < Self.scales.upperBound - 1e-7 }
-    func canDecrease(appScale: Double) -> Bool { effectiveScale(appScale: appScale) > Self.scales.lowerBound + 1e-7 }
-
-    func bigger(appScale: Double = 1) { adjust(1, appScale: appScale) }
-    func smaller(appScale: Double = 1) { adjust(-1, appScale: appScale) }
-    func reset(appScale: Double = 1) { size = Self.defaultSize / appScale }
-
-    private func adjust(_ direction: Double, appScale: Double) {
-        let current = effectiveScale(appScale: appScale)
-        let next = current + direction * 0.1 * appScale
-        let bounded = min(max(next, Self.scales.lowerBound), Self.scales.upperBound)
-        guard abs(bounded - current) > 1e-7 else { return }
-        size = Self.defaultSize * bounded / appScale
-    }
+    func body() -> Font { font(family, size: size) }
+    func code() -> Font { codeFont(size: InterfaceTypography.readableSize(size * 0.9)) }
+    func bigger() { size += Self.defaultSize * 0.1 }
+    func smaller() { size -= Self.defaultSize * 0.1 }
+    func reset() { size = Self.defaultSize }
 
     private static func normalize(_ value: Double) -> Double {
         value.isFinite ? min(max(value, sizes.lowerBound), sizes.upperBound) : defaultSize

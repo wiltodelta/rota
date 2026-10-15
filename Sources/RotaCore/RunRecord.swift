@@ -48,6 +48,8 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     public var startedAt: Date
     public var endedAt: Date?
     public var outcome: RunOutcome
+    /// Persisted before Stop: a slow provider must not turn intentional shutdown into an automatic resume.
+    public var stopRequestedAt: Date?
     public var logPath: String?
     /// The harness session, for harnesses whose runs can be reopened to chat.
     public var sessionID: String?
@@ -63,6 +65,12 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     public var metadata: SessionMetadata?
     public var eventError: String?
     public var requests: [SessionRequest]?
+
+    /// Provider forms expire with the invocation; an independent notification remains actionable.
+    mutating func clearProviderRequests() {
+        if attention == requests?.first?.title { attention = nil }
+        requests = nil
+    }
 
     /// A slot that did not run: a note in the routine's history, not a session.
     public var isSkip: Bool {

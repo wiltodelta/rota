@@ -4,7 +4,6 @@ import SwiftUI
 
 /// The editable fields of a routine, with schedule preview.
 struct RoutineForm: View {
-    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     @Binding var draft: Routine
     /// Set for a new routine, whose skill names it; an existing routine keeps its id.
@@ -24,7 +23,7 @@ struct RoutineForm: View {
             TextField("Name", text: $draft.name)
                 .accessibilityIdentifier("routineName")
             LabeledContent("Project folder") {
-                HStack(spacing: metrics(8)) {
+                HStack(spacing: 8) {
                     TextField("Project folder", text: $draft.workingDirectory, prompt: Text("/path/to/project"))
                         .labelsHidden()
                         .truncationMode(.middle)
@@ -35,7 +34,7 @@ struct RoutineForm: View {
             if !draft.workingDirectory.isEmpty && !FileManager.default.fileExists(atPath: draft.workingDirectory) {
                 Label("No folder at this path.", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(Color.errorText)
-                    .scaledFont(.callout)
+                    .interfaceFont(.callout)
             }
             ScheduleField(schedule: $draft.schedule)
             // A menu, not segments: four fixed-width segments overflow a narrow window.
@@ -52,15 +51,16 @@ struct RoutineForm: View {
                 ModelPickers(draft: $draft)
             }
             TimeLimitField(minutes: $draft.timeLimitMinutes)
-            VStack(alignment: .leading, spacing: metrics(6)) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(draft.harness.isAgent ? "Prompt" : "Command")
                 TextEditor(text: $draft.prompt)
+                    .accessibilityLabel(draft.harness.isAgent ? "Prompt" : "Command")
                     .accessibilityIdentifier("routinePrompt")
-                    .scaledFont(.body, design: .monospaced)
-                    .frame(minHeight: metrics(90))
+                    .interfaceFont(.body, design: .monospaced)
+                    .frame(minHeight: 90)
                     .scrollContentBackground(.hidden)
-                    .padding(metrics(4))
-                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: metrics(6)))
+                    .padding(4)
+                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
             }
         }
         .formStyle(.grouped)
@@ -81,17 +81,16 @@ struct RoutineForm: View {
 }
 
 private struct ScheduleField: View {
-    @Environment(\.interfaceMetrics) private var metrics
     @Binding var schedule: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: metrics(4)) {
+        VStack(alignment: .leading, spacing: 4) {
             LabeledContent("Schedule") {
-                HStack(spacing: metrics(8)) {
+                HStack(spacing: 8) {
                     TextField("Schedule", text: $schedule, prompt: Text("minute hour day month weekday"))
                         .accessibilityIdentifier("routineSchedule")
                         .labelsHidden()
-                        .scaledFont(.body, design: .monospaced)
+                        .interfaceFont(.body, design: .monospaced)
                         .multilineTextAlignment(.trailing)
                     // Common schedules, so a first routine needs no cron.
                     Menu {
@@ -121,7 +120,7 @@ private struct ScheduleField: View {
                     Text(error.localizedDescription).foregroundStyle(Color.errorText)
                 }
             }
-            .scaledFont(.caption)
+            .interfaceFont(.caption)
             .foregroundStyle(Color.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
         }

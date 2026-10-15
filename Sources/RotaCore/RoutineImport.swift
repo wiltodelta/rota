@@ -31,13 +31,16 @@ public struct ImportCandidate: Identifiable, Equatable, Sendable {
     public var onInSource: Bool
     /// Why it cannot be imported, when it cannot.
     public var unsupported: String?
-    public var id: String { "\(source.rawValue):\(routine.id)" }
+    /// The source's stable record id is independent of its display name and destination id.
+    public var id: String
 
-    public init(routine: Routine, source: ImportSource, onInSource: Bool, unsupported: String? = nil) {
+    public init(routine: Routine, source: ImportSource, onInSource: Bool, unsupported: String? = nil,
+                sourceID: String? = nil) {
         self.routine = routine
         self.source = source
         self.onInSource = onInSource
         self.unsupported = unsupported
+        id = "\(source.rawValue):\(sourceID ?? routine.id)"
     }
 }
 
@@ -52,7 +55,7 @@ public struct ImportScan: Sendable {
 public enum RoutineImport {
     /// Every source, read now. Blocks on file reads: call it off the main thread.
     public static func scanAll(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [ImportScan] {
-        ImportSource.allCases.map { source in
+        uniqueIdentifiers(ImportSource.allCases.map { source in
             do {
                 switch source {
                 case .claudeDesktop:
@@ -71,6 +74,31 @@ public enum RoutineImport {
             } catch {
                 return ImportScan(source: source, candidates: [], problem: error.localizedDescription)
             }
+        })
+    }
+
+    /// Allocate every destination id before displaying the choices, so one import cannot overwrite another.
+    static func uniqueIdentifiers(_ scans: [ImportScan]) -> [ImportScan] {
+        var used = Set<String>()
+        return scans.map { scan in
+            var scan = scan
+            scan.candidates = scan.candidates.map { candidate in
+                var candidate = candidate
+                let base = candidate.routine.id
+                var identifier = base
+                var suffix = 2
+                while used.contains(Routine.storageIDKey(identifier)) {
+                    identifier = "\(base)-\(suffix)"
+                    suffix += 1
+                }
+                used.insert(Routine.storageIDKey(identifier))
+                candidate.routine.id = identifier
+                if !Routine.isSafeStorageID(identifier) {
+                    candidate.unsupported = "Its id cannot be used as a safe file name."
+                }
+                return candidate
+            }
+            return scan
         }
     }
 
@@ -98,7 +126,7 @@ public enum CodexAutomationsImport {
 
     public static func candidates(from database: URL) throws -> [ImportCandidate] {
         var handle: OpaquePointer?
-        let uri = "file:\(database.path)?mode=ro"
+        let uri = database.absoluteString + "?mode=ro"
         guard sqlite3_open_v2(uri, &handle, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK else {
             defer { sqlite3_close(handle) }
             throw ReadError(message: "Could not open \(database.lastPathComponent).")
@@ -106,19 +134,30 @@ public enum CodexAutomationsImport {
         defer { sqlite3_close(handle) }
         let query = """
             SELECT id, name, prompt, status, next_run_at, cwds, rrule, model, reasoning_effort, target_thread_id
-            FROM automations ORDER BY name
+            FROM automations ORDER BY name, id
             """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(handle, query, -1, &statement, nil) == SQLITE_OK else {
-            // A Codex store without automations is not an error, just nothing to import.
-            return []
+            let reason = String(cString: sqlite3_errmsg(handle))
+            // Only an absent table means there are no automations; changed columns or corruption are errors.
+            if reason == "no such table: automations" { return [] }
+            throw ReadError(message: "Could not read Codex automations: " + reason)
         }
         defer { sqlite3_finalize(statement) }
         var rows: [Row] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
+        var status = sqlite3_step(statement)
+        while status == SQLITE_ROW {
             rows.append(Row(statement))
+            status = sqlite3_step(statement)
         }
-        return rows.map(candidate)
+        guard status == SQLITE_DONE else {
+            throw ReadError(message: "Could not read all Codex automations: " + String(cString: sqlite3_errmsg(handle)))
+        }
+        return rows.map { row in
+            var item = candidate(row)
+            item.id = "codex:\(database.lastPathComponent):\(row.id)"
+            return item
+        }
     }
 
     struct Row {
@@ -157,10 +196,12 @@ public enum CodexAutomationsImport {
             unsupported = "Continues a Codex thread, which a routine cannot."
         } else if folders.isEmpty {
             unsupported = "Has no project folder."
+        } else if folders.count > 1 {
+            unsupported = "Uses multiple project folders, which a single-folder routine cannot preserve."
         } else if cron == nil {
             unsupported = "Its schedule (\(row.rrule)) has no cron equivalent."
         }
         return ImportCandidate(routine: routine, source: .codex, onInSource: row.status == "ACTIVE",
-                               unsupported: unsupported)
+                               unsupported: unsupported, sourceID: row.id)
     }
 }
