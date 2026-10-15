@@ -31,7 +31,8 @@ final class ToolConnectionChecks {
         let claude = harness == .claude ? ClaudeUserSettings.read() : ClaudeUserSettings()
         var spec = LaunchSpec(executable: settings.executable(for: harness), prompt: Self.prompt,
                               arguments: harness.arguments(settings: claude), workingDirectory: folder,
-                              environment: [:], mode: harness.launchMode, timeout: 120, log: log)
+                              environment: ["ROTA_CLI": AgentAccess.helper().path],
+                              mode: harness.launchMode, timeout: 120, log: log)
         if harness == .claude && settings.claudeInteractive && claude.trusts(folder) {
             spec.mode = .claudeInteractive
         }
@@ -120,10 +121,10 @@ struct ToolConnectionsSection: View {
                         status("Browser Use", connected: result?.evidence.browser, harness: harness)
                     }
                     if let result {
-                        Text(result.detail).font(.caption).foregroundStyle(Color.primary)
+                        Text(result.detail).interfaceFont(.caption).foregroundStyle(Color.primary)
                         HStack {
                             Text("Checked \(result.date.formatted(date: .abbreviated, time: .shortened))")
-                                .font(.caption).foregroundStyle(Color.primary)
+                                .interfaceFont(.caption).foregroundStyle(Color.primary)
                             Spacer()
                             Button("Open Check Log") { NSWorkspace.shared.open(result.log) }
                                 .controlSize(.small)
@@ -148,7 +149,7 @@ struct ToolConnectionsSection: View {
     private func status(_ title: String, connected: Bool?, harness: Harness) -> some View {
         let value = checks.checking == harness ? "Checking…"
             : connected.map { $0 ? "Connected" : "Not confirmed" } ?? "Not checked"
-        return Text("\(title): \(value)").font(.caption).foregroundStyle(Color.primary)
+        return Text("\(title): \(value)").interfaceFont(.caption).foregroundStyle(Color.primary)
     }
 
     private func chooseFolder() {

@@ -1,4 +1,6 @@
 import Foundation
+import CoreFoundation
+import CryptoKit
 
 /// Carries whole JSON-RPC messages to and from a peer.
 protocol MessageTransport: AnyObject {
@@ -19,6 +21,7 @@ final class JSONRPCPeer: @unchecked Sendable {
     private let lock = NSLock()
     private var nextID = 1
     private var pending: [Int: Reply] = [:]
+    private var isClosed = false
     /// Tests advance request deadlines synchronously; a timeout never retries a remote write.
     var scheduleTimeout: (TimeInterval, @escaping () -> Void) -> Void = { seconds, work in
         let box = UncheckedSendable(work)
@@ -45,6 +48,10 @@ final class JSONRPCPeer: @unchecked Sendable {
 
     func request(_ method: String, _ params: [String: Any], timeout: TimeInterval? = nil, reply: @escaping Reply) {
         lock.lock()
+        guard !isClosed else {
+            lock.unlock()
+            return deliver { reply(.failure(JSONRPCError(message: "The provider connection has closed."))) }
+        }
         let id = nextID
         nextID += 1
         pending[id] = reply
@@ -69,14 +76,17 @@ final class JSONRPCPeer: @unchecked Sendable {
 
     func close() {
         transport.close()
+        closed()
     }
 
     private func write(_ object: [String: Any]) {
+        guard lock.withLock({ !isClosed }) else { return }
         guard let data = try? JSONSerialization.data(withJSONObject: object) else { return }
         transport.send(data)
     }
 
     private func receive(_ data: Data) {
+        guard lock.withLock({ !isClosed }) else { return }
         guard let message = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
         let method = message["method"] as? String
         let params = message["params"] as? [String: Any] ?? [:]
@@ -102,6 +112,7 @@ final class JSONRPCPeer: @unchecked Sendable {
         case let (method?, nil):
             deliver { self.onNotification?(method, params) }
         case let (nil, id as Int):
+            if let number = message["id"] as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() { return }
             lock.lock()
             let reply = pending.removeValue(forKey: id)
             lock.unlock()
@@ -118,6 +129,8 @@ final class JSONRPCPeer: @unchecked Sendable {
 
     private func closed() {
         lock.lock()
+        guard !isClosed else { return lock.unlock() }
+        isClosed = true
         let waiting = pending.values
         pending.removeAll()
         lock.unlock()
@@ -154,12 +167,13 @@ struct JSONRPCError: Error, LocalizedError {
 final class LineTransport: MessageTransport, @unchecked Sendable {
     var onMessage: ((Data) -> Void)?
     var onClose: (() -> Void)?
-    private let input: FileHandle
+    private let writer: PipeWriter
     private let lock = NSLock()
     private var buffer = Data()
 
     init(input: FileHandle, output: FileHandle) {
-        self.input = input
+        writer = PipeWriter(input)
+        writer.failed = { [weak self] in self?.onClose?() }
         output.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty {
@@ -184,13 +198,11 @@ final class LineTransport: MessageTransport, @unchecked Sendable {
     }
 
     func send(_ message: Data) {
-        lock.lock()
-        defer { lock.unlock() }
-        try? input.write(contentsOf: message + Data("\n".utf8))
+        writer.send(message + Data("\n".utf8))
     }
 
     func close() {
-        try? input.close()
+        writer.close()
     }
 }
 
@@ -200,15 +212,20 @@ final class LineTransport: MessageTransport, @unchecked Sendable {
 final class WebSocketTransport: MessageTransport, @unchecked Sendable {
     var onMessage: ((Data) -> Void)?
     var onClose: (() -> Void)?
-    private let input: FileHandle
+    private let writer: PipeWriter
+    private let expectedAccept: String
     private let lock = NSLock()
     private var buffer = Data()
     private var upgraded = false
     private var queued: [Data] = []
     private var fragments = Data()
 
-    init(input: FileHandle, output: FileHandle) {
-        self.input = input
+    init(input: FileHandle, output: FileHandle, key: String? = nil) {
+        let key = key ?? Data((0..<16).map { _ in UInt8.random(in: 0...255) }).base64EncodedString()
+        expectedAccept = Data(Insecure.SHA1.hash(data: Data(
+            (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").utf8))).base64EncodedString()
+        writer = PipeWriter(input)
+        writer.failed = { [weak self] in self?.onClose?() }
         output.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty {
@@ -218,24 +235,23 @@ final class WebSocketTransport: MessageTransport, @unchecked Sendable {
                 self?.consume(data)
             }
         }
-        let key = Data((0..<16).map { _ in UInt8.random(in: 0...255) }).base64EncodedString()
         let handshake = "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
             + "Sec-WebSocket-Key: \(key)\r\nSec-WebSocket-Version: 13\r\n\r\n"
-        try? input.write(contentsOf: Data(handshake.utf8))
+        writer.send(Data(handshake.utf8))
     }
 
     func send(_ message: Data) {
         lock.lock()
         defer { lock.unlock() }
         guard upgraded else { return queued.append(message) }
-        try? input.write(contentsOf: Self.frame(message, opcode: 0x1))
+        writer.send(Self.frame(message, opcode: 0x1))
     }
 
     func close() {
         lock.lock()
-        try? input.write(contentsOf: Self.frame(Data(), opcode: 0x8))
+        writer.send(Self.frame(Data(), opcode: 0x8))
         lock.unlock()
-        try? input.close()
+        writer.close()
     }
 
     private func consume(_ data: Data) {
@@ -245,12 +261,12 @@ final class WebSocketTransport: MessageTransport, @unchecked Sendable {
             guard let end = buffer.range(of: Data("\r\n\r\n".utf8)) else { return lock.unlock() }
             let head = lossyUTF8(buffer[buffer.startIndex..<end.lowerBound])
             buffer.removeSubrange(buffer.startIndex..<end.upperBound)
-            guard head.hasPrefix("HTTP/1.1 101") else {
+            guard Self.validUpgrade(head, expectedAccept: expectedAccept) else {
                 lock.unlock()
                 return onClose?() ?? ()
             }
             upgraded = true
-            for message in queued { try? input.write(contentsOf: Self.frame(message, opcode: 0x1)) }
+            for message in queued { writer.send(Self.frame(message, opcode: 0x1)) }
             queued.removeAll()
         }
         var messages: [Data] = []
@@ -264,13 +280,35 @@ final class WebSocketTransport: MessageTransport, @unchecked Sendable {
                     fragments = Data()
                 }
             case 0x9:
-                try? input.write(contentsOf: Self.frame(frame.payload, opcode: 0xA))
+                writer.send(Self.frame(frame.payload, opcode: 0xA))
+            case 0x8:
+                writer.send(Self.frame(frame.payload, opcode: 0x8))
+                writer.close()
+                lock.unlock()
+                return onClose?() ?? ()
             default:
                 break
             }
         }
         lock.unlock()
         messages.forEach { onMessage?($0) }
+    }
+
+    static func validUpgrade(_ head: String, expectedAccept: String) -> Bool {
+        let lines = head.components(separatedBy: "\r\n")
+        let status = lines.first?.split(separator: " ") ?? []
+        guard status.count >= 2, status[0] == "HTTP/1.1", status[1] == "101" else { return false }
+        var fields: [String: [String]] = [:]
+        for line in lines.dropFirst() {
+            let parts = line.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2 else { return false }
+            fields[String(parts[0]).lowercased(), default: []].append(
+                String(parts[1]).trimmingCharacters(in: .whitespaces))
+        }
+        let connections = fields["connection", default: []].joined(separator: ",").split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+        return fields["upgrade"]?.map { $0.lowercased() } == ["websocket"]
+            && connections.contains("upgrade") && fields["sec-websocket-accept"] == [expectedAccept]
     }
 
     /// A client frame: final, masked, with the length in the smallest form.
@@ -315,7 +353,9 @@ final class WebSocketTransport: MessageTransport, @unchecked Sendable {
             offset = 4
         } else if length == 127 {
             guard bytes.count >= 10 else { return nil }
-            length = bytes[2..<10].reduce(0) { $0 << 8 | Int($1) }
+            let extended = bytes[2..<10].reduce(UInt64(0)) { $0 << 8 | UInt64($1) }
+            guard extended <= UInt64(Int.max - 14) else { return nil }
+            length = Int(extended)
             offset = 10
         }
         let maskOffset = offset

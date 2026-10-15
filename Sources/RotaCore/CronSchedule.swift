@@ -114,7 +114,11 @@ public struct CronSchedule: Equatable, Sendable {
         if pieces[0] == "*" {
             bounds = range
         } else {
-            let ends = pieces[0].split(separator: "-", omittingEmptySubsequences: false).compactMap { Int($0) }
+            let tokens = pieces[0].split(separator: "-", omittingEmptySubsequences: false)
+            guard tokens.allSatisfy({ !$0.isEmpty && $0.allSatisfy({ $0.isASCII && $0.isNumber }) }) else {
+                throw CronError.invalidField(field)
+            }
+            let ends = tokens.compactMap { Int($0) }
             let expected = pieces[0].contains("-") ? 2 : 1
             guard ends.count == expected, let low = ends.first, let high = ends.last, low <= high,
                   range.contains(low), range.contains(high) else { throw CronError.invalidField(field) }

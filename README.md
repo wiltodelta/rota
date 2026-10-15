@@ -17,10 +17,11 @@ Desktop.
   schedules, with common ones a click away and the next three run times shown
   as you type.
 - **Sessions are the main view.** The sidebar lists every routine's sessions,
-  newest first, by day. Messages use a plain layout with speaker labels and
+  newest first, by day. Messages use a plain layout without repeated harness headings and
   basic Markdown: paragraphs, lists, links and code. Select any number of lines,
-  across paragraphs and messages, and copy with Command-C. Tool activity can
-  be shown or hidden, and plans show each step's status as text. The rounded
+  across paragraphs and messages, and copy with Command-C. Commentary, tools and
+  plans start collapsed behind one activity link; expand it to inspect the work.
+  Answers and delivery errors stay visible. The rounded
   message field shows the model and run clock, with Send and Stop controls.
   The chat follows the session unless you scroll up or select text.
 - **Attach files and images.** Use the paperclip or drop files onto the composer.
@@ -57,7 +58,8 @@ Desktop.
   any other), or in the macOS default terminal, the one that opens executables
   (iTerm2 after "Make iTerm2 Default Term"). iTerm2 asks "OK to run" before
   each script until you tick "Suppress this message permanently" once. The last
-  50 sessions of each routine are kept.
+  50 finished conversations of each routine are kept, together with active
+  sessions. Skipped slots never evict a conversation.
 - **Agents manage routines.** A Claude Code, Codex or Grok Build session can
   schedule a routine ("run this every weekday at 9"), change, run, pause or
   delete one, and read or message its sessions, through Rota's MCP server.
@@ -76,16 +78,10 @@ Desktop.
   bold in the list with a blue dot, counted on the Dock icon and in the menu
   bar panel.
 - **Readable chat text.** Pick the chat's font, a monospaced font for commands
-  and output, and the size in Settings. View > Increase, Decrease and Reset
-  App Zoom (Command-=, Command-Minus, Command-0) scale interface fonts,
-  spacing, icons and controls proportionally from
-  50% to 200% in 10 percentage point steps, with a reset to 100%. The separate
-  Chat Text Size commands use Option-Command-=, Option-Command-Minus and
-  Option-Command-0. Their effective scale also stays within 50–200%; each step
-  is 10 percentage points multiplied by app scale. Chat reset restores the
-  default 14 pt without resetting the interface. Settings > General controls
-  app zoom, and Settings > Chat controls text size; both show percentages.
-  Both preferences are saved independently.
+  and output, and the text size in Settings > Chat. View > Increase, Decrease
+  and Reset Chat Text Size use Option-Command-=, Option-Command-Minus and
+  Option-Command-0. Text ranges from 10 to 28 pt, with a 14 pt default.
+  Navigation, icons, controls and spacing retain standard macOS sizes.
 - **Agent Markdown as it is meant to read:** headings, lists and code blocks.
 - **Notifications** when a run fails, times out or cannot start, and when a
   missed slot is skipped; click one to open its session. Successes notify too if you ask for it. A routine
@@ -103,13 +99,14 @@ Desktop.
   while the previous run is still going is skipped quietly. Skips stay in the
   routine's history, out of the sessions list. A run takes as long as it
   needs; a routine can set a time limit if it should not.
-- **Sleep, shutdown and lost Wi-Fi do not lose work.** A due slot waits for
+- **Sleep, shutdown and lost Wi-Fi do not lose work.** A due agent slot waits for
   the network rather than failing on a Mac that just woke. An agent run cut
   off by sleep or a network error, or still open when the Mac shut down,
   simply continues in the same session once its agent's service answers again
   (twice at most per run); one that failed on the network before it started
   working runs again. A shutdown quits Rota without
-  asking. Shell commands are never run again on their own.
+  asking. Local Shell slots do not wait for the agent network. Shell commands are never
+  run again on their own.
 
 ## Requirements
 
@@ -137,8 +134,12 @@ Desktop.
 git clone https://github.com/wiltodelta/rota.git
 cd rota
 ./create-app.sh
-mv Rota.app /Applications/
+open Rota.app
 ```
+
+Source builds use a separate development identity and data directory. Keep the
+release in `/Applications`; see [build and release](docs/build-and-release.md)
+for production signing.
 
 ## Usage
 
@@ -172,6 +173,8 @@ Codex, Grok and both Claude modes show supported permission requests and
 questions in the chat. Interactive Claude bridges `AskUserQuestion` and one-time
 permissions through its own per-session hooks while keeping its PTY. Native
 prompts outside those hooks remain available in Terminal.
+A draft stays with its session when you navigate away, including attachments,
+until you send or clear it. Drafts are held only during the current app launch.
 Closing or stopping a run invalidates its pending requests; chat text never
 approves a tool. Ctrl-] detaches from an interactive Claude terminal without
 stopping its session.
@@ -180,6 +183,27 @@ Rota runs routines only while it is open; turn on **Launch at login** in
 Settings, so runs cut off by a shutdown continue after the Mac starts.
 Quitting Rota yourself while routines run asks first and stops them; their
 sessions can be continued later.
+
+## Privacy and recovery
+
+Rota keeps routines, logs, normalized chat events and attachment copies locally
+in Application Support. Prompts go to the selected agent through stdin or its
+owned terminal, never in the agent's process arguments. The agent's own
+configuration determines which provider receives them and retains its own
+session transcript. Rota has no analytics service. Sparkle checks GitHub for
+updates; recovery also sends an unauthenticated HEAD request to the selected
+agent's API host, without the routine's contents, before resuming work.
+
+An explicit Stop, including quitting Rota yourself, is saved before stopping
+the process. Such a run is not resumed automatically after a restart. A storage failure
+keeps the error visible and still requests Stop; verify history before restarting.
+Codex keeps a pending turn connection long enough to interrupt a turn accepted
+after Stop. If the provider cannot confirm stopping, its log says so. A crash
+or system shutdown can leave an interrupted agent run eligible for recovery.
+Unreadable routine or history files are reported and preserved. Repair or
+restore them from a backup before retrying the operation; Rota does not replace
+corrupt data with an empty store. A message whose delivery is unconfirmed is
+not retried automatically, since the provider may already have accepted it.
 
 ## Updates
 
@@ -248,3 +272,6 @@ rm -rf ~/Library/Application\ Support/Rota ~/Library/Logs/Rota ~/Library/Caches/
 ## License
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
+
+Repeatable tests, isolated GUI checks and live-session cleanup are documented
+in [verification](docs/verification.md).

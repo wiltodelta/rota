@@ -1,21 +1,14 @@
 import AppKit
 import SwiftUI
 
-/// Layout uses point sizes, so fonts and vector shapes are drawn at their final resolution.
+/// Bound forms and sheets to the visible screen and parent window.
 struct InterfaceMetrics {
-    let scale: Double
-
-    func callAsFunction(_ points: CGFloat) -> CGFloat { points * scale }
-
-    /// Keep interactive targets usable even at the smallest zoom.
-    func target(_ points: CGFloat) -> CGFloat { max(20, self(points)) }
-
     func surfaceWidth(_ points: CGFloat, available: CGFloat) -> CGFloat {
-        min(self(points), max(240, available - 40))
+        min(points, max(240, available - 40))
     }
 
     func surfaceHeight(_ points: CGFloat, available: CGFloat) -> CGFloat {
-        min(self(points), max(180, available - 100))
+        min(points, max(180, available - 100))
     }
 
     @MainActor
@@ -30,7 +23,7 @@ struct InterfaceMetrics {
 }
 
 extension EnvironmentValues {
-    var interfaceMetrics: InterfaceMetrics { InterfaceMetrics(scale: interfaceTextScale) }
+    var interfaceMetrics: InterfaceMetrics { InterfaceMetrics() }
 }
 
 private struct SettingsPaneModifier: ViewModifier {
@@ -39,41 +32,16 @@ private struct SettingsPaneModifier: ViewModifier {
     func body(content: Content) -> some View {
         let available = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1024, height: 800)
         content.formStyle(.grouped)
-            .frame(width: metrics.surfaceWidth(520, available: available.width))
+            // Keep all five native Settings tabs reachable.
+            .frame(width: max(420, metrics.surfaceWidth(520, available: available.width)))
             .frame(maxHeight: available.height - 100)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
 
-/// Content buttons grow continuously; their hit area never falls below 20 pt.
-struct InterfaceButtonStyle: ButtonStyle {
-    @Environment(\.interfaceMetrics) private var metrics
-    @Environment(\.isEnabled) private var enabled
-    @Environment(\.colorScheme) private var colorScheme
-    var prominent = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaledFont(.body)
-            .padding(.horizontal, metrics(8))
-            .padding(.vertical, metrics(4))
-            .frame(minWidth: metrics.target(28), minHeight: metrics.target(28))
-            .foregroundStyle(prominent ? accentInk
-                             : configuration.role == .destructive ? Color.errorText : Color.primary)
-            .background(prominent ? Color.accentColor
-                         : Color.primary.opacity(configuration.isPressed ? 0.16 : 0.07),
-                        in: RoundedRectangle(cornerRadius: metrics(6)))
-            .opacity(enabled ? 1 : 0.45)
-            .contentShape(Rectangle())
-            .overlay {
-                if prominent && configuration.isPressed {
-                    RoundedRectangle(cornerRadius: metrics(6))
-                        .strokeBorder(Color.primary.opacity(0.4), lineWidth: metrics(1))
-                }
-            }
-    }
-
-    private var accentInk: Color {
+/// Choose readable text for the chat send button under the system accent.
+enum AccentInk {
+    static func accentInk(for colorScheme: ColorScheme) -> Color {
         var ink = NSColor.labelColor
         let appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
         appearance?.performAsCurrentDrawingAppearance { ink = Self.ink(for: .controlAccentColor) }
@@ -93,18 +61,17 @@ struct InterfaceButtonStyle: ButtonStyle {
 }
 
 private struct InterfaceFooterTarget: ViewModifier {
-    @Environment(\.interfaceMetrics) private var metrics
 
     func body(content: Content) -> some View {
-        content.padding(.vertical, metrics(6))
-            .padding(.horizontal, metrics(4))
-            .frame(minHeight: metrics.target(28))
+        content.padding(.vertical, 6)
+            .padding(.horizontal, 4)
+            .frame(minHeight: 28)
             .contentShape(Rectangle())
     }
 }
 
 extension View {
-    /// Settings grow with zoom and scroll before reaching the screen's edges.
+    /// Settings scroll before reaching the screen's edges.
     func settingsPane() -> some View { modifier(SettingsPaneModifier()) }
 
     func interfaceFooterTarget() -> some View { modifier(InterfaceFooterTarget()) }

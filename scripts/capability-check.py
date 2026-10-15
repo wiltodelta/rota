@@ -8,9 +8,9 @@ import logging
 import os
 import plistlib
 import secrets
-import signal
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -250,7 +250,8 @@ def main():
     app = args.app.resolve()
     with (app / "Contents/Info.plist").open("rb") as handle:
         info = plistlib.load(handle)
-    if info["CFBundleIdentifier"] != "com.wiltodelta.rota.dev":
+    domain = info["CFBundleIdentifier"]
+    if not domain.endswith(".dev"):
         parser.error("use the development bundle, never the installed production app")
     subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
     executable = app / "Contents/MacOS/Rota"
@@ -260,7 +261,30 @@ def main():
         )
     os.umask(0o077)
     work = Path(tempfile.mkdtemp(prefix="rota-capability-"))
-    env = dict(os.environ, ROTA_DATA_DIR=str(work / "data"))
+    driver = work / "driver"
+    subprocess.run(
+        [
+            "swiftc",
+            "-O",
+            str(Path(__file__).with_name("ui-driver.swift")),
+            "-o",
+            str(driver),
+        ],
+        check=True,
+    )
+    env = dict(
+        os.environ,
+        ROTA_DATA_DIR=str(work / "data"),
+        ROTA_BUNDLE_ID=domain,
+        ROTA_TEST_DISABLE_NOTIFICATIONS="1",
+    )
+    running = json.loads(
+        subprocess.check_output([str(driver), "processes"], env=env, text=True)
+    )
+    if running:
+        parser.error("another build has this bundle id; use an isolated audit bundle")
+    defaults = work / "defaults.plist"
+    subprocess.run(["defaults", "export", domain, str(defaults)], capture_output=True, check=True)
     cli = app / "Contents/Helpers/rota"
     challenges = {}
 
@@ -371,19 +395,27 @@ def main():
         try:
             if active:
                 command(cli, env, "stop", active)
-            for pid in owned:
-                if pid in app_pids(executable):
-                    os.kill(pid, signal.SIGTERM)
-                    deadline = time.monotonic() + 5
-                    while pid in app_pids(executable) and time.monotonic() < deadline:
-                        time.sleep(0.25)
-                    if pid in app_pids(executable):
-                        os.kill(pid, signal.SIGKILL)
+            if set(app_pids(executable)) - set(owned):
+                report["cleanupError"] = "An unowned audit process is running; refusing to quit it."
+                log.error("Cleanup could not finish: %s", report["cleanupError"])
+            else:
+                subprocess.run([str(driver), "quit", str(app)], env=env, check=True)
         except (OSError, subprocess.SubprocessError) as error:
             report["cleanupError"] = str(error)
             log.error("Cleanup could not finish: %s", error)
         server.shutdown()
         server.server_close()
+        if app_pids(executable):
+            report["defaultsRestoreError"] = "The audit app is still running; snapshot retained."
+        else:
+            restored = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("restore-defaults.py")), domain, str(defaults)],
+                capture_output=True, check=False,
+            )
+            if restored.returncode:
+                report["defaultsRestoreError"] = restored.stderr.decode(errors="replace")
+        if report.get("defaultsRestoreError"):
+            log.error("Could not restore the development defaults; backup retained at %s", defaults)
         (work / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         log.info(
             "Private report and provider session IDs retained at %s",
@@ -396,6 +428,8 @@ def main():
             for result in report["results"].values()
             for key in ("browser", "computer")
         )
+        and not report.get("cleanupError")
+        and not report.get("defaultsRestoreError")
         else 1
     )
 

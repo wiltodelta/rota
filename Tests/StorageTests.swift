@@ -25,6 +25,102 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(try store.load(), [routine])
     }
 
+    func testRoutineIDsCannotCollideOnACaseInsensitiveFileSystem() throws {
+        let first = Routine(id: "report", name: "Report", workingDirectory: "/tmp", schedule: "0 9 * * *",
+                            harness: .shell, prompt: "true")
+        var second = first
+        second.id = "REPORT"
+        XCTAssertThrowsError(try RoutineStore(location: location).save([first, second]))
+    }
+
+    func testHistoryRejectsMismatchedAndDuplicateSessionsWithoutOverwritingThem() throws {
+        let history = RunHistory(location: location)
+        let record = RunRecord(routineID: "a", trigger: .manual, harness: .grok,
+                               startedAt: Date(), outcome: .running)
+        let file = location.historyDirectory.appendingPathComponent("b.json")
+        for corrupt in [[record], [record, record]] {
+            try JSONFile.write(corrupt, to: file)
+            let original = try Data(contentsOf: file)
+            XCTAssertThrowsError(try history.loadRecords(for: "b"))
+            let replacement = RunRecord(routineID: "b", trigger: .manual, harness: .grok,
+                                        startedAt: Date(), outcome: .running)
+            XCTAssertThrowsError(try history.upsert(replacement))
+            XCTAssertEqual(try Data(contentsOf: file), original)
+        }
+        try JSONFile.write([record, record], to: location.historyDirectory.appendingPathComponent("a.json"))
+        XCTAssertThrowsError(try history.loadRecords(for: "a"))
+    }
+
+    func testRunsStartedInTheSameSecondHaveIndependentLogs() {
+        let history = RunHistory(location: location)
+        let first = RunRecord(routineID: "a", trigger: .manual, harness: .codex,
+                              startedAt: Date(timeIntervalSince1970: 100), outcome: .running)
+        let second = RunRecord(routineID: "a", trigger: .manual, harness: .codex,
+                               startedAt: first.startedAt, outcome: .running)
+        XCTAssertNotEqual(first.id, second.id)
+        XCTAssertNotEqual(history.logFile(for: first), history.logFile(for: second))
+    }
+
+    func testCorruptHistoryIsNeverReplacedByANewRecord() throws {
+        let file = location.historyDirectory.appendingPathComponent("a.json")
+        try FileManager.default.createDirectory(at: location.historyDirectory, withIntermediateDirectories: true)
+        let corrupt = Data("{broken history".utf8)
+        try corrupt.write(to: file)
+        let record = RunRecord(routineID: "a", trigger: .manual, harness: .codex,
+                               startedAt: .now, outcome: .running)
+        XCTAssertThrowsError(try RunHistory(location: location).upsert(record))
+        XCTAssertEqual(try Data(contentsOf: file), corrupt)
+    }
+
+    func testSkippedSlotsCannotEvictTheRunningConversation() throws {
+        let history = RunHistory(location: location)
+        let active = RunRecord(routineID: "a", trigger: .manual, harness: .codex,
+                               startedAt: Date(timeIntervalSince1970: 0), outcome: .running)
+        try history.upsert(active)
+        for index in 1...60 {
+            let skip = RunRecord(routineID: "a", trigger: .scheduled, harness: .codex,
+                                 startedAt: Date(timeIntervalSince1970: TimeInterval(index)),
+                                 outcome: .skipped("overlap"))
+            try history.upsert(skip)
+        }
+        XCTAssertEqual(history.records(for: "a").count, RunHistory.limit)
+        XCTAssertTrue(history.records(for: "a").contains { $0.id == active.id })
+        var finished = active
+        finished.outcome = .succeeded
+        try history.upsert(finished)
+        XCTAssertTrue(history.records(for: "a").contains { $0.id == active.id })
+    }
+
+    func testRetentionCannotDeleteAnExternalFileNamedByHistory() throws {
+        let outside = directory.appendingPathComponent("user.log")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("keep this".utf8).write(to: outside)
+        let history = RunHistory(location: location)
+        let record = RunRecord(routineID: "a", trigger: .manual, harness: .shell,
+                               startedAt: .now, outcome: .succeeded, logPath: outside.path)
+        try history.upsert(record)
+        history.removeAll(for: "a")
+        XCTAssertEqual(try String(contentsOf: outside, encoding: .utf8), "keep this")
+    }
+
+    func testUnsafeAndDuplicateRoutineIDsCannotReachStorage() throws {
+        let store = RoutineStore(location: location)
+        let routine = Routine(id: "a", name: "A", workingDirectory: "/tmp", schedule: "0 9 * * *", prompt: "go")
+        XCTAssertThrowsError(try store.save([routine, routine]))
+        for id in ["../outside", ".", "..", "", "nested/task"] {
+            var unsafe = routine
+            unsafe.id = id
+            XCTAssertThrowsError(try store.save([unsafe]), id)
+            // Loading a hand-edited file has the same boundary as writing one.
+            try JSONFile.write([unsafe], to: location.routinesFile)
+            XCTAssertThrowsError(try store.load(), id)
+        }
+        var imported = routine
+        imported.id = "Отчёт по SEO"
+        try store.save([imported])
+        XCTAssertEqual(try store.load(), [imported])
+    }
+
     func testHistoryKeepsNewestAndDeletesDroppedLogs() throws {
         let history = RunHistory(location: location)
         var logs: [URL] = []
@@ -53,7 +149,7 @@ final class StorageTests: XCTestCase {
         let record = RunRecord(routineID: "a", trigger: .manual, harness: .grok,
                                startedAt: Date(timeIntervalSince1970: 0), outcome: .running)
         try history.upsert(record)
-        history.closeOrphans(routineIDs: ["a"], now: Date(timeIntervalSince1970: 60))
+        try history.closeOrphans(routineIDs: ["a"], now: Date(timeIntervalSince1970: 60))
         let closed = history.records(for: "a")
         XCTAssertEqual(closed.count, 1)
         XCTAssertEqual(closed[0].outcome, .interrupted)

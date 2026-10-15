@@ -1,4 +1,9 @@
-# Interface scaling
+# Interface scaling research
+
+> Historical design, superseded on 2026-10-14. Global interface zoom and custom
+> toolbar sizing were removed after user review. The application now keeps
+> standard native sizes and only chat text can be resized. Current behavior and
+> preference migration are documented in [architecture.md](architecture.md#native-interface-and-chat-text).
 
 Research snapshot: October 13, 2026. This decision covers the two controls in
 Rota, app zoom and chat text size. It does not introduce separate sidebar,

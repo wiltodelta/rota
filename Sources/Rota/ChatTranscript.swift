@@ -7,32 +7,26 @@ struct ChatTranscript: View {
     @Environment(AppModel.self) private var model
     let items: [TranscriptItem]
     let running: Bool
-    let record: RunRecord
     @State private var activity: [Int: Bool] = [:]
 
     var body: some View {
         let style = TranscriptStyle(family: model.chatText.family, codeFamily: model.chatText.codeFamily,
-                                    size: model.chatText.effectiveSize(appScale: model.appZoom.scale),
-                                    interfaceScale: model.appZoom.scale)
-        NativeTranscript(document: TranscriptDocument(style: style).make(items: items, record: record, running: running,
-                                                            activity: activity),
-                         interfaceScale: model.appZoom.scale) { id in
-            let live = running && TranscriptTurn.group(items).last?.id == id
-            activity[id] = !(activity[id] ?? live)
+                                    size: model.chatText.size)
+        NativeTranscript(document: TranscriptDocument(style: style).make(items: items, running: running,
+                                                            activity: activity)) { id in
+            activity[id] = !(activity[id] ?? false)
         }
     }
 }
 
 private struct NativeTranscript: NSViewRepresentable {
     let document: NSAttributedString
-    let interfaceScale: Double
     let toggle: (Int) -> Void
 
     func makeNSView(context: Context) -> TranscriptScrollView { TranscriptScrollView() }
 
     func updateNSView(_ view: TranscriptScrollView, context: Context) {
         view.activityToggled = toggle
-        view.interfaceScale = interfaceScale
         view.update(document)
     }
 }

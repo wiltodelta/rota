@@ -1,9 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// A native menu with a button whose font and geometry use the same scale as its label.
+/// A native menu with a button using the standard system body font.
 struct InterfacePicker<Selection: Hashable, Options: View>: View {
-    @Environment(\.interfaceMetrics) private var metrics
     @Environment(\.isEnabled) private var enabled
     let title: String
     let value: String
@@ -19,11 +18,11 @@ struct InterfacePicker<Selection: Hashable, Options: View>: View {
 
     var body: some View {
         LabeledContent {
-            NativePickerButton(title: title, value: value, scale: metrics.scale, enabled: enabled,
+            NativePickerButton(title: title, value: value, enabled: enabled,
                                content: AnyView(Picker(title, selection: $selection) { options }.pickerStyle(.inline)))
-                .frame(minHeight: metrics.target(22))
+                .frame(minHeight: 22)
         } label: {
-            Text(title).scaledFont(.body)
+            Text(title).interfaceFont(.body)
         }
         .accessibilityElement(children: .contain)
     }
@@ -32,7 +31,6 @@ struct InterfacePicker<Selection: Hashable, Options: View>: View {
 private struct NativePickerButton: NSViewRepresentable {
     let title: String
     let value: String
-    let scale: Double
     let enabled: Bool
     let content: AnyView
 
@@ -40,13 +38,13 @@ private struct NativePickerButton: NSViewRepresentable {
 
     func updateNSView(_ button: InterfaceMenuButton, context: Context) {
         button.title = value
-        let font = InterfaceTypography.font(.body, scale: scale)
+        let font = InterfaceTypography.font(.body)
         button.font = font
         button.attributedTitle = NSAttributedString(string: value,
                                                      attributes: [.font: font, .foregroundColor: NSColor.labelColor])
         button.contentTintColor = .labelColor
         button.image = NSImage(systemSymbolName: "chevron.up.chevron.down", accessibilityDescription: nil)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10 * scale, weight: .regular))
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .regular))
         button.isEnabled = enabled
         button.menu = NSHostingMenu(rootView: content)
         button.setAccessibilityLabel(title)

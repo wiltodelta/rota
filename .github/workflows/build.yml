@@ -9,10 +9,34 @@ on:
     branches: [ main ]
 
 jobs:
+  compatibility:
+    name: Test macOS 15
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+    - name: Select Latest Xcode
+      run: |
+        LATEST_XCODE="$(printf '%s\n' /Applications/Xcode*.app | sort -V | tail -1)"
+        [[ -d "$LATEST_XCODE" ]] || { echo "::error::No Xcode application found"; exit 1; }
+        sudo xcode-select -s "$LATEST_XCODE/Contents/Developer"
+        sw_vers
+        xcodebuild -version
+        swift --version
+
+    - name: Run Tests on the Oldest Supported macOS
+      run: swift test
+
+    - name: Test Audit Preferences Restoration
+      run: python3 -m unittest discover -s Tests/AuditPreferences -p '*Tests.py'
+
   build:
-    # macOS 26 host: actool compiles the Icon Composer icon (once the repository
-    # has one) with macOS 26 system frameworks; it crashed on macos-15 for
-    # Translate Like Me.
+    needs: compatibility
+    # Icon Composer assets use the macOS 26 host frameworks. Runtime
+    # compatibility tests run separately before packaging and release actions.
     runs-on: macos-26
     permissions:
       contents: write
@@ -24,9 +48,8 @@ jobs:
         fetch-depth: 0  # Fetch all history and tags for version detection
         fetch-tags: true
 
-    # A release tag is vX.Y.Z and above every earlier tag: Sparkle offers only a
-    # higher version, so a lower number never reaches anybody already on the
-    # newer release (watch-me-sleep 3.6.1, tagged after 3.7 on 2026-10-11).
+    # Sparkle offers only higher versions. Require an annotated vX.Y.Z tag
+    # above every earlier tag before loading any signing credentials.
     - name: Check the release tag (on tag)
       if: startsWith(github.ref, 'refs/tags/v')
       run: |
@@ -35,6 +58,12 @@ jobs:
         HIGHEST="$(git tag -l 'v*' | sort -V | tail -1)"
         [[ "$HIGHEST" == "$GITHUB_REF_NAME" ]] ||
           { echo "::error::$GITHUB_REF_NAME is not above the existing tag $HIGHEST"; exit 1; }
+        [[ $(git cat-file -t "$GITHUB_REF_NAME") == tag ]] ||
+          { echo "::error::$GITHUB_REF_NAME must be an annotated tag (git tag -a)"; exit 1; }
+        git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME" > release-notes.md
+        grep -q '[^[:space:]]' release-notes.md ||
+          { echo "::error::the $GITHUB_REF_NAME annotation has no body; it is the release notes"; exit 1; }
+        echo "RELEASE_TITLE=$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")" >> "$GITHUB_ENV"
     
     # The runner context is not available in job-level env, so the signing
     # keychain path is exported here for the import and cleanup steps.
@@ -42,9 +71,10 @@ jobs:
       run: |
         echo "SIGNING_KEYCHAIN=$RUNNER_TEMP/signing.keychain-db" >> "$GITHUB_ENV"
         # Find the latest Xcode version
-        LATEST_XCODE=$(ls /Applications | grep "Xcode" | sort -V | tail -1)
+        LATEST_XCODE="$(printf '%s\n' /Applications/Xcode*.app | sort -V | tail -1)"
+        [[ -d "$LATEST_XCODE" ]] || { echo "::error::No Xcode application found"; exit 1; }
         echo "Using: $LATEST_XCODE"
-        sudo xcode-select -s /Applications/$LATEST_XCODE/Contents/Developer
+        sudo xcode-select -s "$LATEST_XCODE/Contents/Developer"
     
     - name: Display Build Environment
       run: |
@@ -72,6 +102,9 @@ jobs:
     - name: Run Tests
       run: swift test
 
+    - name: Test Audit Preferences Restoration
+      run: python3 -m unittest discover -s Tests/AuditPreferences -p '*Tests.py'
+
     # Tag builds only: a temporary keychain with the Developer ID Application
     # identity and the notarytool profile, so create-app.sh signs with it
     # (hardened runtime, timestamp) and notarize.sh notarizes
@@ -97,7 +130,13 @@ jobs:
         curl -sSf -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
         security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$KEYCHAIN"
         security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
-        security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+        KEYCHAINS=("$KEYCHAIN")
+        while read -r path; do
+          [[ "$path" == \"*\" ]] || { echo "::error::Unexpected keychain path format"; exit 1; }
+          path="${path#\"}"; path="${path%\"}"
+          KEYCHAINS+=("$path")
+        done < <(security list-keychains -d user)
+        security list-keychains -d user -s "${KEYCHAINS[@]}"
         echo "$NOTARY_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
         xcrun notarytool store-credentials notary-K2GT9Q4S6U --keychain "$KEYCHAIN" \
           --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
@@ -131,15 +170,7 @@ jobs:
         mkdir -p "$FEED"
         ZIP=$(ls Rota-v*-macOS.zip)
         cp "$ZIP" "$FEED/"
-        # Release notes are the annotated tag's body; refuse a lightweight tag or
-        # an empty body rather than publish a release without notes.
-        [[ $(git cat-file -t "$GITHUB_REF_NAME") == tag ]] ||
-          { echo "::error::$GITHUB_REF_NAME must be an annotated tag (git tag -a)"; exit 1; }
-        git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME" > release-notes.md
-        # The annotation's first line ("App Name X.Y") is the release title.
-        echo "RELEASE_TITLE=$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")" >> "$GITHUB_ENV"
-        grep -q '[^[:space:]]' release-notes.md ||
-          { echo "::error::the $GITHUB_REF_NAME annotation has no body; it is the release notes"; exit 1; }
+        # The release tag and its notes were validated before credentials and notarization.
         cp release-notes.md "$FEED/${ZIP%.zip}.md"
         echo "$SPARKLE_PRIVATE_KEY" | .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
           --ed-key-file - --embed-release-notes --maximum-deltas 0 \

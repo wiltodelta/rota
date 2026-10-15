@@ -16,6 +16,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     private var threadID: String?
     private var turnID: String?
     private var stopReason: RunOutcome?
+    private var interruptSent = false
     private var serverRequests: [String: String] = [:]
     private var fileChanges: [String: Any] = [:]
 
@@ -92,11 +93,6 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         process.standardInput = stdin
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            return journal.finish(.launchFailed(error.localizedDescription))
-        }
         proxy = process
         let peer = JSONRPCPeer(transport: WebSocketTransport(input: stdin.fileHandleForWriting,
                                                              output: stdout.fileHandleForReading),
@@ -108,9 +104,16 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         }
         peer.onClose = { [weak self] in
             self?.requests.cancelAll(notifyProvider: false)
-            self?.journal.finish(.interrupted)
+            self?.journal.finish(self?.stopReason ?? .interrupted)
+            if self?.proxy?.isRunning == true { self?.proxy?.terminate() }
         }
         self.peer = peer
+        do {
+            try process.run()
+        } catch {
+            journal.finish(.launchFailed(error.localizedDescription))
+            return disconnect()
+        }
         peer.request("initialize", ["clientInfo": ["name": "rota", "version": "1"]]) { [weak self] result in
             self?.initialized(result)
         }
@@ -189,12 +192,15 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         if let model = spec.model { params["model"] = model }
         if let effort = spec.effort { params["effort"] = effort }
         peer?.request("turn/start", params) { [weak self] result in
+            guard let self, !self.journal.isFinished else { return }
             guard case .success(let value) = result,
-                  let turn = (value as? [String: Any])?["turn"] as? [String: Any] else {
-                return self?.fail(result, "turn/start") ?? ()
+                  let turn = (value as? [String: Any])?["turn"] as? [String: Any],
+                  let id = turn["id"] as? String, !id.isEmpty else {
+                return self.fail(result, "turn/start")
             }
-            self?.turnID = turn["id"] as? String
-            if let self { self.journal.delivery(self.spec.messageID, .accepted) }
+            self.turnID = id
+            self.journal.delivery(self.spec.messageID, .accepted)
+            self.sendInterruptIfReady()
         }
     }
 
@@ -206,6 +212,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         }
         if method == "turn/started", turnID == nil {
             turnID = (params["turn"] as? [String: Any])?["id"] as? String
+            sendInterruptIfReady()
         }
         if let turn = params["turnId"] as? String, let turnID, turn != turnID { return }
         if method == "item/started" || method == "item/completed",
@@ -263,23 +270,39 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     }
 
     private func interrupt(as reason: RunOutcome) {
-        guard !journal.isFinished else { return }
+        guard !journal.isFinished, stopReason == nil else { return }
         requests.cancelAll()
         stopReason = reason
-        guard let threadID, let turnID else {
+        guard threadID != nil else {
             journal.finish(reason)
             return disconnect()
         }
-        peer?.request("turn/interrupt", ["threadId": threadID, "turnId": turnID]) { _ in }
+        // A turn/start already on the wire can be accepted after Stop. Keep the
+        // connection until its reply or notification supplies the turn identity.
+        sendInterruptIfReady()
         // If the daemon never confirms, end the run anyway.
         queue.asyncAfter(deadline: .now() + 15) { [weak self] in
-            self?.journal.finish(reason)
-            self?.disconnect()
+            guard let self, !self.journal.isFinished else { return }
+            self.journal.line("[warning] Codex did not confirm that the turn stopped. "
+                + "Check the thread before retrying.")
+            self.journal.finish(reason)
+            self.disconnect()
         }
     }
 
+    private func sendInterruptIfReady() {
+        guard stopReason != nil, !interruptSent, !journal.isFinished, let threadID, let turnID else { return }
+        interruptSent = true
+        peer?.request("turn/interrupt", ["threadId": threadID, "turnId": turnID]) { _ in }
+    }
+
     private func fail(_ result: Result<Any, JSONRPCError>, _ step: String) {
-        if case .failure(let error) = result { journal.finish(.launchFailed("\(step): \(error.message)")) }
+        let reason: String
+        switch result {
+        case .failure(let error): reason = error.message
+        case .success: reason = "The provider returned an invalid response."
+        }
+        journal.finish(stopReason ?? .launchFailed("\(step): \(reason)"))
         disconnect()
     }
 

@@ -60,8 +60,7 @@ final class PTYTerminal: @unchecked Sendable {
         guard incoming >= 0 else { return }
         guard client == nil else { Darwin.close(incoming); return }
         _ = fcntl(incoming, F_SETFL, O_NONBLOCK)
-        var noSignal: Int32 = 1
-        _ = setsockopt(incoming, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
+        FileDescriptorIO.suppressBrokenPipe(incoming)
         descriptor = incoming
         let source = DispatchSource.makeReadSource(fileDescriptor: incoming, queue: queue)
         source.setEventHandler { [weak self] in self?.read() }
@@ -131,8 +130,7 @@ public enum TerminalAttachment {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw ControlError("Could not create attachment socket.") }
         defer { Darwin.close(fd) }
-        var noSignal: Int32 = 1
-        _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
+        FileDescriptorIO.suppressBrokenPipe(fd)
         var address = try ControlServer.address(path)
         let result = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {

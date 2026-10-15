@@ -133,14 +133,14 @@ public final class ProcessLauncher: RoutineLaunching {
             FileManager.default.createFile(atPath: spec.log.path, contents: nil)
         }
         let output = try FileHandle(forWritingTo: spec.log)
-        output.seekToEndOfFile()
-        output.write(Data((Transcript.userLines(spec.chatMessage.fileReferenceText) + "\n").utf8))
+        try output.seekToEnd()
+        try output.write(contentsOf: Data((Transcript.userLines(spec.chatMessage.fileReferenceText) + "\n").utf8))
         Self.log.info("Starting \(spec.executable, privacy: .public) in \(spec.workingDirectory, privacy: .public)")
         let journal = try RunJournal(output: output, events: events, spec: spec, legacy: legacy)
         switch spec.mode {
         case .claudeStream:
             if let notice = spec.notice { journal.line("[rota: \(notice)]") }
-            return try ClaudeStreamRun.start(spec, journal: journal)
+            return ClaudeStreamRun.start(spec, journal: journal)
         case .claudeInteractive:
             return try ClaudeInteractiveRun.start(spec, journal: journal)
         case .codexDaemon:
@@ -191,15 +191,17 @@ public final class ProcessLauncher: RoutineLaunching {
         return base
     }
 
+    typealias TimeoutSchedule = @Sendable (TimeInterval, DispatchWorkItem) -> Void
+
     /// Runs a short command to completion and returns its exit status and output,
     /// stderr included unless `errors` is false. A command still running after
     /// `timeout` is terminated, so a CLI waiting on a prompt cannot hang the caller.
-    /// `loginShell: false` runs an absolute-path system tool directly: a login
-    /// shell costs about 0.17 s against 0.04 s, which a once-a-second poll pays
-    /// for the whole run.
+    /// `loginShell: false` skips shell startup for frequently polled system tools.
+
     static func capture(_ executable: String, _ arguments: [String], in directory: String,
                         timeout: TimeInterval? = nil, errors: Bool = true,
-                        loginShell: Bool = true) -> (Int32, String) {
+                        loginShell: Bool = true,
+                        timeoutSchedule: TimeoutSchedule? = nil) -> (Int32, String) {
         let process: Process
         if loginShell {
             process = loginShellProcess(executable, arguments, in: directory, environment: [:])
@@ -219,13 +221,53 @@ public final class ProcessLauncher: RoutineLaunching {
         } catch {
             return (-1, error.localizedDescription)
         }
-        let deadline = DispatchWorkItem { if process.isRunning { process.terminate() } }
-        if let timeout { DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline) }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let expired = OSAllocatedUnfairLock(initialState: false)
+        let deadline = DispatchWorkItem { expired.withLock { $0 = true } }
+        if let timeout {
+            if let timeoutSchedule { timeoutSchedule(timeout, deadline) } else {
+                DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline)
+            }
+        }
+        let data = capturedOutput(process, handle: pipe.fileHandleForReading, expired: expired)
         process.waitUntilExit()
         deadline.cancel()
         return (process.terminationStatus, lossyUTF8(data))
     }
+
+    private static func capturedOutput(_ process: Process, handle: FileHandle,
+                                       expired: OSAllocatedUnfairLock<Bool>) -> Data {
+        let descriptor = handle.fileDescriptor
+        _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL) | O_NONBLOCK)
+        var data = Data()
+        var bytes = [UInt8](repeating: 0, count: 8_192)
+        var pipeEnded = false
+        while !expired.withLock({ $0 }) {
+            let count = pipeEnded ? 0 : Darwin.read(descriptor, &bytes, bytes.count)
+            if count > 0 {
+                data.append(contentsOf: bytes.prefix(count))
+                if !process.isRunning { break }
+                continue
+            }
+            if count == 0 { pipeEnded = true }
+            if count < 0 && errno == EINTR { continue }
+            if !process.isRunning { break }
+            if pipeEnded { Thread.sleep(forTimeInterval: 0.02) } else {
+                var entry = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+                _ = poll(&entry, 1, 50)
+            }
+        }
+        // SIGTERM is advisory. A short discovery command must not hold its caller
+        // forever, including when a descendant keeps stdout open after it exits.
+        if expired.withLock({ $0 }), process.isRunning { _ = kill(process.processIdentifier, SIGKILL) }
+        for _ in 0..<8 {
+            let count = Darwin.read(descriptor, &bytes, bytes.count)
+            guard count > 0 else { break }
+            data.append(contentsOf: bytes.prefix(count))
+        }
+        try? handle.close()
+        return data
+    }
+
 }
 
 /// Decodes log bytes, replacing invalid sequences: a log read from an arbitrary

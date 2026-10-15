@@ -49,7 +49,8 @@ let package = Package(
         .testTarget(
             name: "RotaTests",
             dependencies: ["RotaCore", "Rota"],
-            path: "Tests"
+            path: "Tests",
+            exclude: ["AuditPreferences"]
         )
     ]
 )

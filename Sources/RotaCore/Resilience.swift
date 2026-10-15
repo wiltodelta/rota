@@ -71,11 +71,12 @@ extension Scheduler {
         guard !pendingResumes.isEmpty || !pendingReruns.isEmpty else { return }
         guard isOnline() else { return retryLater() }
         for (recordID, routineID) in pendingResumes {
-            guard let routine = routine(routineID) else {
+            guard routine(routineID) != nil,
+                  let record = history.records(for: routineID).first(where: { $0.id == recordID }) else {
                 pendingResumes[recordID] = nil
                 continue
             }
-            probe(routine.harness) { [weak self] reachable in
+            probe(record.harness) { [weak self] reachable in
                 guard let self, reachable else { self?.retryLater(); return }
                 guard self.pendingResumes.removeValue(forKey: recordID) != nil,
                       // A routine already running again leaves the older session as it ended.

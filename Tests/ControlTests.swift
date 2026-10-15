@@ -59,6 +59,22 @@ final class ControlCommandTests: XCTestCase {
         XCTAssertEqual(create().failure?.message.contains("exists"), true)
     }
 
+    func testNumericParametersRequireIntegersAndNeverOverflow() throws {
+        for invalid: Any in [1.5, true, Double.infinity, NSNumber(value: UInt64.max)] {
+            XCTAssertNotNil(create(["timeLimitMinutes": invalid]).failure)
+        }
+        _ = try create(["timeLimitMinutes": NSNumber(value: 1.0)]).get()
+        XCTAssertEqual(scheduler.routine("digest")?.timeLimitMinutes, 1)
+        scheduler.run(try XCTUnwrap(scheduler.routine("digest")), trigger: .manual)
+        launcher.events[0].finished(.succeeded)
+        XCTAssertNotNil(call("sessions.read", ["id": "digest", "limit": 1.5]).failure)
+        // A caller may ask for all remaining text without overflowing the byte budget.
+        let file = try XCTUnwrap(launcher.specs[0].log)
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("sample".utf8).write(to: file)
+        XCTAssertEqual(Scheduler.tail(of: file.path, characters: Int.max).0, "sample")
+    }
+
     /// The window's sheets ask the same question, so what the API refuses never saves from the window.
     func testTheWindowSharesTheValidation() throws {
         var routine = Routine(id: "", name: "", workingDirectory: directory.path, schedule: "0 9 * * *",
@@ -109,6 +125,16 @@ final class ControlCommandTests: XCTestCase {
         XCTAssertNil(routine.effort)
         XCTAssertNil(routine.timeLimitMinutes)
         XCTAssertEqual(call("routines.update", ["id": "nope"]).failure?.message, "No routine nope.")
+    }
+
+    func testChangingHarnessClearsEachOmittedProviderSettingIndependently() throws {
+        _ = try create(["model": "old-model", "effort": "high"]).get()
+        _ = try call("routines.update", ["id": "digest", "harness": "claude", "model": "new-model"]).get()
+        XCTAssertEqual(scheduler.routine("digest")?.model, "new-model")
+        XCTAssertNil(scheduler.routine("digest")?.effort)
+        _ = try call("routines.update", ["id": "digest", "harness": "codex", "effort": "low"]).get()
+        XCTAssertNil(scheduler.routine("digest")?.model)
+        XCTAssertEqual(scheduler.routine("digest")?.effort, "low")
     }
 
     /// Claude runs interactively where the setting is on and Claude Code trusts the folder, else as claude -p.
@@ -221,6 +247,24 @@ final class ControlCommandTests: XCTestCase {
 }
 
 final class ControlSocketTests: XCTestCase {
+    func testASecondServerCannotReplaceALiveSocket() throws {
+        let path = socketPath()
+        let first = ControlServer(socket: path) { _, _ in .success("first") }
+        try first.start()
+        defer { first.stop() }
+        let second = ControlServer(socket: path) { _, _ in .success("second") }
+        XCTAssertThrowsError(try second.start())
+        second.stop()
+        let answered = expectation(description: "original listener preserved")
+        DispatchQueue.global().async {
+            do {
+                let answer = try ControlClient.call("test", socket: path, timeout: 3)
+                XCTAssertEqual(answer as? String, "first")
+            } catch { XCTFail("The original server is unreachable: \(error)") }
+            answered.fulfill()
+        }
+        wait(for: [answered], timeout: 5)
+    }
     /// A short path: a Unix socket's path must fit in 104 bytes.
     private func socketPath() -> URL {
         URL(fileURLWithPath: "/tmp/rota-test-\(UUID().uuidString.prefix(8)).sock")
@@ -259,6 +303,47 @@ final class ControlSocketTests: XCTestCase {
         XCTAssertThrowsError(try ControlClient.call("routines.list", socket: socketPath(), timeout: 2)) { error in
             XCTAssertEqual(error as? ControlError, .notRunning)
         }
+    }
+
+    func testAnOccupiedSocketPathIsPreservedAndStopAfterFailedStartIsSafe() throws {
+        let path = socketPath()
+        defer { try? FileManager.default.removeItem(at: path) }
+        let bytes = Data("user data".utf8)
+        try bytes.write(to: path)
+        let server = ControlServer(socket: path) { _, _ in .success([:]) }
+        XCTAssertThrowsError(try server.start())
+        server.stop()
+        XCTAssertEqual(try Data(contentsOf: path), bytes)
+    }
+
+    func testOneSlowReaderCannotBlockAnotherControlClient() throws {
+        let path = socketPath()
+        let server = ControlServer(socket: path) { method, _ in
+            .success(method == "large" ? String(repeating: "x", count: 2_000_000) : "ok")
+        }
+        try server.start()
+        defer { server.stop() }
+        let slow = socket(AF_UNIX, SOCK_STREAM, 0)
+        XCTAssertGreaterThanOrEqual(slow, 0)
+        defer { close(slow) }
+        var address = try ControlServer.address(path.path)
+        let connected = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(slow, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        XCTAssertEqual(connected, 0)
+        let request = Data("{\"id\":1,\"method\":\"large\"}\n".utf8)
+        try FileHandle(fileDescriptor: slow, closeOnDealloc: false).write(contentsOf: request)
+        let answered = expectation(description: "another client answered")
+        DispatchQueue.global().async {
+            do {
+                let result = try ControlClient.call("ping", socket: path, timeout: 5)
+                XCTAssertEqual(result as? String, "ok")
+            } catch { XCTFail("The slow client blocked control requests: \(error)") }
+            answered.fulfill()
+        }
+        wait(for: [answered], timeout: 10)
     }
 }
 

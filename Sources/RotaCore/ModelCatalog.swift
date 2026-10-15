@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// A model a routine can run on, with the reasoning efforts it takes.
 public struct ModelOption: Hashable, Identifiable, Sendable {
@@ -59,23 +60,52 @@ public enum ModelCatalog {
         process.standardInput = stdin
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
-        do { try process.run() } catch { return [] }
-        defer { process.terminate() }
         let peer = JSONRPCPeer(transport: LineTransport(input: stdin.fileHandleForWriting,
-                                                        output: stdout.fileHandleForReading))
+                                                        output: stdout.fileHandleForReading),
+                               callbackQueue: DispatchQueue(label: "com.wiltodelta.rota.models"))
         let done = DispatchSemaphore(value: 0)
-        var models: [ModelOption] = []
+        let models = OSAllocatedUnfairLock(initialState: [ModelOption]())
         peer.onClose = { done.signal() }
-        peer.request("initialize", ["clientInfo": ["name": "rota", "version": "1"]]) { _ in
+        defer {
+            stdout.fileHandleForReading.readabilityHandler = nil
+            peer.close()
+            if process.isRunning { process.terminate() }
+        }
+        do { try process.run() } catch { return [] }
+        peer.request("initialize", ["clientInfo": ["name": "rota", "version": "1"]]) { result in
+            guard case .success = result else {
+                done.signal()
+                return
+            }
             peer.notify("initialized")
-            peer.request("model/list", [:]) { result in
-                if case .success(let value) = result { models = parseCodexModels(value) }
+            readCodexModels(peer) { result in
+                if let result { models.withLock { $0 = result } }
                 done.signal()
             }
         }
-        _ = done.wait(timeout: .now() + timeout)
-        peer.close()
-        return models
+        guard done.wait(timeout: .now() + timeout) == .success else { return [] }
+        return models.withLock { $0 }
+    }
+
+    /// Run on the peer's serial callback queue. A failed page never returns an incomplete catalog.
+    static func readCodexModels(_ peer: JSONRPCPeer, done: @escaping ([ModelOption]?) -> Void) {
+        var models: [ModelOption] = []
+        var cursors = Set<String>()
+        func page(_ cursor: String?) {
+            let params: [String: Any] = cursor.map { ["cursor": $0] } ?? [:]
+            peer.request("model/list", params) { result in
+                guard case .success(let value) = result, let response = value as? [String: Any],
+                      response["data"] is [[String: Any]] else { return done(nil) }
+                models += parseCodexModels(value)
+                if let cursor = response["nextCursor"] as? String {
+                    guard cursors.insert(cursor).inserted else { return done(nil) }
+                    page(cursor)
+                } else {
+                    done(models)
+                }
+            }
+        }
+        page(nil)
     }
 
     /// The visible models of a `model/list` reply, with the efforts each supports.

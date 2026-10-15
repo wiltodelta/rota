@@ -41,11 +41,13 @@ final class LiveHarnessTests: XCTestCase {
         let events = RunEvents(session: { id in
             session = id
             LiveSessionManifest.record(id, harness: harness, cwd: workingDirectory, folder: self.folder)
+            // Snapshot the assigned control on the callback's main queue before scheduling work.
+            let target = UncheckedSendable(control)
             if let stopAfter {
-                DispatchQueue.main.asyncAfter(deadline: .now() + stopAfter) { control?.stop() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + stopAfter) { target.value?.stop() }
             }
             guard let message else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { control?.send(message) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { target.value?.send(message) }
         }, finished: { result in
             outcome = result
             ended.fulfill()
@@ -190,7 +192,9 @@ final class LiveHarnessTests: XCTestCase {
         let ended = expectation(description: "permission run ended")
         nonisolated(unsafe) var control: RunControl?
         nonisolated(unsafe) var requested = false
-        let events = RunEvents(session: { _ in }, finished: { outcome in
+        let events = RunEvents(session: { id in
+            LiveSessionManifest.record(id, harness: .claude, cwd: self.folder.path, folder: self.folder)
+        }, finished: { outcome in
             XCTAssertEqual(outcome, .succeeded)
             ended.fulfill()
         }, requests: { requests in
@@ -217,7 +221,9 @@ final class LiveHarnessTests: XCTestCase {
         let ended = expectation(description: "question answered")
         nonisolated(unsafe) var control: RunControl?
         nonisolated(unsafe) var requested = false
-        let events = RunEvents(session: { _ in }, finished: { outcome in
+        let events = RunEvents(session: { id in
+            LiveSessionManifest.record(id, harness: .claude, cwd: self.folder.path, folder: self.folder)
+        }, finished: { outcome in
             XCTAssertEqual(outcome, .succeeded)
             ended.fulfill()
         }, requests: { requests in

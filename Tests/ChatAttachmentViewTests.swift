@@ -16,11 +16,9 @@ final class ChatAttachmentViewTests: XCTestCase {
         let files = try fixture.files.map(ChatAttachment.inspect)
         var item = TranscriptItem(id: 0, kind: .user, text: "Attached image and report")
         item.attachments = files
-        let record = RunRecord(routineID: "preview", trigger: .manual, harness: .codex,
-                               startedAt: Date(timeIntervalSince1970: 0), outcome: .succeeded)
         for (theme, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
             let style = TranscriptStyle(family: "", codeFamily: "", size: 14)
-            let text = TranscriptDocument(style: style).make(items: [item], record: record, running: false,
+            let text = TranscriptDocument(style: style).make(items: [item], running: false,
                                                             activity: [:])
             let transcript = TranscriptScrollView()
             transcript.frame = NSRect(x: 0, y: 90, width: 520, height: 380)

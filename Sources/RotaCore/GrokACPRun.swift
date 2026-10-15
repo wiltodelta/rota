@@ -98,11 +98,6 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         process.standardInput = stdin
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            return journal.finish(.launchFailed(error.localizedDescription))
-        }
         self.process = process
         let peer = JSONRPCPeer(transport: LineTransport(input: stdin.fileHandleForWriting,
                                                         output: stdout.fileHandleForReading),
@@ -121,9 +116,16 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         }
         peer.onClose = { [weak self] in
             self?.requests.cancelAll(notifyProvider: false)
-            self?.journal.finish(.interrupted)
+            self?.journal.finish(self?.stopReason ?? .interrupted)
+            if self?.process?.isRunning == true { self?.process?.terminate() }
         }
         self.peer = peer
+        do {
+            try process.run()
+        } catch {
+            journal.finish(.launchFailed(error.localizedDescription))
+            return disconnect()
+        }
         let hello: [String: Any] = ["protocolVersion": 1, "clientCapabilities": [String: Any]()]
         peer.request("initialize", hello) { [weak self] result in
             self?.initialized(result)
@@ -238,7 +240,8 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     }
 
     private func handle(_ method: String, _ params: [String: Any]) {
-        guard method == "session/update", !loading, let update = params["update"] as? [String: Any] else { return }
+        guard method == "session/update", params["sessionId"] as? String == sessionID,
+              !loading, let update = params["update"] as? [String: Any] else { return }
         for payload in mapper.events(update) {
             switch payload {
             case .delta(let id, let text, let phase):
@@ -275,7 +278,12 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     }
 
     private func fail(_ result: Result<Any, JSONRPCError>, _ step: String) {
-        if case .failure(let error) = result { journal.finish(.launchFailed("\(step): \(error.message)")) }
+        let reason: String
+        switch result {
+        case .failure(let error): reason = error.message
+        case .success: reason = "The provider returned an invalid response."
+        }
+        journal.finish(.launchFailed("\(step): \(reason)"))
         disconnect()
     }
 

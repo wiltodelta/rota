@@ -278,6 +278,21 @@ final class SchedulerTests: XCTestCase {
         XCTAssertEqual(notifier.outcomes, [.cancelled])
     }
 
+    func testStopReportsAPersistenceFailureWhileStillStoppingTheProcess() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        let file = directory.appendingPathComponent("runs/\(routine.id).json")
+        let corrupt = Data("unreadable history".utf8)
+        try corrupt.write(to: file)
+        for _ in 0..<2 {
+            let response = scheduler.control("routines.stop", ["id": routine.id])
+            guard case .failure(let error) = response else { return XCTFail("The stop intent was not saved") }
+            XCTAssertTrue(error.message.contains("stop"))
+            XCTAssertTrue(launcher.controls[0].stopped, "a storage error must not prevent Stop")
+            XCTAssertEqual(try Data(contentsOf: file), corrupt)
+        }
+    }
+
     func testStopAllReachesEveryRunningProcess() {
         let first = addDailyRoutine()
         let second = Routine(id: "digest", name: "Digest", workingDirectory: "/p", schedule: "0 10 * * *",
@@ -296,6 +311,139 @@ final class SchedulerTests: XCTestCase {
         XCTAssertNil(scheduler.active["report"])
         XCTAssertEqual(scheduler.history.records(for: "report").first?.outcome,
                        .launchFailed("no executable at /bin/codex"))
+    }
+
+    func testLateCallbacksCannotChangeANewerRun() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        let old = launcher.events[0]
+        old.session("old-session")
+        old.finished(.succeeded)
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[1].session("new-session")
+        let newID = try XCTUnwrap(scheduler.active[routine.id]?.id)
+        old.session("late-session")
+        old.finished(.failed(exitCode: 1))
+        XCTAssertEqual(scheduler.active[routine.id]?.id, newID)
+        XCTAssertEqual(scheduler.active[routine.id]?.sessionID, "new-session")
+        XCTAssertEqual(scheduler.active[routine.id]?.outcome, .running)
+    }
+
+    func testAnUnconfirmedStopSurvivesRestartAndNeverAutoResumes() throws {
+        var routine = addDailyRoutine()
+        routine.enabled = false
+        scheduler.save(routine)
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("stopped-session")
+        launcher.events[0].requests([RequestPresentation.permission(title: "Allow command?", detail: "echo sample")])
+        scheduler.stopAll()
+        XCTAssertTrue(launcher.controls[0].stopped)
+        XCTAssertEqual(scheduler.active[routine.id]?.outcome, .running, "the provider has not ended yet")
+        let replacement = FakeLauncher()
+        let restarted = Scheduler(location: StorageLocation(root: directory,
+            logs: directory.appendingPathComponent("logs")), launcher: replacement)
+        restarted.now = { self.clock }
+        restarted.probe = { _, reply in reply(true) }
+        restarted.start()
+        restarted.tick()
+        XCTAssertEqual(restarted.history.records(for: routine.id).first?.outcome, .cancelled)
+        XCTAssertNil(restarted.history.records(for: routine.id).first?.requests)
+        XCTAssertNil(restarted.history.records(for: routine.id).first?.attention)
+        XCTAssertTrue(restarted.pendingResumes.isEmpty)
+        XCTAssertTrue(replacement.specs.isEmpty)
+    }
+
+    func testAUserCanContinueAStoppedSessionWithANewStopIntent() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("stopped-session")
+        scheduler.stop(routine.id)
+        XCTAssertEqual(scheduler.active[routine.id]?.stopRequestedAt, clock)
+        launcher.events[0].finished(.cancelled)
+        let record = try XCTUnwrap(scheduler.history.records(for: routine.id).first)
+        _ = try scheduler.message(ChatMessage(text: "Continue"), to: record)
+        XCTAssertNil(scheduler.active[routine.id]?.stopRequestedAt)
+        XCTAssertNil(scheduler.history.records(for: routine.id).first?.stopRequestedAt)
+    }
+
+    func testLateCallbacksCannotCloseAContinuationOfTheSameRecord() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        let old = launcher.events[0]
+        old.session("same-session")
+        old.finished(.succeeded)
+        let record = try XCTUnwrap(scheduler.allRecords().first)
+        _ = try scheduler.message(ChatMessage(text: "Continue"), to: record)
+        old.finished(.failed(exitCode: 1))
+        old.metadata(.init(model: "stale-model"))
+        XCTAssertEqual(scheduler.active[routine.id]?.id, record.id)
+        XCTAssertEqual(scheduler.active[routine.id]?.outcome, .running)
+        XCTAssertNil(scheduler.active[routine.id]?.metadata)
+    }
+
+    func testUnreadableRoutineStoreCannotBeOverwritten() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("routines.json")
+        let corrupt = Data("unreadable routines".utf8)
+        try corrupt.write(to: file)
+        let location = StorageLocation(root: directory, logs: directory.appendingPathComponent("logs"))
+        scheduler = Scheduler(location: location,
+                              launcher: launcher)
+        _ = addDailyRoutine()
+        XCTAssertTrue(scheduler.routines.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: file), corrupt)
+    }
+
+    func testUnreadableHistoryIsReportedAtLaunchAndPreservedDuringRecovery() throws {
+        let routine = addDailyRoutine()
+        let file = directory.appendingPathComponent("runs/\(routine.id).json")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let corrupt = Data("unreadable history".utf8)
+        try corrupt.write(to: file)
+        let restarted = Scheduler(location: StorageLocation(root: directory,
+            logs: directory.appendingPathComponent("logs")), launcher: launcher)
+        XCTAssertTrue(restarted.lastError?.contains("run history") == true)
+        restarted.now = { self.clock }
+        restarted.start()
+        XCTAssertTrue(restarted.lastError?.contains("recover unfinished sessions") == true)
+        XCTAssertEqual(try Data(contentsOf: file), corrupt)
+        XCTAssertTrue(launcher.specs.isEmpty)
+    }
+
+    func testFailedContinuationKeepsTheFailureVisibleToTheSender() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("provider-session")
+        launcher.events[0].finished(.succeeded)
+        let record = try XCTUnwrap(scheduler.allRecords().first)
+        launcher.failure = LaunchError.missingExecutable("/missing")
+        XCTAssertThrowsError(try scheduler.message(ChatMessage(text: "Continue"), to: record))
+        XCTAssertNil(scheduler.active[routine.id])
+    }
+
+    func testDeletingARunningRoutineDoesNotRecreateItsHistory() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        let events = launcher.events[0]
+        scheduler.delete(routine.id)
+        XCTAssertTrue(launcher.controls[0].stopped)
+        events.session("late-session")
+        events.finished(.cancelled)
+        XCTAssertNil(scheduler.routine(routine.id))
+        XCTAssertTrue(scheduler.history.records(for: routine.id).isEmpty)
+        XCTAssertNil(scheduler.active[routine.id])
+    }
+
+    func testFailedSaveDoesNotEnableAnUnsavedRoutine() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let blocked = directory.appendingPathComponent("routines.json")
+        try FileManager.default.createDirectory(at: blocked, withIntermediateDirectories: true)
+        _ = addDailyRoutine()
+        XCTAssertTrue(scheduler.routines.isEmpty)
+        XCTAssertNotNil(scheduler.lastError)
+        clock = makeDate(hour: 10, minute: 0)
+        scheduler.tick()
+        XCTAssertTrue(launcher.specs.isEmpty)
     }
 
     func testRoutinesSurviveARestart() {

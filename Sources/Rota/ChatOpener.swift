@@ -26,12 +26,12 @@ enum ChatOpener {
                 let reason = error.localizedDescription
                 Task { @MainActor in
                     let target = app?.path ?? "the script"
-                    log.error("Could not open \(target, privacy: .public): \(reason, privacy: .public)")
+                    log.error("Could not open \(target, privacy: .private): \(reason, privacy: .private)")
                     scheduler.lastError = "Could not open the terminal: \(reason)"
                 }
             }
             let terminalName = app?.lastPathComponent ?? "the default terminal"
-            log.info("Opened chat in \(terminalName, privacy: .public): \(command, privacy: .public)")
+            log.info("Opened chat in \(terminalName, privacy: .public): \(command, privacy: .private)")
         } catch {
             scheduler.lastError = "Could not open the chat: \(error.localizedDescription)"
         }
