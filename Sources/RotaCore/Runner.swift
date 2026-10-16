@@ -20,11 +20,7 @@ public struct LaunchSpec: Equatable, Sendable {
     public var model: String?
     public var effort: String?
     /// A note the log opens with, such as why a Claude run is not interactive.
-    public var messageID: String = UUID().uuidString
     public var notice: String?
-    public var attachments: [ChatAttachment] = []
-
-    public var chatMessage: ChatMessage { ChatMessage(text: prompt, attachments: attachments) }
 
     public init(executable: String, prompt: String, arguments: [String], workingDirectory: String,
                 environment: [String: String], mode: LaunchMode, timeout: TimeInterval?, log: URL,
@@ -52,18 +48,12 @@ public protocol RunControl: AnyObject {
     func stop()
     /// Delivers a message from the user into the running session, where the harness allows it.
     func send(_ message: String)
-    func send(_ message: String, id: String)
-    func send(_ message: ChatMessage, id: String)
-    func respond(_ id: String, response: SessionResponse)
     /// The command that shows the running session in a terminal, when it runs in one.
     var attachCommand: [String]? { get }
 }
 
 public extension RunControl {
     func send(_ message: String) {}
-    func send(_ message: String, id: String) { send(message) }
-    func send(_ message: ChatMessage, id: String) { send(message.fileReferenceText, id: id) }
-    func respond(_ id: String, response: SessionResponse) {}
     var attachCommand: [String]? { nil }
 }
 
@@ -73,19 +63,10 @@ public struct RunEvents {
     public var session: (String) -> Void
     /// Fires once, when the run's work is over.
     public var finished: (RunOutcome) -> Void
-    public var metadata: (SessionMetadata) -> Void
-    public var eventError: (String) -> Void
-    public var requests: ([SessionRequest]) -> Void
 
-    public init(session: @escaping (String) -> Void, finished: @escaping (RunOutcome) -> Void,
-                metadata: @escaping (SessionMetadata) -> Void = { _ in },
-                eventError: @escaping (String) -> Void = { _ in },
-                requests: @escaping ([SessionRequest]) -> Void = { _ in }) {
+    public init(session: @escaping (String) -> Void, finished: @escaping (RunOutcome) -> Void) {
         self.session = session
         self.finished = finished
-        self.metadata = metadata
-        self.eventError = eventError
-        self.requests = requests
     }
 }
 
@@ -125,18 +106,15 @@ public final class ProcessLauncher: RoutineLaunching {
         }
         try FileManager.default.createDirectory(at: spec.log.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
-        let eventFile = SessionEventReader.file(for: spec.log)
-        let legacy = spec.resume != nil && !FileManager.default.fileExists(atPath: eventFile.path)
-            ? try String(contentsOf: spec.log, encoding: .utf8) : nil
         // A continued session appends to its log; a new run starts one.
         if spec.resume == nil || !FileManager.default.fileExists(atPath: spec.log.path) {
             FileManager.default.createFile(atPath: spec.log.path, contents: nil)
         }
         let output = try FileHandle(forWritingTo: spec.log)
         output.seekToEndOfFile()
-        output.write(Data((Transcript.userLines(spec.chatMessage.fileReferenceText) + "\n").utf8))
+        output.write(Data((Transcript.userLines(spec.prompt) + "\n").utf8))
         Self.log.info("Starting \(spec.executable, privacy: .public) in \(spec.workingDirectory, privacy: .public)")
-        let journal = try RunJournal(output: output, events: events, spec: spec, legacy: legacy)
+        let journal = RunJournal(output: output, events: events)
         switch spec.mode {
         case .claudeStream:
             if let notice = spec.notice { journal.line("[rota: \(notice)]") }

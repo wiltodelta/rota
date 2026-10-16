@@ -14,23 +14,9 @@ struct GeneralSettings: View {
         @Bindable var settings = model.settings
         Form {
             Section {
-                LabeledContent("App zoom") {
-                    ScaleControls(name: "App Zoom", identifier: "appZoom", value: model.appZoom.scale,
-                                  canDecrease: model.appZoom.percent > AppZoomSettings.range.lowerBound,
-                                  canIncrease: model.appZoom.percent < AppZoomSettings.range.upperBound,
-                                  decrease: { model.appZoom.decrease() }, increase: { model.appZoom.increase() },
-                                  reset: { model.appZoom.reset() })
-                }
-            } header: {
-                Text("Appearance")
-            } footer: {
-                Text("Scales interface text, icons, and controls. Adjust chat text separately in Chat.")
-                    .foregroundStyle(Color.secondaryText)
-            }
-            Section {
                 Toggle("Notify when a run succeeds", isOn: $settings.notifyOnSuccess)
             } footer: {
-                Text("Failed and skipped runs always notify.")
+                Text("Failed runs and missed slots notify. Slots skipped while a run is still going stay quiet.")
                     .foregroundStyle(Color.secondaryText)
             }
             Section {
@@ -87,7 +73,7 @@ struct ChatSettings: View {
     }
 }
 
-/// The Agents tab: which copy of each agent CLI runs, and how Claude runs.
+/// The Agents tab: which copy of each agent CLI runs, and agents' access to routines.
 struct AgentSettings: View {
     @Environment(AppModel.self) private var model
 
@@ -104,16 +90,10 @@ struct AgentSettings: View {
                     .foregroundStyle(Color.secondaryText)
             }
             ClaudeModeSection()
+            AgentAccessSection()
         }
         .settingsPane()
         .onAppear { model.settings.refreshInstalled() }
-    }
-}
-
-/// The Integrations tab: the rota command and agents' MCP access to routines.
-struct IntegrationSettings: View {
-    var body: some View {
-        Form { AgentAccessSection() }.settingsPane()
     }
 }
 
@@ -167,10 +147,18 @@ private struct PermissionRow: View {
     }
 }
 
+extension View {
+    /// A settings tab's form: grouped, the window's width, as tall as its content.
+    func settingsPane() -> some View {
+        formStyle(.grouped)
+            .frame(width: 520)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 /// Picks which installed copy of an agent CLI runs: the first one found, one
 /// of the others, or any file chosen in an open panel.
 private struct ExecutablePicker: View {
-    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     let harness: Harness
     private static let chooseTag = "\u{0}choose"
@@ -180,10 +168,8 @@ private struct ExecutablePicker: View {
         let installed = settings.installed[harness] ?? []
         let chosen = settings.chosenExecutable(for: harness)
         let effective = settings.executable(for: harness)
-        VStack(alignment: .leading, spacing: metrics(4)) {
-            InterfacePicker(harness.title, value: chosen.map(Self.display)
-                            ?? (installed.first.map { "Automatic (\(Self.display($0.path)))" } ?? "Automatic"),
-                            selection: Binding(
+        VStack(alignment: .leading, spacing: 4) {
+            Picker(harness.title, selection: Binding(
                 get: { chosen ?? "" },
                 set: { choose($0) }
             )) {
@@ -209,11 +195,11 @@ private struct ExecutablePicker: View {
             Label("Not installed. Install \(harness.commandName) or choose its file.",
                   systemImage: "xmark.circle.fill")
                 .foregroundStyle(Color.errorText)
-                .scaledFont(.caption)
+                .font(.caption)
         } else if let version = installed.first(where: { $0.path == effective })?.version {
             Label(version, systemImage: "checkmark.circle.fill")
                 .labelStyle(StatusLabelStyle())
-                .scaledFont(.caption)
+                .font(.caption)
         }
     }
 
@@ -273,7 +259,7 @@ private struct AgentAccessSection: View {
                 }
             }
             if let problem {
-                Text(problem).scaledFont(.caption).foregroundStyle(Color.errorText)
+                Text(problem).font(.caption).foregroundStyle(Color.errorText)
             }
         } header: {
             Text("Routines from agents")
@@ -337,9 +323,7 @@ private struct TerminalPicker: View {
         let chosen = model.settings.terminalApp
         // A closure, not `set: choose`: Swift 6.3.3 (Xcode 26.6) crashed in IRGen on the
         // method reference's @isolated(any) thunk.
-        InterfacePicker("Terminal", value: chosen.map(Self.name)
-                        ?? (handler.map { "Default (\(Self.name($0.path)))" } ?? "Default"),
-                        selection: Binding(get: { chosen ?? "" }, set: { choose($0) })) {
+        Picker("Terminal", selection: Binding(get: { chosen ?? "" }, set: { choose($0) })) {
             Text(handler.map { "Default (\(Self.name($0.path)))" } ?? "Default").tag("")
             Divider()
             ForEach(installed, id: \.self) { terminal in
@@ -380,9 +364,8 @@ private struct TerminalPicker: View {
 
 /// A green check before secondary text, as the status under a picker reads.
 private struct StatusLabelStyle: LabelStyle {
-    @Environment(\.interfaceMetrics) private var metrics
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: metrics(4)) {
+        HStack(spacing: 4) {
             configuration.icon.foregroundStyle(.green)
             configuration.title.foregroundStyle(Color.secondaryText)
         }
@@ -391,85 +374,41 @@ private struct StatusLabelStyle: LabelStyle {
 
 /// Font, monospaced font and size of the chat, with a sample in them.
 private struct ChatTextSection: View {
-    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     @State private var families: [String] = []
     @State private var monospaced: [String] = []
 
     var body: some View {
         @Bindable var text = model.chatText
-        Section {
-            InterfacePicker("Font", value: text.family.isEmpty ? "System" : text.family, selection: $text.family) {
+        Section("Chat text") {
+            Picker("Font", selection: $text.family) {
                 Text("System").tag("")
                 Divider()
                 ForEach(families, id: \.self) { Text($0).tag($0) }
             }
-            InterfacePicker("Code font", value: text.codeFamily.isEmpty ? "System monospaced" : text.codeFamily,
-                            selection: $text.codeFamily) {
+            Picker("Code font", selection: $text.codeFamily) {
                 Text("System monospaced").tag("")
                 Divider()
                 ForEach(monospaced, id: \.self) { Text($0).tag($0) }
             }
-            LabeledContent("Text size") {
-                ScaleControls(name: "Chat Text Size", identifier: "chatZoom",
-                              value: text.effectiveScale(appScale: model.appZoom.scale),
-                              canDecrease: text.canDecrease(appScale: model.appZoom.scale),
-                              canIncrease: text.canIncrease(appScale: model.appZoom.scale),
-                              decrease: { text.smaller(appScale: model.appZoom.scale) },
-                              increase: { text.bigger(appScale: model.appZoom.scale) },
-                              reset: { text.reset(appScale: model.appZoom.scale) })
+            LabeledContent("Size") {
+                HStack {
+                    Slider(value: $text.size, in: ChatTextSettings.sizes, step: 1)
+                    Text("\(Int(text.size)) pt")
+                        .monospacedDigit()
+                        .frame(width: 44, alignment: .trailing)
+                }
             }
-            VStack(alignment: .leading, spacing: metrics(6)) {
-                Text("Clicks are down 8% week over week.").font(text.body(scale: model.appZoom.scale))
-                Text("$ git log --oneline -5").font(text.code(scale: model.appZoom.scale))
-                    .foregroundStyle(Color.secondaryText)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Clicks are down 8% week over week.").font(text.body)
+                Text("$ git log --oneline -5").font(text.code).foregroundStyle(Color.secondaryText)
             }
-            .padding(.vertical, metrics(4))
+            .padding(.vertical, 4)
             .accessibilityLabel("Sample")
-        } header: {
-            Text("Chat text").scaledFont(.headline)
-        } footer: {
-            Text("Changes messages and the composer without resizing interface controls.")
-                .foregroundStyle(Color.secondaryText)
         }
         .task {
             families = ChatTextSettings.families
             monospaced = ChatTextSettings.monospacedFamilies
         }
-    }
-}
-
-/// The same percentage controls for app zoom and the chat's rendered text size.
-private struct ScaleControls: View {
-    @Environment(\.interfaceMetrics) private var metrics
-    let name: String
-    let identifier: String
-    let value: Double
-    let canDecrease: Bool
-    let canIncrease: Bool
-    let decrease: () -> Void
-    let increase: () -> Void
-    let reset: () -> Void
-
-    var body: some View {
-        HStack(spacing: metrics(8)) {
-            Button(action: decrease) { Image(systemName: "minus") }
-                .accessibilityLabel("Decrease \(name)")
-                .accessibilityIdentifier("\(identifier)Decrease")
-                .disabled(!canDecrease)
-            Text(value, format: .percent.precision(.fractionLength(0)))
-                .monospacedDigit()
-                .foregroundStyle(Color.primary)
-                .frame(width: metrics(64))
-                .accessibilityIdentifier("\(identifier)Percent")
-            Button(action: increase) { Image(systemName: "plus") }
-                .accessibilityLabel("Increase \(name)")
-                .accessibilityIdentifier("\(identifier)Increase")
-                .disabled(!canIncrease)
-            Button("Reset", action: reset)
-                .accessibilityLabel("Reset \(name)")
-                .accessibilityIdentifier("\(identifier)Reset")
-        }
-        .accessibilityElement(children: .contain)
     }
 }

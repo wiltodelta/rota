@@ -34,87 +34,6 @@ final class JSONRPCPeerTests: XCTestCase {
         wait(for: [replied, notified], timeout: 2)
     }
 
-    func testServerRequestCanWaitForUserAndOnlyReplyOnce() {
-        let transport = LoopbackTransport()
-        let peer = JSONRPCPeer(transport: transport)
-        var respond: ((Any?) -> Void)?
-        peer.onAsyncRequest = { method, params, identity, reply in
-            XCTAssertEqual(identity, #"["provider-id"]"#)
-            XCTAssertEqual(method, "item/commandExecution/requestApproval")
-            XCTAssertEqual(params["command"] as? String, "echo sample")
-            respond = reply
-        }
-        transport.deliver(#"{"id":"provider-id","method":"item/commandExecution/requestApproval","params": "#
-                          + #"{"command":"echo sample"}}"#)
-        XCTAssertTrue(transport.sent.isEmpty)
-        XCTAssertNotNil(respond)
-        respond?(["decision": "decline"])
-        respond?(["decision": "accept"])
-        XCTAssertEqual(transport.sent.count, 1)
-        XCTAssertEqual(transport.sent[0]["id"] as? String, "provider-id")
-        XCTAssertEqual((transport.sent[0]["result"] as? [String: Any])?["decision"] as? String, "decline")
-    }
-
-    func testSteerWaitsForMatchingAcknowledgmentAndDoesNotRetryAnUnconfirmedWrite() {
-        let transport = LoopbackTransport()
-        let peer = JSONRPCPeer(transport: transport)
-        var deadline: (() -> Void)?
-        peer.scheduleTimeout = { seconds, work in XCTAssertEqual(seconds, 10); deadline = work }
-        var states: [MessageDelivery] = []
-        CodexDaemonRun.requestSteer(peer, message: "Change direction", threadID: "thread", turnID: "turn") {
-            states.append($0)
-        }
-        XCTAssertEqual(transport.sent.count, 1)
-        XCTAssertEqual(transport.sent[0]["method"] as? String, "turn/steer")
-        XCTAssertEqual((transport.sent[0]["params"] as? [String: Any])?["expectedTurnId"] as? String, "turn")
-        XCTAssertTrue(states.isEmpty, "a local send is not a delivery acknowledgment")
-        transport.deliver(#"{"jsonrpc":"2.0","id":1,"result":{"turnId":"turn"}}"#)
-        XCTAssertEqual(states, [.accepted])
-        deadline?()
-        XCTAssertEqual(states, [.accepted], "a resolved request cannot time out again")
-        CodexDaemonRun.requestSteer(peer, message: "Another message", threadID: "thread", turnID: "turn") {
-            states.append($0)
-        }
-        deadline?()
-        guard case .unconfirmed = states.last else { return XCTFail("timeout must preserve uncertainty") }
-        transport.deliver(#"{"jsonrpc":"2.0","id":2,"result":{"turnId":"turn"}}"#)
-        XCTAssertEqual(states.count, 2, "a late reply cannot resolve an expired request twice")
-        XCTAssertEqual(transport.sent.count, 2, "there is no automatic retry of a potentially applied write")
-    }
-
-    func testSteeringSendsNativeImageBlocksThroughTheRealPeer() throws {
-        let transport = LoopbackTransport()
-        let peer = JSONRPCPeer(transport: transport)
-        let image = ChatAttachment(id: UUID().uuidString, url: URL(fileURLWithPath: "/tmp/sample.png"),
-                                   name: "sample.png", mimeType: "image/png", size: 12)
-        var state: MessageDelivery?
-        CodexDaemonRun.requestSteer(peer, message: ChatMessage(text: "", attachments: [image]),
-                                   threadID: "thread", turnID: "turn") { state = $0 }
-        let request = try XCTUnwrap(transport.sent.first)
-        let params = try XCTUnwrap(request["params"] as? [String: Any])
-        let input = try XCTUnwrap(params["input"] as? [[String: String]])
-        XCTAssertEqual(input, [["type": "localImage", "path": "/tmp/sample.png"]])
-        transport.deliver(#"{"jsonrpc":"2.0","id":1,"result":{"turnId":"turn"}}"#)
-        XCTAssertEqual(state, .accepted)
-    }
-
-    func testSteerRejectsAnotherTurnAndKeepsProviderError() {
-        let transport = LoopbackTransport()
-        let peer = JSONRPCPeer(transport: transport)
-        peer.scheduleTimeout = { _, _ in }
-        var state: MessageDelivery?
-        CodexDaemonRun.requestSteer(peer, message: "Change direction", threadID: "thread", turnID: "turn") {
-            state = $0
-        }
-        transport.deliver(#"{"jsonrpc":"2.0","id":1,"result":{"turnId":"other-turn"}}"#)
-        XCTAssertEqual(state, .failed("The active turn changed."))
-        CodexDaemonRun.requestSteer(peer, message: "Change direction", threadID: "thread", turnID: "turn") {
-            state = $0
-        }
-        transport.deliver(#"{"jsonrpc":"2.0","id":2,"error":{"code":1,"message":"Steering unavailable"}}"#)
-        XCTAssertEqual(state, .failed("Steering unavailable"))
-    }
-
     func testRequestGetsItsOwnReply() {
         let transport = LoopbackTransport()
         let peer = JSONRPCPeer(transport: transport)
@@ -188,34 +107,14 @@ final class WebSocketFrameTests: XCTestCase {
 }
 
 final class LiveRunPieceTests: XCTestCase {
-    func testClaudeToolResultsRemainVisible() {
-        let event = #"""
-        {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"call-1",
-        "content":"Permission denied","is_error":true}]}}
-        """#
-        let formatted = StreamJSONFormatter.format(event)
-        XCTAssertNotNil(formatted)
-        XCTAssertTrue(formatted?.contains("call-1") == true)
-        XCTAssertTrue(formatted?.contains("Permission denied") == true)
-    }
-
-    func testGrokQueueAcknowledgmentMatchesTheInstalledLeaderResponse() {
-        XCTAssertEqual(GrokACPRun.interjectionDelivery(["result": ["status": "queued"]]), .queued)
-        XCTAssertEqual(GrokACPRun.interjectionDelivery(["accepted": true]), .accepted)
-        XCTAssertEqual(GrokACPRun.interjectionDelivery(["accepted": false]),
-                       .failed("Grok did not accept the interjection."))
-        XCTAssertEqual(GrokACPRun.interjectionDelivery(["result": ["status": "unknown"]]),
-                       .unconfirmed("Grok did not confirm whether the message was queued."))
-    }
-
-    func testGrokDoesNotGrantRequestedPermissions() {
-        for options in [[], [["optionId": "yes", "kind": "allow_once"]],
-                        [["optionId": "always", "kind": "allow_always"],
-                         ["optionId": "no", "kind": "reject_once"]]] {
-            let answer = GrokACPRun.answer("session/request_permission", ["options": options]) as? [String: Any]
-            XCTAssertEqual((answer?["outcome"] as? [String: Any])?["outcome"] as? String, "cancelled")
-        }
+    func testGrokPermissionPicksAnAllowOption() {
+        let params: [String: Any] = ["options": [["optionId": "no", "kind": "reject_once"],
+                                                 ["optionId": "yes", "kind": "allow_once"]]]
+        let answer = GrokACPRun.answer("session/request_permission", params) as? [String: Any]
+        XCTAssertEqual((answer?["outcome"] as? [String: Any])?["optionId"] as? String, "yes")
         XCTAssertNil(GrokACPRun.answer("fs/read_text_file", [:]))
+        XCTAssertNil(GrokACPRun.answer("session/request_permission",
+                                       ["options": [["optionId": "no", "kind": "reject_once"]]]))
     }
 
     func testCodexItemDescriptions() {

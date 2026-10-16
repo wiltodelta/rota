@@ -14,6 +14,7 @@ final class Notifier: NSObject, RunNotifying, UNUserNotificationCenterDelegate {
     var open: (SidebarItem) -> Void = { _ in }
     /// Sends what the user typed into a notification's Reply field to its session.
     var reply: (UUID, String) -> Void = { _, _ in }
+    var canReply: (RunRecord) -> Bool = { _ in false }
     private static let replyCategory = "rota.reply"
     private static let replyAction = "reply"
 
@@ -73,18 +74,28 @@ final class Notifier: NSObject, RunNotifying, UNUserNotificationCenterDelegate {
 
     func sessionNotified(_ record: RunRecord?, routine: Routine?, title: String?, text: String, needsReply: Bool) {
         guard let center else { return }
+        let content = sessionContent(record, routine: routine, title: title, text: text, needsReply: needsReply)
+        let id = "notify-\(record?.id.uuidString ?? "rota")-\(UUID().uuidString)"
+        center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+        Self.log.info("Notified from \(record?.routineID ?? "outside a routine", privacy: .public)")
+    }
+
+    /// Build the same content used for delivery without requesting notification permission.
+    func sessionContent(_ record: RunRecord?, routine: Routine?, title: String?, text: String,
+                        needsReply: Bool) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = title ?? routine?.name ?? "Rota"
-        if needsReply { content.subtitle = "Needs your reply" }
+        if needsReply {
+            content.subtitle = record.map { canReply($0) ? "Needs your reply" : "Needs your attention" }
+                ?? "Needs your attention"
+        }
         content.body = text
         content.sound = .default
         if let record {
             content.userInfo = [Self.sessionKey: record.id.uuidString]
-            content.categoryIdentifier = Self.replyCategory
+            if canReply(record) { content.categoryIdentifier = Self.replyCategory }
         }
-        let id = "notify-\(record?.id.uuidString ?? "rota")-\(UUID().uuidString)"
-        center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
-        Self.log.info("Notified from \(record?.routineID ?? "outside a routine", privacy: .public)")
+        return content
     }
 
     nonisolated func userNotificationCenter(

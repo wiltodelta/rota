@@ -24,7 +24,6 @@ let usage = """
       notify TEXT [--title T] [--needs-reply]
                                    a notification from Rota; inside a routine it opens that
                                    session, and --needs-reply marks it until you answer
-      attach-terminal PATH         attach to a live terminal, Ctrl-] detaches
       mcp                          serve these as MCP tools over stdio
 
     Add --json for the raw answer. Schedules are five-field cron in local time;
@@ -208,17 +207,6 @@ func run(_ raw: [String]) throws {
     let arguments = try Arguments(raw)
     guard let command = arguments.positional.first, command != "help", !arguments.flags.contains("help") else {
         return print(usage)
-    }
-    if command == "attach-terminal" {
-        guard arguments.positional.count == 2 else { throw ControlError("attach-terminal needs a socket path.") }
-        return try TerminalAttachment.attach(arguments.positional[1])
-    }
-    if command == "claude-hook" {
-        guard arguments.positional.count == 2 else { throw ControlError("claude-hook needs an event name.") }
-        let socket = ProcessInfo.processInfo.environment["ROTA_CLAUDE_HOOK_SOCKET"].map { URL(fileURLWithPath: $0) }
-        let result = ClaudeHookClient.response(event: arguments.positional[1],
-                                               input: FileHandle.standardInput.readDataToEndOfFile(), socket: socket)
-        return printJSON(result)
     }
     if command == "mcp" { return MCPServer().serve() }
     let (method, params) = try requestFor(command, arguments)

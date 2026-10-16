@@ -102,7 +102,7 @@ public struct RunHistory: Sendable {
         (try? JSONFile.read([RunRecord].self, from: file(for: routineID))) ?? []
     }
 
-    /// Inserts or replaces `record` and drops the oldest records past the limit, with their logs.
+    /// Keeps running sessions, plus separate limits for finished sessions and skipped slots.
     public func upsert(_ record: RunRecord) throws {
         var records = self.records(for: record.routineID)
         if let index = records.firstIndex(where: { $0.id == record.id }) {
@@ -111,10 +111,25 @@ public struct RunHistory: Sendable {
             records.insert(record, at: 0)
         }
         records.sort { $0.startedAt > $1.startedAt }
-        for dropped in records.dropFirst(Self.limit) {
-            if let path = dropped.logPath { removeLog(path) }
+        var sessions = 0
+        var skips = 0
+        let retained = records.filter { item in
+            if item.outcome == .running { return true }
+            if item.isSkip {
+                skips += 1
+                return skips <= Self.limit
+            }
+            sessions += 1
+            return sessions <= Self.limit
         }
-        try JSONFile.write(Array(records.prefix(Self.limit)), to: file(for: record.routineID))
+        try JSONFile.write(retained, to: file(for: record.routineID))
+        let keptIDs = Set(retained.map(\.id))
+        let keptLogs = Set(retained.compactMap(\.logPath))
+        for dropped in records where !keptIDs.contains(dropped.id) {
+            if let path = dropped.logPath, !keptLogs.contains(path) {
+                try? FileManager.default.removeItem(atPath: path)
+            }
+        }
     }
 
     /// Marks runs left `running` by a previous launch as interrupted and returns them.
@@ -134,16 +149,9 @@ public struct RunHistory: Sendable {
 
     public func removeAll(for routineID: String) {
         for record in records(for: routineID) {
-            if let path = record.logPath { removeLog(path) }
+            if let path = record.logPath { try? FileManager.default.removeItem(atPath: path) }
         }
         try? FileManager.default.removeItem(at: file(for: routineID))
-    }
-
-    private func removeLog(_ path: String) {
-        let log = URL(fileURLWithPath: path)
-        try? FileManager.default.removeItem(at: log)
-        try? FileManager.default.removeItem(at: SessionEventReader.file(for: log))
-        try? FileManager.default.removeItem(at: log.deletingPathExtension().appendingPathExtension("attachments"))
     }
 
     public func logFile(for record: RunRecord) -> URL {

@@ -4,7 +4,6 @@ import SwiftUI
 /// A routine: when it runs next, the switch that pauses it, Run Now, and its
 /// sessions. Its settings change rarely, so they live in a sheet.
 struct RoutineDetail: View {
-    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     let routine: Routine
 
@@ -16,22 +15,26 @@ struct RoutineDetail: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-                .padding(.horizontal, metrics(20))
-                .padding(.vertical, metrics(14))
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+            HarnessWarnings(routine: routine)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 10)
             Divider()
             List(records) { record in
                 Button {
                     model.selection = .session(record.id)
                 } label: {
-                    HStack(spacing: metrics(8)) {
+                    HStack {
                         Text(record.startedAt.formatted(date: .abbreviated, time: .shortened))
                             .fontWeight(record.isUnread ? .semibold : .regular)
-                        Spacer(minLength: metrics(8))
+                        Spacer()
                         if record.attention != nil {
                             Image(systemName: "exclamationmark.bubble.fill")
                                 .foregroundStyle(.orange)
-                                .help("Needs your reply")
-                                .accessibilityLabel("Needs your reply")
+                                .help(model.scheduler.canMessage(record) ? "Needs your reply" : "Needs your attention")
+                                .accessibilityLabel(model.scheduler.canMessage(record)
+                                    ? "Needs your reply" : "Needs your attention")
                         }
                         Text(record.outcome.title)
                             .foregroundStyle(record.outcome.isFailure && !record.isSkip
@@ -45,12 +48,12 @@ struct RoutineDetail: View {
                 if records.isEmpty { Text("No sessions yet").foregroundStyle(Color.secondaryText) }
             }
         }
-        .frame(minWidth: min(520, metrics(520)), maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(routine.name)
         .sheet(isPresented: Binding(
             get: { model.editingRoutineID == routine.id },
             set: { if !$0 { model.editingRoutineID = nil } }
-        )) { EditRoutineSheet(routine: routine).appZoom() }
+        )) { EditRoutineSheet(routine: routine) }
         .onAppear {
             // Development hook: open the editor for a capture script.
             if ProcessInfo.processInfo.environment["ROTA_OPEN_EDIT"] != nil { model.editingRoutineID = routine.id }
@@ -58,19 +61,19 @@ struct RoutineDetail: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: metrics(12)) {
-            VStack(alignment: .leading, spacing: metrics(3)) {
-                Text(ScheduleText.describe(routine.schedule) ?? routine.schedule).scaledFont(.callout)
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(ScheduleText.describe(routine.schedule) ?? routine.schedule).font(.callout)
                 // Only the folder gives way when the line is short of room.
                 HStack(spacing: 0) {
                     Text("\(state) \u{00B7} \(harness) \u{00B7} ").layoutPriority(1)
                     Text(routine.workingDirectory).truncationMode(.middle)
                 }
-                .scaledFont(.caption)
+                .font(.caption)
                 .foregroundStyle(Color.secondaryText)
                 .lineLimit(1)
             }
-            Spacer(minLength: metrics(12))
+            Spacer(minLength: 12)
             Toggle("On", isOn: Binding(
                 get: { routine.enabled },
                 set: { model.scheduler.setEnabled($0, for: routine.id) }
@@ -110,7 +113,6 @@ struct RoutineDetail: View {
 
 /// The routine's settings, edited as a draft and saved together.
 struct EditRoutineSheet: View {
-    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let routine: Routine
@@ -127,12 +129,12 @@ struct EditRoutineSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             SheetTitle(text: "Edit Routine")
             RoutineForm(draft: $draft)
-            HStack(spacing: metrics(8)) {
+            HStack {
                 Button("Delete Routine\u{2026}", role: .destructive) { confirmingDelete = true }
-                Spacer(minLength: metrics(12))
+                Spacer(minLength: 12)
                 if let problem {
                     Text(problem)
-                        .scaledFont(.callout)
+                        .font(.callout)
                         .foregroundStyle(Color.secondaryText)
                         .lineLimit(2)
                         .accessibilityIdentifier("sheetProblem")
@@ -144,16 +146,14 @@ struct EditRoutineSheet: View {
                     dismiss()
                 }
                 .accessibilityIdentifier("saveRoutine")
-                .buttonStyle(InterfaceButtonStyle(prominent: true))
                 .keyboardShortcut(.defaultAction)
                 .disabled(draft == routine || problem != nil)
             }
-            .padding(metrics(16))
+            .padding(16)
         }
         // Fits the window at its minimum height; the form scrolls inside.
-        .frame(width: metrics.sheetWidth(600))
-        .frame(minHeight: metrics.sheetHeight(360),
-               idealHeight: metrics.sheetHeight(500))
+        .frame(width: 600)
+        .frame(minHeight: 360, idealHeight: 500)
         .confirmationDialog("Delete \(routine.name)?", isPresented: $confirmingDelete) {
             Button("Delete", role: .destructive) {
                 dismiss()

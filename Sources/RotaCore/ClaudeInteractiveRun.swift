@@ -1,28 +1,35 @@
 import Foundation
 import os
 
-/// Interactive Claude on a directly owned controlling PTY. Structured chat still
-/// comes from Claude's transcript; terminal bytes remain available through a
-/// private attachment socket for native permission and question dialogs.
+/// A Claude routine run as an interactive `claude`, the way a terminal session
+/// runs, inside a detached `screen` session that gives it a terminal. Print mode
+/// (`claude -p`, `ClaudeStreamRun`) never loads Claude's built-in computer use;
+/// an interactive session does, where the user turned it on.
+///
+/// The chat comes from Claude's own transcript
+/// (`~/.claude/projects/<folder>/<session>.jsonl`): its assistant entries have
+/// the stream-json shape `StreamJSONFormatter` reads, and a
+/// `system`/`turn_duration` entry marks the end of a turn. Messages are typed
+/// into the terminal as a bracketed paste, so a line break stays a line break.
+/// Once the last turn has ended with no message waiting, the run types `/exit`.
+/// "Open in Terminal" attaches to the screen session, where the user can answer
+/// whatever Claude asks there; a `Notification` hook marks the session
+/// needs-reply when Claude waits for that.
 final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     static let log = Logger(subsystem: "com.wiltodelta.rota", category: "claude")
 
     private let spec: LaunchSpec
     private let journal: RunJournal
     private let session: String
-    private var process: PTYProcess?
-    private var terminal: PTYTerminal?
-    private var hookServer: ClaudeHookServer?
-    private var settingsFile: URL?
-    private lazy var requests = SessionRequests(changed: journal.requests)
+    private let name: String
+    private let exitFile: URL
+    private let script: URL
     private let queue = DispatchQueue(label: "com.wiltodelta.rota.claude-interactive")
     private var transcript: URL?
     private var offset: UInt64 = 0
     private var partial = Data()
     /// The prompt is in the log already; its transcript entry is skipped once.
     private var promptPending = true
-    /// Input arriving during CLI startup waits for its first transcript entry.
-    private var startupMessages: [(ChatMessage, String)] = []
     /// Messages typed in and not yet seen in the transcript.
     private var unanswered = 0
     private var turnEnded = false
@@ -30,36 +37,34 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     private var exiting = false
     private var stopReason: RunOutcome?
     private var headerWritten = false
-    private let mapper = ClaudeEventMapper()
 
-    private init(spec: LaunchSpec, journal: RunJournal, session: String) {
+    private init(spec: LaunchSpec, journal: RunJournal, session: String, folder: URL) {
         self.spec = spec
         self.journal = journal
         self.session = session
+        name = Self.screenName(session)
+        exitFile = folder.appendingPathComponent("\(name).exit")
+        script = folder.appendingPathComponent("\(name).zsh")
     }
 
-    var attachCommand: [String]? {
-        guard let terminal, let cli = spec.environment["ROTA_CLI"] else { return nil }
-        return [cli, "attach-terminal", terminal.path]
+    var attachCommand: [String]? { [ScreenRun.screen, "-r", name] }
+
+    static func screenName(_ session: String) -> String { "rota-claude-" + session.prefix(8).lowercased() }
+
+    /// Whether a screen session of that name is still up.
+    static func alive(_ name: String) -> Bool {
+        let (_, output) = ProcessLauncher.capture(ScreenRun.screen, ["-ls", name], in: NSTemporaryDirectory(),
+                                                  loginShell: false)
+        return output.contains(".\(name)")
     }
 
     static func start(_ spec: LaunchSpec, journal: RunJournal) throws -> ClaudeInteractiveRun {
         let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Rota/terminal")
+            .appendingPathComponent("Rota/screen")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let session = spec.resume ?? UUID().uuidString.lowercased()
-        let run = ClaudeInteractiveRun(spec: spec, journal: journal, session: session)
-        let hookServer = try ClaudeHookServer(folder: folder, queue: run.queue)
-        run.hookServer = hookServer
-        hookServer.received = { [weak run] id, payload, reply in run?.hook(id, payload: payload, reply: reply) }
-        hookServer.disconnected = { [weak run] id in run?.requests.cancel(id, notifyProvider: false) }
-        do { try run.launch(settings: try hookSettings(in: folder, session: session), folder: folder) } catch {
-            run.queue.sync {
-                hookServer.close()
-                if let file = run.settingsFile { try? FileManager.default.removeItem(at: file) }
-            }
-            throw error
-        }
+        let run = ClaudeInteractiveRun(spec: spec, journal: journal, session: session, folder: folder)
+        try run.launch(settings: try hookSettings(in: folder))
         return run
     }
 
@@ -67,59 +72,49 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     /// then the prompt after `--`, so a prompt starting with a dash stays a prompt.
     static func arguments(session: String, resume: Bool, settings: String, model: [String],
                           prompt: String) -> [String] {
-        [resume ? "--resume" : "--session-id", session, "--settings", settings] + model + ["--", prompt]
+        [resume ? "--resume" : "--session-id", session, "--settings", settings,
+         "--permission-mode", "bypassPermissions"] + model + ["--", prompt]
     }
 
-    /// Per-run hooks collect question answers and one-time permissions through Rota.
-    /// Native prompts outside those hooks still mark the session needs-reply.
-    static func hookSettings(in folder: URL, session: String = UUID().uuidString) throws -> URL {
-        let command = #"[ -n "$ROTA_SESSION" ] && [ -n "$ROTA_CLI" ] && "$ROTA_CLI" notify --needs-reply "#
+    /// Settings Rota adds to the user's for its runs: when Claude waits for the
+    /// user in its terminal (a permission or an app it asks to use), the
+    /// session is marked needs-reply through the `rota` command the run carries.
+    static func hookSettings(in folder: URL) throws -> URL {
+        let command = #"[ -n "$ROTA_CLI" ] && "$ROTA_CLI" notify --needs-reply "#
             + #""Claude is waiting for you in its terminal. Open the session in Terminal to answer.""#
-        func hook(_ event: String) -> [String: Any] {
-            let fallback = ClaudeHookClient.denied(event: event, reason: "The Rota hook helper is unavailable.")
-            let json = (try? JSONSerialization.data(withJSONObject: fallback)).map(lossyUTF8) ?? "{}"
-            let command = #""$ROTA_CLI" claude-hook "# + event + " || printf '%s\n' " + shellQuote(json)
-            return ["type": "command", "command": command, "timeout": Int(ClaudeHookClient.timeout) + 5]
-        }
-        let settings: [String: Any] = ["hooks": [
-            "PreToolUse": [["matcher": "AskUserQuestion", "hooks": [hook("PreToolUse")]]],
-            "PermissionRequest": [["hooks": [hook("PermissionRequest")]]],
-            "Notification": [[
+        let settings: [String: Any] = ["hooks": ["Notification": [[
             "matcher": "permission_prompt|elicitation_dialog",
             "hooks": [["type": "command", "command": command]]
         ]]]]
-        let file = folder.appendingPathComponent(session + "-" + UUID().uuidString + "-settings.json")
+        let file = folder.appendingPathComponent("claude-settings.json")
         try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]).write(to: file)
         return file
     }
 
-    private func launch(settings: URL, folder: URL) throws {
-        settingsFile = settings
+    static func scriptText(executable: String, arguments: [String], directory: String, exitFile: URL) -> String {
+        """
+        cd \(shellQuote(directory)) || { print -r -- 1 > \(shellQuote(exitFile.path)); exit 1 }
+        \(([executable] + arguments).map(shellQuote).joined(separator: " "))
+        print -r -- $? > \(shellQuote(exitFile.path))
+        """
+    }
+
+    private func launch(settings: URL) throws {
         let arguments = Self.arguments(session: session, resume: spec.resume != nil, settings: settings.path,
-                                       model: spec.modelFlags(effortFlag: "--effort"),
-                                       prompt: spec.chatMessage.fileReferenceText)
+                                       model: spec.modelFlags(effortFlag: "--effort"), prompt: spec.prompt)
+        try Self.scriptText(executable: spec.executable, arguments: arguments, directory: spec.workingDirectory,
+                            exitFile: exitFile).write(to: script, atomically: true, encoding: .utf8)
+        try? FileManager.default.removeItem(at: exitFile)
+        // A continued session appends to its transcript: read from where it ends now.
         if let existing = Self.transcriptFile(session) {
             transcript = existing
             offset = (try? FileManager.default.attributesOfItem(atPath: existing.path)[.size] as? UInt64) ?? 0
         }
-        var environment = ProcessLauncher.baseEnvironment().merging(spec.environment) { $1 }
-        environment["TERM"] = "xterm-256color"
-        environment["ROTA_CLAUDE_HOOK_SOCKET"] = hookServer?.path
-        let process = try PTYProcess(executable: "/bin/zsh", arguments: ["-lc", "exec \"$0\" \"$@\"",
-                                    spec.executable] + arguments,
-                                    directory: spec.workingDirectory, environment: environment, queue: queue)
-        do {
-            let terminal = try PTYTerminal(process: process, queue: queue, folder: folder)
-            self.terminal = terminal
-            process.output = { [weak terminal] data in terminal?.publish(data) }
-        } catch {
-            process.terminate()
-            process.start()
-            throw error
-        }
-        self.process = process
-        process.exited = { [weak self] status in self?.finish(status: status) }
-        process.start()
+        let process = ProcessLauncher.loginShellProcess(ScreenRun.screen, ["-dmS", name, "/bin/zsh", "-l", script.path],
+                                                        in: spec.workingDirectory, environment: spec.environment)
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw LaunchError.screenFailed(process.terminationStatus) }
         journal.session(session)
         if let timeout = spec.timeout {
             queue.asyncAfter(deadline: .now() + timeout) { [weak self] in self?.end(as: .timedOut) }
@@ -137,51 +132,16 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
             .first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
-    func send(_ message: String) { send(message, id: UUID().uuidString) }
-
-    func send(_ message: String, id: String) { send(ChatMessage(text: message), id: id) }
-
-    func send(_ message: ChatMessage, id: String) {
+    func send(_ message: String) {
         queue.async {
-            self.journal.user(message, id: id)
             guard !self.journal.isFinished, !self.exiting else {
-                return self.journal.delivery(id, .failed("The session is ending."))
+                return self.journal.line("[rota: message not delivered: the session is ending]")
             }
-            if self.promptPending {
-                self.startupMessages.append((message, id))
-            } else {
-                self.deliver(message, id: id)
-            }
+            self.unanswered += 1
+            self.turnEnded = false
+            self.type("\u{1B}[200~" + message + "\u{1B}[201~")
+            self.type("\r")
         }
-    }
-
-    private func deliver(_ message: ChatMessage, id: String) {
-        let ended = turnEnded
-        unanswered += 1
-        turnEnded = false
-        if type("\u{1B}[200~" + message.fileReferenceText + "\u{1B}[201~") && type("\r") {
-            journal.delivery(id, .written)
-        } else {
-            unanswered -= 1
-            turnEnded = ended
-            journal.delivery(id, .failed("Could not write to Claude's terminal."))
-        }
-    }
-
-    func respond(_ id: String, response: SessionResponse) {
-        queue.async { _ = self.requests.answer(id, response) }
-    }
-
-    private func hook(_ id: String, payload: [String: Any], reply: @escaping ([String: Any]) -> Void) {
-        let event = payload["hook_event_name"] as? String ?? "PermissionRequest"
-        guard !journal.isFinished, stopReason == nil, var hook = ClaudeHookRequest(payload, session: session) else {
-            let reason = "This request does not belong to a live Rota session."
-            return reply(ClaudeHookClient.denied(event: event, reason: reason))
-        }
-        hook.request.id = id
-        requests.add(hook.request, answer: { response in reply(hook.answer(response)) }, cancel: {
-            reply(ClaudeHookClient.denied(event: event, reason: "The Rota session has ended."))
-        })
     }
 
     func stop() {
@@ -193,18 +153,15 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     private func poll() {
         guard !journal.isFinished else { return }
         readTranscript()
-        if !promptPending, stopReason == nil, !exiting {
-            let waiting = startupMessages
-            startupMessages.removeAll()
-            for (message, id) in waiting { deliver(message, id: id) }
+        if let status = exitStatus ?? (isAlive() ? nil : exitStatus ?? -1) {
+            return finish(status: status)
         }
-        if turnEnded, unanswered == 0, requests.isEmpty, !exiting, stopReason == nil {
+        if turnEnded, unanswered == 0, !exiting, stopReason == nil {
             exiting = true
             type("/exit")
             type("\r")
             // Claude normally leaves at once; a session stuck in a dialog is closed.
-            queue.asyncAfter(deadline: .now() + 15) { [weak self] in self?.process?.terminate() }
-            queue.asyncAfter(deadline: .now() + 20) { [weak self] in self?.process?.forceKill() }
+            queue.asyncAfter(deadline: .now() + 15) { [weak self] in self?.quitScreen() }
         }
         // Strong on purpose: the run keeps itself alive until Claude exits.
         queue.asyncAfter(deadline: .now() + 1) { self.poll() }
@@ -225,36 +182,27 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         }
     }
 
-    private func consumeEvents(_ data: Data) {
-        if let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            for payload in mapper.events(event) { journal.event(payload) }
-        }
-    }
-
     private func handle(entry data: Data) {
-        consumeEvents(data)
         switch ClaudeTranscript.read(data) {
         case .user(let text):
-            journal.confirmUser(text)
             if promptPending, text.trimmingCharacters(in: .whitespacesAndNewlines)
-                == spec.chatMessage.fileReferenceText.trimmingCharacters(in: .whitespacesAndNewlines) {
+                == spec.prompt.trimmingCharacters(in: .whitespacesAndNewlines) {
                 promptPending = false
                 return
             }
             promptPending = false
             unanswered = max(0, unanswered - 1)
             turnEnded = false
-            journal.line(Transcript.userLines(text), structured: false)
+            journal.line(Transcript.userLines(text))
         case .queued(let text):
-            journal.confirmUser(text, queued: true)
             unanswered = max(0, unanswered - 1)
-            journal.line(Transcript.userLines(text), structured: false)
+            journal.line(Transcript.userLines(text))
         case .assistant(let model, let text):
             if !headerWritten, let model {
                 headerWritten = true
-                journal.line("[session started, \(model)]", structured: false)
+                journal.line("[session started, \(model)]")
             }
-            if let text { journal.line(text, structured: false) }
+            if let text { journal.line(text) }
         case .apiError(let text):
             failed = true
             journal.line("[error] \(text)")
@@ -265,17 +213,29 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         }
     }
 
-    @discardableResult
-    private func type(_ text: String) -> Bool { process?.write(Data(text.utf8)) ?? false }
+    private var exitStatus: Int32? {
+        guard let text = try? String(contentsOf: exitFile, encoding: .utf8) else { return nil }
+        return Int32(text.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private func isAlive() -> Bool { Self.alive(name) }
+
+    private func type(_ text: String) {
+        _ = ProcessLauncher.capture(ScreenRun.screen, ["-S", name, "-p", "0", "-X", "stuff", text],
+                                    in: NSTemporaryDirectory(), loginShell: false)
+    }
+
+    private func quitScreen() {
+        _ = ProcessLauncher.capture(ScreenRun.screen, ["-S", name, "-X", "quit"], in: NSTemporaryDirectory(),
+                                    loginShell: false)
+    }
 
     private func end(as reason: RunOutcome) {
         guard !journal.isFinished, stopReason == nil else { return }
         stopReason = reason
-        requests.cancelAll()
         // Escape interrupts the turn; then the session closes, its transcript saved as it went.
         type("\u{1B}")
-        queue.asyncAfter(deadline: .now() + 1) { [weak self] in self?.process?.terminate() }
-        queue.asyncAfter(deadline: .now() + 5) { [weak self] in self?.process?.forceKill() }
+        queue.asyncAfter(deadline: .now() + 1) { [weak self] in self?.quitScreen() }
     }
 
     private func finish(status: Int32) {
@@ -291,14 +251,10 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
             // Claude left before its work was done: a crash, or it refused to start.
             outcome = status == 0 ? .interrupted : .failed(exitCode: status)
         }
-        requests.cancelAll()
-        hookServer?.close()
-        hookServer = nil
-        if let settingsFile { try? FileManager.default.removeItem(at: settingsFile) }
         journal.finish(outcome)
         Self.log.info("interactive claude \(self.session, privacy: .public) ended: \(outcome.title, privacy: .public)")
-        terminal?.close()
-        terminal = nil
+        try? FileManager.default.removeItem(at: exitFile)
+        try? FileManager.default.removeItem(at: script)
     }
 }
 

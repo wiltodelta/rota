@@ -16,14 +16,6 @@ public enum StreamJSONFormatter {
             return "[session started, \(model)]"
         case "assistant":
             return assistantText(event)
-        case "user":
-            let blocks = (event["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
-            let results = blocks.compactMap { block -> String? in
-                guard block["type"] as? String == "tool_result", let id = block["tool_use_id"] as? String,
-                      let text = EventContent.text(block["content"]) else { return nil }
-                return "-> result \(id): \(text)"
-            }
-            return results.isEmpty ? nil : results.joined(separator: "\n")
         case "result":
             return resultText(event)
         default:
@@ -41,7 +33,9 @@ public enum StreamJSONFormatter {
             case "tool_use":
                 if item["name"] as? String == "TodoWrite",
                    let todos = (item["input"] as? [String: Any])?["todos"] as? [[String: Any]] {
-                    return PlanStep.lines(EventContent.plan(todos, textKey: "content"))
+                    return PlanStep.lines(todos.map {
+                        PlanStep(status: $0["status"] as? String, text: $0["content"] as? String ?? "")
+                    })
                 }
                 return "-> \(item["name"] as? String ?? "tool")\(toolDetail(item["input"]))"
             default:

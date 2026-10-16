@@ -7,7 +7,6 @@ import os
 final class CodexDaemonRun: RunControl, @unchecked Sendable {
     static let log = Logger(subsystem: "com.wiltodelta.rota", category: "codex")
 
-    private lazy var requests = SessionRequests(changed: journal.requests)
     private let spec: LaunchSpec
     private let journal: RunJournal
     private let queue = DispatchQueue(label: "com.wiltodelta.rota.codex")
@@ -16,8 +15,6 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     private var threadID: String?
     private var turnID: String?
     private var stopReason: RunOutcome?
-    private var serverRequests: [String: String] = [:]
-    private var fileChanges: [String: Any] = [:]
 
     private init(spec: LaunchSpec, journal: RunJournal) {
         self.spec = spec
@@ -30,48 +27,19 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         return run
     }
 
-    func respond(_ id: String, response: SessionResponse) {
-        queue.async { _ = self.requests.answer(id, response) }
-    }
-
     func stop() {
         queue.async { self.interrupt(as: .cancelled) }
     }
 
-    func send(_ message: String) { send(message, id: UUID().uuidString) }
-
-    func send(_ message: String, id: String) { send(ChatMessage(text: message), id: id) }
-
-    func send(_ message: ChatMessage, id: String) {
+    func send(_ message: String) {
         queue.async {
-            self.journal.user(message, id: id)
-            guard let threadID = self.threadID, let turnID = self.turnID,
-                  !self.journal.isFinished, self.stopReason == nil else {
-                return self.journal.delivery(id, .failed("The session cannot accept steering now."))
-            }
-            self.journal.line(Transcript.userLines(message.fileReferenceText), structured: false)
-            guard let peer = self.peer else { return self.journal.delivery(id, .failed("Connection closed.")) }
-            Self.requestSteer(peer, message: message, threadID: threadID, turnID: turnID) { state in
-                self.journal.delivery(id, state)
-            }
-        }
-    }
-
-    static func requestSteer(_ peer: JSONRPCPeer, message: String, threadID: String, turnID: String,
-                             reply: @escaping (MessageDelivery) -> Void) {
-        requestSteer(peer, message: ChatMessage(text: message), threadID: threadID, turnID: turnID, reply: reply)
-    }
-
-    static func requestSteer(_ peer: JSONRPCPeer, message: ChatMessage, threadID: String, turnID: String,
-                             reply: @escaping (MessageDelivery) -> Void) {
-        peer.request("turn/steer", ["threadId": threadID, "expectedTurnId": turnID,
-                                    "input": message.codexInput()], timeout: 10) { result in
-            switch result {
-            case .success(let value):
-                let acknowledged = (value as? [String: Any])?["turnId"] as? String == turnID
-                reply(acknowledged ? .accepted : .failed("The active turn changed."))
-            case .failure(let error):
-                reply(error.deliveryUncertain ? .unconfirmed(error.message) : .failed(error.message))
+            guard let threadID = self.threadID, let turnID = self.turnID, !self.journal.isFinished else { return }
+            self.journal.line(Transcript.userLines(message))
+            self.peer?.request("turn/steer", ["threadId": threadID, "expectedTurnId": turnID,
+                                              "input": [["type": "text", "text": message]]]) { result in
+                if case .failure(let error) = result {
+                    self.journal.line("[rota: message not delivered: \(error.message)]")
+                }
             }
         }
     }
@@ -79,7 +47,6 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     // MARK: On `queue`
 
     private func connect() {
-        guard !journal.isFinished else { return }
         let (status, output) = ProcessLauncher.capture(spec.executable, ["app-server", "daemon", "start"],
                                                        in: ProcessLauncher.helperDirectory)
         guard status == 0 else {
@@ -102,14 +69,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
                                                              output: stdout.fileHandleForReading),
                                callbackQueue: queue)
         peer.onNotification = { [weak self] method, params in self?.handle(method, params) }
-        peer.onAsyncRequest = { [weak self] method, params, wireID, reply in
-            guard let self else { return reply(nil) }
-            self.permission(method, params, wireID: wireID, reply: reply)
-        }
-        peer.onClose = { [weak self] in
-            self?.requests.cancelAll(notifyProvider: false)
-            self?.journal.finish(.interrupted)
-        }
+        peer.onClose = { [weak self] in self?.journal.finish(.interrupted) }
         self.peer = peer
         peer.request("initialize", ["clientInfo": ["name": "rota", "version": "1"]]) { [weak self] result in
             self?.initialized(result)
@@ -119,47 +79,21 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         }
     }
 
-    private func permission(_ method: String, _ params: [String: Any], wireID: String,
-                            reply: @escaping (Any?) -> Void) {
-        guard !journal.isFinished, stopReason == nil,
-              params["threadId"] as? String == threadID,
-              params["turnId"] as? String == turnID,
-              var request = RequestPresentation.codex(method, params) else { return reply(nil) }
-        if method == "item/fileChange/requestApproval", let item = params["itemId"] as? String {
-            var details = params
-            details["changes"] = fileChanges[item]
-            request.detail = RequestPresentation.detail(details)
-            if fileChanges[item] == nil {
-                request.detail += "\nThe provider has not supplied the changes for review."
-                request.choices.removeAll { $0.id == "allow" }
-            }
-        }
-        serverRequests[wireID] = request.id
-        requests.add(request, answer: { response in
-            self.serverRequests[wireID] = nil
-            reply(RequestPresentation.codexResponse(method, params, response))
-        }, cancel: { reply(RequestPresentation.codexResponse(method, params, .init(choice: "cancel"))) })
-    }
-
     private func initialized(_ result: Result<Any, JSONRPCError>) {
-        guard !journal.isFinished, stopReason == nil else { return disconnect() }
         guard case .success = result else { return fail(result, "initialize") }
         peer?.notify("initialized")
-        let params = Self.threadParameters(spec)
+        var params: [String: Any] = ["cwd": spec.workingDirectory, "approvalPolicy": "never",
+                                     "sandbox": "danger-full-access"]
+        if let model = spec.model { params["model"] = model }
+        // The daemon's commands inherit the daemon's environment, not this run's, so the
+        // run's variables reach them as a per-thread config override.
+        params["config"] = Self.configOverrides(spec.environment)
+        // A continued session loads its thread back onto the daemon and takes the next turn.
         let method = spec.resume == nil ? "thread/start" : "thread/resume"
+        if let thread = spec.resume { params["threadId"] = thread }
         peer?.request(method, params) { [weak self] result in
             self?.threadStarted(result)
         }
-    }
-
-    /// Omitted permission and sandbox fields let the daemon load the user's configuration.
-    static func threadParameters(_ spec: LaunchSpec) -> [String: Any] {
-        var params: [String: Any] = ["cwd": spec.workingDirectory]
-        if let model = spec.model { params["model"] = model }
-        let overrides = configOverrides(spec.environment)
-        if !overrides.isEmpty { params["config"] = overrides }
-        if let thread = spec.resume { params["threadId"] = thread }
-        return params
     }
 
     /// `shell_environment_policy.set.<NAME>` for each of the run's variables: dotted keys,
@@ -171,7 +105,6 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     }
 
     private func threadStarted(_ result: Result<Any, JSONRPCError>) {
-        guard !journal.isFinished, stopReason == nil else { return disconnect() }
         guard case .success(let value) = result,
               let thread = (value as? [String: Any])?["thread"] as? [String: Any],
               let id = thread["id"] as? String else {
@@ -180,12 +113,9 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         threadID = id
         // The header names the model the daemon picked, so a chosen one can be checked.
         let model = (value as? [String: Any])?["model"] as? String
-        if spec.resume == nil {
-            journal.line("[codex thread \(id)" + (model.map { ", \($0)" } ?? "") + "]", structured: false)
-        }
+        if spec.resume == nil { journal.line("[codex thread \(id)" + (model.map { ", \($0)" } ?? "") + "]") }
         journal.session(id)
-        journal.metadata(model: model, effort: (value as? [String: Any])?["reasoningEffort"] as? String ?? spec.effort)
-        var params: [String: Any] = ["threadId": id, "input": spec.chatMessage.codexInput()]
+        var params: [String: Any] = ["threadId": id, "input": [["type": "text", "text": spec.prompt]]]
         if let model = spec.model { params["model"] = model }
         if let effort = spec.effort { params["effort"] = effort }
         peer?.request("turn/start", params) { [weak self] result in
@@ -194,43 +124,21 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
                 return self?.fail(result, "turn/start") ?? ()
             }
             self?.turnID = turn["id"] as? String
-            if let self { self.journal.delivery(self.spec.messageID, .accepted) }
         }
     }
 
     private func handle(_ method: String, _ params: [String: Any]) {
-        if let thread = params["threadId"] as? String, thread != threadID { return }
-        if method == "serverRequest/resolved", let wireID = params["requestId"],
-           let id = serverRequests.removeValue(forKey: JSONRPCPeer.requestIdentity(wireID)) {
-            requests.cancel(id, notifyProvider: false)
-        }
-        if method == "turn/started", turnID == nil {
-            turnID = (params["turn"] as? [String: Any])?["id"] as? String
-        }
-        if let turn = params["turnId"] as? String, let turnID, turn != turnID { return }
-        if method == "item/started" || method == "item/completed",
-           let item = params["item"] as? [String: Any], item["type"] as? String == "fileChange",
-           let id = item["id"] as? String { fileChanges[id] = item["changes"] }
-        for payload in CodexEventMapper.events(method, params) { journal.event(payload) }
-        logEvent(method, params)
-    }
-
-    private func logEvent(_ method: String, _ params: [String: Any]) {
         switch method {
         case "item/started":
-            if let line = Self.describe(started: params["item"] as? [String: Any]) {
-                journal.line(line, structured: false)
-            }
+            if let line = Self.describe(started: params["item"] as? [String: Any]) { journal.line(line) }
         case "item/completed":
             let item = params["item"] as? [String: Any]
-            if item?["type"] as? String == "agentMessage", let text = item?["text"] as? String {
-                journal.line(text, structured: false)
-            }
+            if item?["type"] as? String == "agentMessage", let text = item?["text"] as? String { journal.line(text) }
         case "turn/plan/updated":
             let steps = (params["plan"] as? [[String: Any]] ?? []).map {
                 PlanStep(status: $0["status"] as? String, text: $0["step"] as? String ?? "")
             }
-            if !steps.isEmpty { journal.line(PlanStep.lines(steps), structured: false) }
+            if !steps.isEmpty { journal.line(PlanStep.lines(steps)) }
         case "turn/completed":
             turnCompleted(params["turn"] as? [String: Any])
         default:
@@ -239,7 +147,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     }
 
     private func turnCompleted(_ turn: [String: Any]?) {
-        guard let turnID, turn?["id"] as? String == turnID else { return }
+        guard turn?["id"] as? String == turnID || turnID == nil else { return }
         let outcome: RunOutcome
         switch turn?["status"] as? String {
         case "completed": outcome = .succeeded
@@ -264,7 +172,6 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
 
     private func interrupt(as reason: RunOutcome) {
         guard !journal.isFinished else { return }
-        requests.cancelAll()
         stopReason = reason
         guard let threadID, let turnID else {
             journal.finish(reason)
@@ -284,8 +191,6 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     }
 
     private func disconnect() {
-        requests.cancelAll()
-        serverRequests.removeAll()
         peer?.close()
         proxy?.terminate()
     }

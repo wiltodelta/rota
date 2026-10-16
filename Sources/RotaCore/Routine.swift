@@ -64,6 +64,13 @@ public struct Routine: Codable, Identifiable, Equatable, Sendable {
         """
     }
 
+    /// The project skill this routine hands off to, when it follows the
+    /// `.claude/skills/<id>/SKILL.md` convention.
+    public var skillFile: URL {
+        URL(fileURLWithPath: workingDirectory)
+            .appendingPathComponent(".claude/skills/\(id)/SKILL.md")
+    }
+
     /// Lowercase letters, digits, - and _: an id names a file and a skill folder.
     public static func isValidID(_ id: String) -> Bool {
         let allowed = CharacterSet.lowercaseLetters.union(.decimalDigits).union(CharacterSet(charactersIn: "-_"))
@@ -94,5 +101,30 @@ public struct Routine: Codable, Identifiable, Equatable, Sendable {
             return "A time limit is 1 to 1440 minutes, or none."
         }
         return nil
+    }
+}
+
+/// What a routine's skill depends on, read from the skill text.
+public enum SkillRequirements {
+    static let markers: [(Capability, [String])] = [
+        (.chrome, ["mcp__claude-in-chrome__", "Claude in Chrome", "Chrome MCP"]),
+        (.push, ["PushNotification"])
+    ]
+
+    public static func scan(_ text: String) -> Set<Capability> {
+        Set(markers.filter { _, needles in needles.contains { text.contains($0) } }.map(\.0))
+    }
+
+    public static func scan(file: URL) -> Set<Capability> {
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return [] }
+        return scan(text)
+    }
+
+    /// The capabilities `harness` cannot serve as the skill is written.
+    public static func gaps(_ needs: Set<Capability>, on harness: Harness) -> [(Capability, CapabilitySupport)] {
+        Capability.allCases.filter(needs.contains).compactMap { capability in
+            let support = harness.support(for: capability)
+            return support == .native ? nil : (capability, support)
+        }
     }
 }

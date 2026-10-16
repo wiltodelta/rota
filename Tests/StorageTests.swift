@@ -60,6 +60,24 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(closed[0].endedAt, Date(timeIntervalSince1970: 60))
     }
 
+    func testModelSnapshotRoundTripsAndOldRecordsDecodeWithoutIt() throws {
+        var record = RunRecord(routineID: "a", trigger: .manual, harness: .codex,
+                               startedAt: Date(timeIntervalSince1970: 0), outcome: .succeeded)
+        record.model = "gpt-6-luna"
+        record.effort = "high"
+        let history = RunHistory(location: location)
+        try history.upsert(record)
+        XCTAssertEqual(history.records(for: "a"), [record])
+        var old = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONFile.encoder.encode(record))
+            as? [String: Any])
+        old.removeValue(forKey: "model")
+        old.removeValue(forKey: "effort")
+        let decoded = try JSONFile.decoder.decode(RunRecord.self, from: JSONSerialization.data(withJSONObject: old))
+        XCTAssertNil(decoded.model)
+        XCTAssertNil(decoded.effort)
+        XCTAssertEqual(decoded.id, record.id)
+    }
+
     func testImportReadsRegistrationsAndStubBodies() throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let stub = directory.appendingPathComponent("stub.md")

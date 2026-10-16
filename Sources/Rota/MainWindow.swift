@@ -12,75 +12,38 @@ enum SidebarItem: Hashable {
 struct MainWindow: View {
     @Environment(AppModel.self) private var model
 
-    private var metrics: InterfaceMetrics { InterfaceMetrics(scale: model.appZoom.scale) }
-
     private var records: [RunRecord] {
         _ = model.scheduler.historyVersion
         return model.scheduler.allRecords()
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            splitView(width: geometry.size.width)
-        }
-    }
-
-    private func splitView(width: CGFloat) -> some View {
         @Bindable var model = model
         let records = records
-        let sidebarWidth = max(120, width - 1 - min(520, width * 0.64))
         // Dragging the divider shut hides the list too, and the binding keeps that.
-        return NavigationSplitView(columnVisibility: Binding(
+        NavigationSplitView(columnVisibility: Binding(
             get: { model.sidebarVisible ? .all : .detailOnly },
             set: { model.sidebarVisible = $0 != .detailOnly }
         )) {
-            sidebar(records, width: sidebarWidth)
-        } detail: {
-            detail(records)
-                .appZoom()
-                .frame(minWidth: min(metrics(520), width - sidebarWidth - 1))
-        }
-        .navigationTitle("Rota")
-        .toolbar { toolbarItems }
-        .sheet(isPresented: $model.presentingImport) { ImportSheet().appZoom() }
-        .sheet(isPresented: $model.presentingNew) { NewRoutineSheet().appZoom() }
-        .alert("Rota", isPresented: Binding(
-            get: { model.scheduler.lastError != nil },
-            set: { if !$0 { model.scheduler.lastError = nil } }
-        )) {
-            Button("OK") { model.scheduler.lastError = nil }
-        } message: {
-            Text(model.scheduler.lastError ?? "")
-        }
-        .onAppear {
-            if model.selection == nil { model.selection = records.first.map { .session($0.id) } }
-        }
-    }
-
-    private func sidebar(_ records: [RunRecord], width sidebarWidth: CGFloat) -> some View {
-        @Bindable var model = model
-            return List(selection: $model.selection) {
+            List(selection: $model.selection) {
                 ForEach(DayGroup.group(records), id: \.title) { group in
-                    Section {
+                    Section(group.title) {
                         ForEach(group.records) { record in
                             SessionRow(record: record).tag(SidebarItem.session(record.id))
                         }
-                    } header: {
-                        Text(group.title).scaledFont(.headline).foregroundStyle(Color.secondaryText)
                     }
                 }
-                Section {
+                Section("Routines") {
                     ForEach(model.scheduler.routines) { routine in
-                        HStack(spacing: metrics(8)) {
+                        HStack(spacing: 8) {
                             StatusDot(routine: routine)
-                            Text(routine.name).scaledFont(.body).lineLimit(1)
+                            Text(routine.name).lineLimit(1)
                         }
                         .tag(SidebarItem.routine(routine.id))
                     }
-                } header: {
-                    Text("Routines").scaledFont(.headline).foregroundStyle(Color.secondaryText)
                 }
             }
+            .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
             .overlay {
                 if model.scheduler.routines.isEmpty {
                     ContentUnavailableView {
@@ -92,55 +55,43 @@ struct MainWindow: View {
                     }
                 }
             }
-            .appZoom()
-            .frame(maxWidth: sidebarWidth)
-            .navigationSplitViewColumnWidth(min: min(240, metrics(240)),
-                                            ideal: min(metrics(280), sidebarWidth),
-                                            max: min(metrics(360), sidebarWidth))
-    }
-
-    @ToolbarContentBuilder
-    private var toolbarItems: some ToolbarContent {
-        if #available(macOS 26, *) {
-            sidebarToolbarItem.sharedBackgroundVisibility(.hidden)
-            routineToolbarItems.sharedBackgroundVisibility(.hidden)
-        } else {
-            sidebarToolbarItem
-            routineToolbarItems
+        } detail: {
+            detail(records)
         }
-    }
-
-    private var sidebarToolbarItem: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            Button { model.sidebarVisible.toggle() } label: {
-                Label(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.left")
+        .navigationTitle("Rota")
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button { model.sidebarVisible.toggle() } label: {
+                    Label(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.left")
+                }
+                .help("\(model.sidebarVisible ? "Hide" : "Show") the sidebar (Control-Command-S)")
+                .accessibilityIdentifier("toggleSidebar")
             }
-            .help("\(model.sidebarVisible ? "Hide" : "Show") the sidebar (Control-Command-S)")
-            .accessibilityIdentifier("toggleSidebar")
-            .buttonStyle(.borderless)
-            .font(.system(size: max(10, 14 * model.appZoom.scale)))
-            .controlSize(.regular)
+            ToolbarItemGroup {
+                Button { model.presentingImport = true } label: {
+                    Label("Import Routines", systemImage: "square.and.arrow.down")
+                }
+                .help("Import routines from Claude Desktop or Codex")
+                .accessibilityIdentifier("import")
+                Button { model.presentingNew = true } label: {
+                    Label("New Routine", systemImage: "plus")
+                }
+                .help("New Routine")
+                .accessibilityIdentifier("newRoutine")
+            }
         }
-    }
-
-    private var routineToolbarItems: some ToolbarContent {
-        ToolbarItemGroup {
-            Button { model.presentingImport = true } label: {
-                Label("Import Routines", systemImage: "square.and.arrow.down")
-            }
-            .help("Import routines from Claude Desktop or Codex")
-            .accessibilityIdentifier("import")
-            .buttonStyle(.borderless)
-            .font(.system(size: max(10, 14 * model.appZoom.scale)))
-            .controlSize(.regular)
-            Button { model.presentingNew = true } label: {
-                Label("New Routine", systemImage: "plus")
-            }
-            .help("New Routine")
-            .accessibilityIdentifier("newRoutine")
-            .buttonStyle(.borderless)
-            .font(.system(size: max(10, 14 * model.appZoom.scale)))
-            .controlSize(.regular)
+        .sheet(isPresented: $model.presentingImport) { ImportSheet() }
+        .sheet(isPresented: $model.presentingNew) { NewRoutineSheet() }
+        .alert("Rota", isPresented: Binding(
+            get: { model.scheduler.lastError != nil },
+            set: { if !$0 { model.scheduler.lastError = nil } }
+        )) {
+            Button("OK") { model.scheduler.lastError = nil }
+        } message: {
+            Text(model.scheduler.lastError ?? "")
+        }
+        .onAppear {
+            if model.selection == nil { model.selection = records.first.map { .session($0.id) } }
         }
     }
 
@@ -217,29 +168,27 @@ struct DayGroup {
 }
 
 private struct SessionRow: View {
-    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
 
     var body: some View {
-        HStack(spacing: metrics(8)) {
+        HStack(spacing: 8) {
             Group {
                 if record.outcome == .running {
                     // A working session spins, as in super.engineering's list.
-                    ProgressView().controlSize(.mini).frame(width: metrics(8), height: metrics(8))
+                    ProgressView().controlSize(.mini).frame(width: 8, height: 8)
                 } else {
                     dot(color, size: 8)
                 }
             }
             .accessibilityElement()
             .accessibilityLabel(record.outcome.title)
-            VStack(alignment: .leading, spacing: metrics(1)) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(model.scheduler.routine(record.routineID)?.name ?? record.routineID)
-                    .scaledFont(.body)
                     .fontWeight(record.isUnread ? .semibold : .regular)
                     .lineLimit(1)
                 Text(details)
-                    .scaledFont(.caption)
+                    .font(.caption)
                     .foregroundStyle(Color.secondaryText)
                     .lineLimit(1)
             }
@@ -247,8 +196,9 @@ private struct SessionRow: View {
             if record.attention != nil {
                 Image(systemName: "exclamationmark.bubble.fill")
                     .foregroundStyle(.orange)
-                    .help("Needs your reply")
-                    .accessibilityLabel("Needs your reply")
+                    .help(model.scheduler.canMessage(record) ? "Needs your reply" : "Needs your attention")
+                    .accessibilityLabel(model.scheduler.canMessage(record)
+                        ? "Needs your reply" : "Needs your attention")
             } else if record.isUnread {
                 dot(.accentColor, size: 7)
                     .accessibilityLabel("Unread")
@@ -260,12 +210,8 @@ private struct SessionRow: View {
         Circle()
             .fill(fill)
             // The selected row's accent fill hides a blue or green dot.
-            .overlay {
-                if model.selection == .session(record.id) {
-                    Circle().strokeBorder(.white, lineWidth: metrics(1.5))
-                }
-            }
-            .frame(width: metrics(size), height: metrics(size))
+            .overlay { if model.selection == .session(record.id) { Circle().strokeBorder(.white, lineWidth: 1.5) } }
+            .frame(width: size, height: size)
     }
 
     private var details: String {
@@ -277,6 +223,7 @@ private struct SessionRow: View {
 
     private var color: Color {
         if record.outcome == .running { return .blue }
+        if record.outcome == .cancelled { return Color.secondary }
         return record.outcome.isFailure ? .red : .green
     }
 }

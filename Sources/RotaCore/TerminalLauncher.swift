@@ -45,34 +45,21 @@ public enum TerminalLauncher {
 
     /// Opens `script` in the app at `app`, or in the default terminal when nil.
     public static func open(_ script: URL, in app: URL?, completion: @escaping @Sendable (Error?) -> Void) {
-        let process = openingProcess(script, in: app ?? defaultTerminal())
-        process.terminationHandler = { process in
-            let error = process.terminationStatus == 0 ? nil : NSError(
-                domain: "com.wiltodelta.rota.terminal", code: Int(process.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: "The terminal could not be opened."])
-            completion(error)
+        guard let app = app ?? defaultTerminal() else {
+            NSWorkspace.shared.open(script)
+            return completion(nil)
         }
-        do {
-            try process.run()
-        } catch {
-            completion(error)
-        }
-    }
-
-    static func openingProcess(_ script: URL, in app: URL?,
-                               environment: [String: String] = ProcessInfo.processInfo.environment) -> Process {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        // NSWorkspace's configuration environment only adds overrides: omitted
-        // child-session markers still leak. Give open a fully replaced environment.
-        process.environment = ProcessLauncher.baseEnvironment(environment)
-        process.standardInput = FileHandle.nullDevice
-        let known = app.flatMap { Bundle(url: $0)?.bundleIdentifier }.flatMap(KnownTerminal.init(rawValue:))
-        if let app, let arguments = known?.arguments(running: script.path) {
-            process.arguments = ["-n", "-a", app.path, "--args"] + arguments
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        let known = Bundle(url: app)?.bundleIdentifier.flatMap(KnownTerminal.init(rawValue:))
+        if let arguments = known?.arguments(running: script.path) {
+            configuration.createsNewApplicationInstance = true
+            configuration.arguments = arguments
+            NSWorkspace.shared.openApplication(at: app, configuration: configuration) { _, error in completion(error) }
         } else {
-            process.arguments = (app.map { ["-a", $0.path] } ?? []) + [script.path]
+            NSWorkspace.shared.open([script], withApplicationAt: app, configuration: configuration) { _, error in
+                completion(error)
+            }
         }
-        return process
     }
 }

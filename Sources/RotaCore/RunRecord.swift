@@ -45,6 +45,9 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     public var routineID: String
     public var trigger: RunTrigger
     public var harness: Harness
+    /// Explicit model and effort requested when this session started; absent in old records or for CLI defaults.
+    public var model: String?
+    public var effort: String?
     public var startedAt: Date
     public var endedAt: Date?
     public var outcome: RunOutcome
@@ -59,10 +62,6 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     /// How many times Rota continued this session on its own after the Mac slept
     /// or shut down in the middle of it (`Scheduler.resumeLimit` at most).
     public var resumes: Int?
-    public var configuration: RunConfiguration?
-    public var metadata: SessionMetadata?
-    public var eventError: String?
-    public var requests: [SessionRequest]?
 
     /// A slot that did not run: a note in the routine's history, not a session.
     public var isSkip: Bool {

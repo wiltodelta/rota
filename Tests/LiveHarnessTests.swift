@@ -22,17 +22,13 @@ final class LiveHarnessTests: XCTestCase {
     private func run(_ harness: Harness, prompt: String, message: String?, timeout: TimeInterval = 240,
                      directory: String? = nil, resume: String? = nil,
                      stopAfter: TimeInterval? = nil, model: String? = nil,
-                     effort: String? = nil, mode: LaunchMode? = nil,
-                     attachments: [ChatAttachment] = []) throws -> (RunOutcome, String, String?) {
+                     effort: String? = nil) throws -> (RunOutcome, String, String?) {
         let log = folder.appendingPathComponent("\(harness.rawValue).log")
         let workingDirectory = directory ?? folder.path
-        let environment = mode == .claudeInteractive ? interactiveEnvironment() : [:]
-        var spec = LaunchSpec(executable: harness.defaultExecutable(), prompt: prompt,
+        let spec = LaunchSpec(executable: harness.defaultExecutable(), prompt: prompt,
                               arguments: harness.arguments(settings: ClaudeUserSettings(), resume: resume),
-                              workingDirectory: workingDirectory, environment: environment,
-                              mode: mode ?? harness.launchMode,
+                              workingDirectory: workingDirectory, environment: [:], mode: harness.launchMode,
                               timeout: timeout, log: log, resume: resume, model: model, effort: effort)
-        spec.attachments = attachments
         let ended = expectation(description: "run ended")
         // Written by the run's callbacks and read after `wait`, which orders the two.
         nonisolated(unsafe) var outcome: RunOutcome?
@@ -40,7 +36,6 @@ final class LiveHarnessTests: XCTestCase {
         nonisolated(unsafe) var control: RunControl?
         let events = RunEvents(session: { id in
             session = id
-            LiveSessionManifest.record(id, harness: harness, cwd: workingDirectory, folder: self.folder)
             if let stopAfter {
                 DispatchQueue.main.asyncAfter(deadline: .now() + stopAfter) { control?.stop() }
             }
@@ -53,64 +48,8 @@ final class LiveHarnessTests: XCTestCase {
         control = try ProcessLauncher().launch(spec, events: events)
         wait(for: [ended], timeout: timeout + 30)
         let text = try String(contentsOf: log, encoding: .utf8)
-        if harness.isAgent {
-            let reader = SessionEventReader()
-            XCTAssertTrue(try reader.read(from: SessionEventReader.file(for: log)))
-            if let message {
-                let sent = try XCTUnwrap(reader.transcript.items.last { $0.kind == .user && $0.text == message })
-                if harness == .grok || mode == .claudeInteractive {
-                    XCTAssertTrue(sent.delivery == .accepted || sent.delivery == .queued,
-                                  "provider acknowledgment, not local log presence: "
-                                    + String(describing: sent.delivery))
-                } else {
-                    XCTAssertEqual(sent.delivery, .accepted, "provider acknowledgment, not local log presence")
-                }
-            }
-            if outcome == .succeeded {
-                XCTAssertTrue(reader.transcript.items.contains { $0.kind == .agent && !$0.text.isEmpty })
-            }
-        }
         print("---- \(harness.rawValue) log\n\(text)----")
         return (try XCTUnwrap(outcome), text, session)
-    }
-
-    private func interactiveEnvironment() -> [String: String] {
-        let helper = Bundle(for: Self.self).bundleURL.deletingLastPathComponent()
-            .appendingPathComponent("RotaCLI").path
-        return ["ROTA_CLI": helper, "ROTA_DATA_DIR": folder.path]
-    }
-
-    func testAgentsReadAttachedImageAndFileAndContinueWithAttachments() throws {
-        let prompt = "Describe the shapes and their colors in the attached image. Read the attached text file "
-            + "and include its exact marker in your answer. Do not change any files."
-        for harness in [Harness.claude, .codex, .grok] {
-            let fixture = try AttachmentTestFixture.create(in: folder)
-            let attachments = try fixture.files.map(ChatAttachment.inspect)
-            let (outcome, log, session) = try run(harness, prompt: prompt, message: nil, attachments: attachments)
-            XCTAssertEqual(outcome, .succeeded, log)
-            let answer = try latestAnswer(harness).lowercased()
-            for words in [["red", "красн"], ["circle", "круг"], ["blue", "син"], ["square", "квадрат"]] {
-                XCTAssertTrue(words.contains { answer.contains($0) }, "Missing shape/color: \(answer)")
-            }
-            XCTAssertTrue(answer.contains(fixture.marker), answer)
-            let id = try XCTUnwrap(session)
-            let changed = try AttachmentTestFixture.create(in: folder)
-            XCTAssertNotEqual(changed.marker, fixture.marker)
-            let newFile = try ChatAttachment.inspect(changed.files[1])
-            let (continued, again, resumed) = try run(harness,
-                prompt: "Read the newly attached text file and reply with its exact marker.", message: nil,
-                resume: id, attachments: [newFile])
-            XCTAssertEqual(continued, .succeeded, again)
-            XCTAssertEqual(resumed, id)
-            XCTAssertTrue(try latestAnswer(harness).contains(changed.marker))
-        }
-    }
-
-    private func latestAnswer(_ harness: Harness) throws -> String {
-        let reader = SessionEventReader()
-        let log = folder.appendingPathComponent(harness.rawValue + ".log")
-        _ = try reader.read(from: SessionEventReader.file(for: log))
-        return try XCTUnwrap(reader.transcript.items.last { $0.kind == .agent }).text
     }
 
     private let steerable = "Run the shell command `sleep 15; echo first`. When it is done, reply with exactly "
@@ -161,79 +100,6 @@ final class LiveHarnessTests: XCTestCase {
     }
 
     func testClaudeContinuesAFinishedSession() throws { try checkContinuation(.claude) }
-
-    func testInteractiveClaudeTakesAMessageAndContinues() throws {
-        let settings = ClaudeUserSettings.read()
-        let directory = ProcessInfo.processInfo.environment["ROTA_LIVE_TRUSTED_FOLDER"]
-            ?? FileManager.default.currentDirectoryPath
-        try XCTSkipUnless(settings.trusts(directory), "interactive Claude requires an already trusted checkout")
-        let (outcome, log, session) = try run(.claude, prompt: steerable,
-            message: "Reply with exactly: purple otter", directory: directory, mode: .claudeInteractive)
-        XCTAssertEqual(outcome, .succeeded, log)
-        let id = try XCTUnwrap(session)
-        XCTAssertTrue(log.contains("purple otter"), log)
-        let (continued, next, again) = try run(.claude, prompt: "Now reply with exactly: blue whale",
-            message: nil, directory: directory, resume: id, mode: .claudeInteractive)
-        XCTAssertEqual(continued, .succeeded, next)
-        XCTAssertEqual(again, id)
-        XCTAssertTrue(next.contains("blue whale"), next)
-    }
-
-    func testClaudeStreamWaitsForAnExplicitPermissionAnswer() throws {
-        let log = folder.appendingPathComponent("permission.log")
-        var arguments = Harness.claude.arguments(settings: ClaudeUserSettings())
-        arguments += ["--permission-mode", "manual", "--settings", #"{"permissions":{"ask":["Bash"]}}"#]
-        let spec = LaunchSpec(executable: Harness.claude.defaultExecutable(),
-            prompt: "Run only the shell command echo rota-permission-fixture, then reply done.",
-            arguments: arguments, workingDirectory: folder.path, environment: [:], mode: .claudeStream,
-            timeout: 120, log: log, model: "haiku", effort: "low")
-        let ended = expectation(description: "permission run ended")
-        nonisolated(unsafe) var control: RunControl?
-        nonisolated(unsafe) var requested = false
-        let events = RunEvents(session: { _ in }, finished: { outcome in
-            XCTAssertEqual(outcome, .succeeded)
-            ended.fulfill()
-        }, requests: { requests in
-            guard let request = requests.first else { return }
-            requested = true
-            XCTAssertTrue(request.detail.contains("echo rota-permission-fixture"))
-            let choice = request.detail.contains("echo rota-permission-fixture") ? "allow" : "deny"
-            control?.respond(request.id, response: .init(choice: choice))
-        })
-        control = try ProcessLauncher().launch(spec, events: events)
-        wait(for: [ended], timeout: 150)
-        XCTAssertTrue(requested, "the real provider must request permission")
-        print("---- Claude permission log\n" + (try String(contentsOf: log, encoding: .utf8)))
-    }
-
-    func testClaudeStreamDeliversClarifyingQuestionAnswers() throws {
-        let log = folder.appendingPathComponent("question.log")
-        let spec = LaunchSpec(executable: Harness.claude.defaultExecutable(),
-            prompt: "Use AskUserQuestion to ask which output I prefer, with exactly Local and Remote options. "
-                + "After I answer, reply with exactly my answer. Do not use any other tools.",
-            arguments: Harness.claude.arguments(settings: ClaudeUserSettings()),
-            workingDirectory: folder.path, environment: [:], mode: .claudeStream,
-            timeout: 120, log: log, model: "haiku", effort: "low")
-        let ended = expectation(description: "question answered")
-        nonisolated(unsafe) var control: RunControl?
-        nonisolated(unsafe) var requested = false
-        let events = RunEvents(session: { _ in }, finished: { outcome in
-            XCTAssertEqual(outcome, .succeeded)
-            ended.fulfill()
-        }, requests: { requests in
-            guard let request = requests.first else { return }
-            requested = true
-            XCTAssertFalse(request.questions.isEmpty)
-            let answers = Dictionary(uniqueKeysWithValues: request.questions.map { ($0.id, "Local") })
-            control?.respond(request.id, response: .init(choice: "submit", answers: answers))
-        })
-        control = try ProcessLauncher().launch(spec, events: events)
-        wait(for: [ended], timeout: 150)
-        XCTAssertTrue(requested)
-        let text = try String(contentsOf: log, encoding: .utf8)
-        XCTAssertTrue(text.contains("Local"), text)
-        print("---- Claude question log\n" + text)
-    }
 
     func testShellRunsInScreenWithItsExitStatus() throws {
         let (outcome, log, session) = try run(.shell, prompt: "echo hello from screen; sleep 3; exit 5", message: nil)

@@ -2,9 +2,8 @@ import AppKit
 import RotaCore
 import SwiftUI
 
-/// The editable fields of a routine, with schedule preview.
+/// The editable fields of a routine, with schedule preview and harness warnings.
 struct RoutineForm: View {
-    @Environment(\.interfaceMetrics) private var metrics
     @Environment(AppModel.self) private var model
     @Binding var draft: Routine
     /// Set for a new routine, whose skill names it; an existing routine keeps its id.
@@ -24,7 +23,7 @@ struct RoutineForm: View {
             TextField("Name", text: $draft.name)
                 .accessibilityIdentifier("routineName")
             LabeledContent("Project folder") {
-                HStack(spacing: metrics(8)) {
+                HStack {
                     TextField("Project folder", text: $draft.workingDirectory, prompt: Text("/path/to/project"))
                         .labelsHidden()
                         .truncationMode(.middle)
@@ -35,11 +34,11 @@ struct RoutineForm: View {
             if !draft.workingDirectory.isEmpty && !FileManager.default.fileExists(atPath: draft.workingDirectory) {
                 Label("No folder at this path.", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(Color.errorText)
-                    .scaledFont(.callout)
+                    .font(.callout)
             }
             ScheduleField(schedule: $draft.schedule)
             // A menu, not segments: four fixed-width segments overflow a narrow window.
-            InterfacePicker("Runs on", value: draft.harness.title, selection: $draft.harness) {
+            Picker("Runs on", selection: $draft.harness) {
                 ForEach(Harness.allCases) { Text($0.title).tag($0) }
             }
             .accessibilityIdentifier("routineHarness")
@@ -51,16 +50,17 @@ struct RoutineForm: View {
             if draft.harness.isAgent {
                 ModelPickers(draft: $draft)
             }
+            HarnessWarnings(routine: draft)
             TimeLimitField(minutes: $draft.timeLimitMinutes)
-            VStack(alignment: .leading, spacing: metrics(6)) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(draft.harness.isAgent ? "Prompt" : "Command")
                 TextEditor(text: $draft.prompt)
                     .accessibilityIdentifier("routinePrompt")
-                    .scaledFont(.body, design: .monospaced)
-                    .frame(minHeight: metrics(90))
+                    .font(.body.monospaced())
+                    .frame(minHeight: 90)
                     .scrollContentBackground(.hidden)
-                    .padding(metrics(4))
-                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: metrics(6)))
+                    .padding(4)
+                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
             }
         }
         .formStyle(.grouped)
@@ -81,17 +81,16 @@ struct RoutineForm: View {
 }
 
 private struct ScheduleField: View {
-    @Environment(\.interfaceMetrics) private var metrics
     @Binding var schedule: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: metrics(4)) {
+        VStack(alignment: .leading, spacing: 4) {
             LabeledContent("Schedule") {
-                HStack(spacing: metrics(8)) {
+                HStack(spacing: 8) {
                     TextField("Schedule", text: $schedule, prompt: Text("minute hour day month weekday"))
                         .accessibilityIdentifier("routineSchedule")
                         .labelsHidden()
-                        .scaledFont(.body, design: .monospaced)
+                        .font(.body.monospaced())
                         .multilineTextAlignment(.trailing)
                     // Common schedules, so a first routine needs no cron.
                     Menu {
@@ -121,9 +120,44 @@ private struct ScheduleField: View {
                     Text(error.localizedDescription).foregroundStyle(Color.errorText)
                 }
             }
-            .scaledFont(.caption)
+            .font(.caption)
             .foregroundStyle(Color.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// Explains which tools the skill uses that the chosen harness lacks.
+struct HarnessWarnings: View {
+    @Environment(AppModel.self) private var model
+    let routine: Routine
+
+    var body: some View {
+        let needs = model.scheduler.requirements(of: routine)
+        let gaps = SkillRequirements.gaps(needs, on: routine.harness)
+        if !gaps.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(gaps, id: \.0) { capability, support in
+                    Label(message(capability, support), systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(support == .missing ? Color.errorText : Color.warningText)
+                }
+            }
+            .font(.callout)
+        } else if !needs.isEmpty {
+            Text("Uses " + needs.map(\.title).sorted().joined(separator: " and ") + ", available here.")
+                .font(.caption)
+                .foregroundStyle(Color.secondaryText)
+        }
+    }
+
+    private func message(_ capability: Capability, _ support: CapabilitySupport) -> String {
+        switch support {
+        case .native:
+            return ""
+        case .differentTools(let detail):
+            return "The skill uses \(capability.title). \(detail)"
+        case .missing:
+            return "The skill uses \(capability.title), which \(routine.harness.title) does not have."
         }
     }
 }
@@ -136,16 +170,13 @@ private struct ModelPickers: View {
 
     var body: some View {
         let options = model.settings.models[draft.harness] ?? []
+        // Claude names no default; its aliases share one set of efforts.
         let selected = options.first { $0.id == draft.model } ?? options.first(where: \.isDefault)
             ?? (draft.model == nil ? options.first : nil)
-        InterfacePicker("Model", value: draft.model.map { id in
-            options.first { $0.id == id }?.title ?? id
-        } ?? (options.first(where: \.isDefault).map { "Default (\($0.title))" } ?? "Default"),
-                        selection: $draft.model) {
+        Picker("Model", selection: $draft.model) {
             Text(options.first(where: \.isDefault).map { "Default (\($0.title))" } ?? "Default")
                 .tag(String?.none)
             Divider()
-            if options.isEmpty { Text("Model List Unavailable").disabled(true) }
             ForEach(options) { Text($0.title).tag(Optional($0.id)) }
             if let current = draft.model, !options.contains(where: { $0.id == current }) {
                 Text(current).tag(Optional(current))
@@ -155,7 +186,7 @@ private struct ModelPickers: View {
         .onChange(of: draft.model) {
             if let effort = draft.effort, let selected, !selected.efforts.contains(effort) { draft.effort = nil }
         }
-        InterfacePicker("Effort", value: draft.effort?.capitalized ?? "Default", selection: $draft.effort) {
+        Picker("Effort", selection: $draft.effort) {
             Text("Default").tag(String?.none)
             Divider()
             ForEach(selected?.efforts ?? [], id: \.self) { Text($0.capitalized).tag(Optional($0)) }
