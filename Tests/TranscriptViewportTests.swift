@@ -57,6 +57,13 @@ final class TranscriptViewportTests: XCTestCase {
         XCTAssertEqual(scroll.documentVisibleRect.minY, 618, accuracy: 0.5)
     }
 
+    func testDisclosureCanAnchorItsOwnPartiallyVisibleHeader() throws {
+        let anchor = try XCTUnwrap(viewport.capture(id: 1))
+        XCTAssertEqual(anchor.id, 1)
+        XCTAssertEqual(anchor.offset, -100, accuracy: 0.5)
+        XCTAssertNil(viewport.capture(id: 99))
+    }
+
     func testUserScrollCancelsQueuedCorrection() async throws {
         let anchor = try XCTUnwrap(viewport.capture())
         marker.frame.origin.y += 318

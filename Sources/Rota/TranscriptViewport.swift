@@ -29,9 +29,10 @@ final class TranscriptViewport {
         let visible: CGRect
     }
 
-    func capture() -> Anchor? {
+    func capture(id requestedID: Int? = nil) -> Anchor? {
         let candidates = markers.compactMap { id, marker -> Candidate? in
-            guard let view = marker.view, view.window != nil,
+            guard requestedID == nil || requestedID == id,
+                  let view = marker.view, view.window != nil,
                   let scroll = view.enclosingScrollView, let document = scroll.documentView else { return nil }
             return Candidate(id: id, frame: view.convert(view.bounds, to: document),
                              visible: scroll.documentVisibleRect)

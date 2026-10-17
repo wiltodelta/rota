@@ -80,8 +80,16 @@ UI actor; scheduler refreshes and run completion retain already loaded pages.
 The view changes state only when the snapshot changes. A pending page request
 supersedes any older poll result. The footer copies loaded agent messages and
 labels that scope while earlier pages remain. Normalized entries render
-in their recorded order with stable IDs and SwiftUI scroll targets. They do
-not infer which prose is a final answer from the last tool call. Legacy logs
+in their recorded order with stable IDs and SwiftUI scroll targets. Adjacent tool
+calls form a collapsed group labeled with the number of loaded calls, including
+a single call. Expanding reveals complete, selectable titles with wrapping.
+Every other kind, including agent text and errors, ends the group and stays
+visible. This is a view projection over the existing items, not a journal change.
+Expansion belongs to the session view and survives live appends and paging that
+extends the first group. A paged reading anchor maps an old tool ID to its new
+group header; toggling preserves the header offset instead of following the end.
+The ordered presentation does not infer which prose is a final answer from
+the last tool call. Legacy logs
 retain their inferred turn layout. Markdown, typography, copy actions, and
 the composer reuse existing components.
 
@@ -137,3 +145,17 @@ write settling and failure recovery. `TranscriptViewportTests` uses real
 `NSScrollView` geometry to pin saved reading offsets and correction cancellation.
 Disposable mutation checks reject full-file paging, indefinite write settling,
 disabled pixel correction, and recapturing an already moved reading anchor.
+
+Tool grouping was rendered in the signed development bundle with producer-generated
+synthetic history, collapsed and expanded in light and dark at 820 by 600 points,
+and at 1100 by 720 points. Accessibility presses expanded and collapsed the
+14-call group and exposed full wrapped titles. Header position stayed unchanged
+through both transitions; controls measured 28 points high and the layout gate
+reported no overflow. Calibrated pixel samples passed text contrast in both
+appearances. Keyboard activation was not established: AX focus stayed in the
+composer, so the guarded Space probe sent no key. `ToolGroupingTests` checks
+all non-tool boundaries, repeated calls, live append identity and prepended
+page mapping; a disposable mutation that grouped agent text fails those checks.
+Set `ROTA_TOOL_FIXTURE_DIR` while running its producer fixture test to export
+synthetic app data for this UI check. This verification uses synthetic history,
+not a live provider conversation.

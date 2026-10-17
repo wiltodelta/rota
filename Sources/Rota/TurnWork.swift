@@ -64,8 +64,8 @@ struct WorkSection: View {
     }
 }
 
-/// One line of a turn's work: a note the agent made, or a run of tool calls in a row.
-private enum WorkRow: Identifiable {
+/// One transcript entry, or adjacent tool calls sharing a disclosure row.
+enum WorkRow: Identifiable {
     case note(TranscriptItem)
     case tools([TranscriptItem])
 
@@ -76,15 +76,33 @@ private enum WorkRow: Identifiable {
         }
     }
 
+    var items: [TranscriptItem] {
+        switch self {
+        case .note(let item): [item]
+        case .tools(let calls): calls
+        }
+    }
+
+    /// Paging can prepend calls to the first group; map its previous row ID to the new header.
+    static func visibleID(for id: Int, in rows: [WorkRow]) -> Int {
+        rows.first { $0.items.contains { $0.id == id } }?.id ?? id
+    }
+
     static func group(_ items: [TranscriptItem]) -> [WorkRow] {
         var rows: [WorkRow] = []
+        var calls: [TranscriptItem] = []
         for item in items {
-            if item.kind == .tool, case .tools(let calls) = rows.last {
-                rows[rows.count - 1] = .tools(calls + [item])
-            } else {
-                rows.append(item.kind == .tool ? .tools([item]) : .note(item))
+            if item.kind == .tool {
+                calls.append(item)
+                continue
             }
+            if !calls.isEmpty {
+                rows.append(.tools(calls))
+                calls = []
+            }
+            rows.append(.note(item))
         }
+        if !calls.isEmpty { rows.append(.tools(calls)) }
         return rows
     }
 }

@@ -39,3 +39,49 @@ struct MarkdownText: View {
         return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
     }
 }
+
+/// A fenced code block as super.engineering draws one: a header with the
+/// language and a Copy button over the code, which scrolls sideways rather than wrapping.
+struct CodeBlockView: View {
+    @Environment(AppModel.self) private var model
+    let code: String
+    let language: String?
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(language ?? "Plain text")
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(code, forType: .string)
+                    copied = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.5))
+                        copied = false
+                    }
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .help(copied ? "Copied" : "Copy Code")
+                .accessibilityLabel(copied ? "Copied" : "Copy Code")
+            }
+            .font(model.chatText.small)
+            .foregroundStyle(Color.secondaryText)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            Divider()
+            ScrollView(.horizontal) {
+                Text(code)
+                    .font(model.chatText.code)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(12)
+            }
+        }
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.06)) }
+    }
+}

@@ -24,7 +24,8 @@ Desktop.
   actions in their recorded order. Older sessions retain their folded
   "Worked for …" sections. While a session works, the field shows the clock
   and turns its button into Stop. The chat follows the session unless you
-  scroll up. Code blocks name their language and copy in one click.
+  scroll up. Adjacent tool calls stay collapsed behind a count; expand them
+  to read the full commands. Code blocks name their language and copy in one click.
 - **Keep talking to a session, on every agent, while it works or after.** The
   field under the chat sends your message:
   - Claude Code runs interactively, as in a terminal, inside a detached

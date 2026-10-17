@@ -15,6 +15,7 @@ struct ChatTranscript: View {
     var hasEarlier = false
     var loadingEarlier = false
     var loadEarlier: () -> Void = {}
+    @State private var expandedTools: Set<Int> = []
     @State private var following = true
     @State private var visibleItem: Int?
     @State private var viewport = TranscriptViewport()
@@ -22,6 +23,7 @@ struct ChatTranscript: View {
 
     var body: some View {
         let turns = structured ? [] : TranscriptTurn.group(items)
+        let rows = structured ? WorkRow.group(items) : []
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
@@ -36,11 +38,28 @@ struct ChatTranscript: View {
                         .accessibilityIdentifier("loadEarlierMessages")
                     }
                     if structured {
-                        ForEach(items) { item in
-                            TranscriptRow(item: item, record: record)
-                                .accessibilityIdentifier("transcriptItem-\(item.id)")
-                                .id(item.id)
-                                .background(TranscriptMarker(id: item.id, viewport: viewport))
+                        ForEach(rows) { row in
+                            VStack(alignment: .leading, spacing: 0) {
+                                switch row {
+                                case .note(let item):
+                                    TranscriptRow(item: item, record: record)
+                                        .accessibilityIdentifier("transcriptItem-\(item.id)")
+                                case .tools(let calls):
+                                    ToolCallsView(calls: calls, expanded: Binding(
+                                        get: { calls.contains { expandedTools.contains($0.id) } },
+                                        set: { expanded in
+                                            following = false
+                                            viewport.cancel()
+                                            let anchor = viewport.capture(id: row.id)
+                                            if expanded { expandedTools.insert(row.id) } else {
+                                                expandedTools.subtract(calls.map(\.id))
+                                            }
+                                            if let anchor { viewport.restoreAfterLayout(anchor) }
+                                        }))
+                                }
+                            }
+                            .id(row.id)
+                            .background(TranscriptMarker(id: row.id, viewport: viewport))
                         }
                         if running {
                             WorkingLabel(since: model.scheduler.runStartedAt(record))
@@ -104,8 +123,10 @@ struct ChatTranscript: View {
                 guard !following else { return }
                 if let anchor = pageAnchor {
                     // Materialize the old row after a prepend, then correct the lazy estimate.
-                    proxy.scrollTo(anchor.id, anchor: anchor.point)
-                    viewport.restoreAfterLayout(anchor)
+                    let mapped = TranscriptViewport.Anchor(id: WorkRow.visibleID(for: anchor.id, in: rows),
+                                                           offset: anchor.offset, point: anchor.point)
+                    proxy.scrollTo(mapped.id, anchor: mapped.point)
+                    viewport.restoreAfterLayout(mapped)
                     pageAnchor = nil
                 } else if let anchor = viewport.anchorForUpdate() {
                     viewport.restoreAfterLayout(anchor)
@@ -425,52 +446,6 @@ struct HarnessLogo: View {
                          : Color.primary)
         .frame(width: 14, height: 14)
         .accessibilityHidden(true)
-    }
-}
-
-/// A fenced code block as super.engineering draws one: a header with the
-/// language and a Copy button over the code, which scrolls sideways rather than wrapping.
-struct CodeBlockView: View {
-    @Environment(AppModel.self) private var model
-    let code: String
-    let language: String?
-    @State private var copied = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(language ?? "Plain text")
-                Spacer()
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(code, forType: .string)
-                    copied = true
-                    Task {
-                        try? await Task.sleep(for: .seconds(1.5))
-                        copied = false
-                    }
-                } label: {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                }
-                .buttonStyle(.borderless)
-                .help(copied ? "Copied" : "Copy Code")
-                .accessibilityLabel(copied ? "Copied" : "Copy Code")
-            }
-            .font(model.chatText.small)
-            .foregroundStyle(Color.secondaryText)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            Divider()
-            ScrollView(.horizontal) {
-                Text(code)
-                    .font(model.chatText.code)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(12)
-            }
-        }
-        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
-        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.06)) }
     }
 }
 
