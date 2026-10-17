@@ -18,6 +18,8 @@ struct ChatComposer: View {
     }
     @FocusState private var focused: Bool
     @State private var legacyModel: String?
+    @State private var resolvedConfiguration: SessionConfiguration?
+    @State private var resolvingConfiguration = false
     @State private var staging = false
     @State private var choosingFiles = false
     @State private var attachmentError: String?
@@ -50,7 +52,23 @@ struct ChatComposer: View {
         .background(Color(nsColor: .textBackgroundColor))
         .task(id: record.id) {
             focused = true
-            if record.reportedModel == nil, record.model == nil, let path = record.logPath {
+            resolvedConfiguration = nil
+            legacyModel = nil
+            resolvingConfiguration = false
+            if record.harness == .claude, !running, record.reportedEffort == nil,
+               let routine = model.scheduler.routine(record.routineID) {
+                resolvingConfiguration = true
+                let executable = model.settings.executable(for: .claude)
+                let resolved = await Task.detached {
+                    ClaudeConfiguration.read(executable: executable, directory: routine.workingDirectory,
+                                             model: record.model, effort: record.effort, resume: record.sessionID)
+                }.value
+                guard !Task.isCancelled else { return }
+                resolvedConfiguration = resolved?.session
+                resolvingConfiguration = false
+            }
+            if record.reportedModel == nil, record.model == nil, resolvedConfiguration?.model == nil,
+               let path = record.logPath {
                 legacyModel = await Task.detached {
                     SessionConfiguration.recordedModel(log: URL(fileURLWithPath: path))
                 }.value
@@ -74,17 +92,19 @@ struct ChatComposer: View {
             HStack(spacing: 8) {
                 HStack(spacing: 6) {
                     HarnessLogo(harness: record.harness)
-                    Text(ModelLabel.model(record: record, models: model.settings.models, fallback: legacyModel))
+                    Text(ModelLabel.model(record: record, models: model.settings.models,
+                                          fallback: resolvedConfiguration?.model ?? legacyModel))
                         .truncationMode(.middle)
                     Text("·")
-                    Text(ModelLabel.effort(record)).fixedSize()
+                    Text(resolvingConfiguration ? "Resolving…"
+                         : ModelLabel.effort(record, fallback: resolvedConfiguration?.effort)).fixedSize()
                 }
                 .font(.callout)
                 .foregroundStyle(Color.secondaryText)
                 .lineLimit(1)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("composerModel")
-                .help("Session model and reasoning effort. Default means the agent has not reported a resolved value.")
+                .help("Session model and reasoning effort, as resolved by the agent.")
                 Spacer(minLength: 8)
                 if staging {
                     ProgressView().controlSize(.small).frame(width: 28, height: 28)

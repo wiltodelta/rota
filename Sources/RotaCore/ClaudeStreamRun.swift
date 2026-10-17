@@ -72,6 +72,8 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         try process.run()
         self.process = process
         input = stdin.fileHandleForWriting
+        try input?.write(contentsOf: ClaudeConfiguration.request("initialize", id: ClaudeConfiguration.initializeID))
+        try input?.write(contentsOf: ClaudeConfiguration.request("get_settings", id: ClaudeConfiguration.settingsID))
         try input?.write(contentsOf: Self.userMessage(spec.prompt))
         if let session = spec.resume { journal.session(session) }
         if let timeout = spec.timeout {
@@ -114,6 +116,7 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
             if !line.trimmingCharacters(in: .whitespaces).isEmpty { journal.line("[error] \(line)") }
             return
         }
+        if let configuration = ClaudeConfiguration.applied(event) { journal.configure(configuration) }
         switch type {
         case "system":
             if event["subtype"] as? String == "init", let session = event["session_id"] as? String {
@@ -121,6 +124,8 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
                 if let header = StreamJSONFormatter.format(line) { journal.line(header) }
                 journal.configure(SessionConfiguration(model: event["model"] as? String))
                 journal.session(session)
+                try? input?.write(contentsOf: ClaudeConfiguration.request("get_settings",
+                                                                          id: ClaudeConfiguration.settingsID))
             }
         case "result":
             turnEnded(event)

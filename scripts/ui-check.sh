@@ -155,6 +155,14 @@ for appearance in light dark; do
     grep -q "hello from rota" "$LOGS/ui-shell-$appearance/"*.log && pass "output in log" || fail "output in log"
     capture "UI check $appearance" "$appearance-finished"
 
+    # Open the owning routine page and return to its session.
+    check "$DRIVER" exists showSessionRoutine
+    check "$DRIVER" press showSessionRoutine
+    check "$DRIVER" exists editRoutine
+    check "$DRIVER" select "UI check $appearance" 2
+    check "$DRIVER" exists showSessionRoutine
+    check "$DRIVER" exists deleteSession
+
     # A session that asks for a reply shows it until it is answered or dismissed.
     Rota.app/Contents/Helpers/rota notify --session "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[0]["id"])' "$SUPPORT/runs/ui-shell-$appearance.json")" \
         --needs-reply "Approve the weekly report?" >/dev/null && pass "notify needs reply" || fail "notify needs reply"
@@ -177,7 +185,7 @@ for appearance in light dark; do
     check "$DRIVER" exists Routines
 
     # The routine view and its settings sheet.
-    "$DRIVER" select "UI check $appearance" 2; sleep 1
+    "$DRIVER" select "UI check $appearance" 1; sleep 1
     check "$DRIVER" exists editRoutine
     capture "UI check $appearance" "$appearance-routine"
     "$DRIVER" press editRoutine; sleep 1

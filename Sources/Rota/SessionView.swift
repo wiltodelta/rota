@@ -89,42 +89,72 @@ struct SessionView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(record.startedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.callout)
-                Text([record.harness.title, record.trigger == .catchUp ? "missed slot, run late" : nil,
-                      record.outcome.title].compactMap { $0 }.joined(separator: " \u{00B7} "))
-                    .font(.caption)
-                    .foregroundStyle(record.outcome.isFailure ? Color.errorText : Color.secondaryText)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                sessionSummary
+                Spacer(minLength: 12)
+                showRoutine
+                sessionActions
             }
-            Spacer()
-            if let path = record.logPath {
-                Button("Show Log in Finder", systemImage: "folder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    sessionSummary
+                    Spacer(minLength: 12)
+                    showRoutine
                 }
-                .labelStyle(.iconOnly)
-                .help("Show log in Finder")
-            }
-            if model.scheduler.terminalCommand(for: record) != nil {
-                Button(running ? "Open in Terminal" : "Continue in Terminal", systemImage: "terminal") {
-                    ChatOpener.open(record, workingDirectory: routine.workingDirectory, scheduler: model.scheduler,
-                                    terminal: model.settings.terminalApp)
+                HStack(spacing: 12) {
+                    Spacer(minLength: 0)
+                    sessionActions
                 }
-                .accessibilityIdentifier("openTerminal")
             }
-            Button("Delete Session…", systemImage: "trash", role: .destructive) {
-                model.sessionToDelete = record
+        }
+    }
+
+    private var sessionSummary: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(record.startedAt.formatted(date: .abbreviated, time: .shortened))
+                .font(.callout)
+            Text([record.harness.title, record.trigger == .catchUp ? "missed slot, run late" : nil,
+                  record.outcome.title].compactMap { $0 }.joined(separator: " \u{00B7} "))
+                .font(.caption)
+                .foregroundStyle(record.outcome.isFailure ? Color.errorText : Color.secondaryText)
+        }
+    }
+
+    private var showRoutine: some View {
+        Button("Show Routine", systemImage: "calendar") { model.selection = .routine(routine.id) }
+            .fixedSize()
+            .help("Show \(routine.name)'s schedule, settings, and sessions")
+            .accessibilityIdentifier("showSessionRoutine")
+    }
+
+    @ViewBuilder
+    private var sessionActions: some View {
+        if let path = record.logPath {
+            Button("Show Log in Finder", systemImage: "folder") {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
             }
             .labelStyle(.iconOnly)
-            .help("Delete this session and its logs")
-            .disabled(!model.scheduler.canDelete(current))
-            .accessibilityIdentifier("deleteSession")
-            // A session that takes messages has Stop beside its field.
-            if running && !model.scheduler.canMessage(record) {
-                Button("Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }
-                    .accessibilityIdentifier("stopSession")
+            .help("Show log in Finder")
+        }
+        if model.scheduler.terminalCommand(for: record) != nil {
+            Button(running ? "Open in Terminal" : "Continue in Terminal", systemImage: "terminal") {
+                ChatOpener.open(record, workingDirectory: routine.workingDirectory, scheduler: model.scheduler,
+                                terminal: model.settings.terminalApp)
             }
+            .accessibilityIdentifier("openTerminal")
+        }
+        Button("Delete Session…", systemImage: "trash", role: .destructive) {
+            model.sessionToDelete = record
+        }
+        .labelStyle(.iconOnly)
+        .help("Delete this session and its logs")
+        .disabled(!model.scheduler.canDelete(current))
+        .accessibilityIdentifier("deleteSession")
+        // A session that takes messages has Stop beside its field.
+        if running && !model.scheduler.canMessage(record) {
+            Button("Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }
+                .accessibilityIdentifier("stopSession")
         }
     }
 

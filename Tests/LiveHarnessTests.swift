@@ -22,12 +22,12 @@ final class LiveHarnessTests: XCTestCase {
     private func run(_ harness: Harness, prompt: String, message: String?, timeout: TimeInterval = 240,
                      directory: String? = nil, resume: String? = nil,
                      stopAfter: TimeInterval? = nil, model: String? = nil,
-                     effort: String? = nil) throws -> (RunOutcome, String, String?) {
+                     effort: String? = nil, mode: LaunchMode? = nil) throws -> (RunOutcome, String, String?) {
         let log = folder.appendingPathComponent("\(harness.rawValue).log")
         let workingDirectory = directory ?? folder.path
         let spec = LaunchSpec(executable: harness.defaultExecutable(), prompt: prompt,
                               arguments: harness.arguments(settings: ClaudeUserSettings(), resume: resume),
-                              workingDirectory: workingDirectory, environment: [:], mode: harness.launchMode,
+                              workingDirectory: workingDirectory, environment: [:], mode: mode ?? harness.launchMode,
                               timeout: timeout, log: log, resume: resume, model: model, effort: effort)
         let ended = expectation(description: "run ended")
         // Written by the run's callbacks and read after `wait`, which orders the two.
@@ -57,6 +57,9 @@ final class LiveHarnessTests: XCTestCase {
         XCTAssertEqual(snapshot.structured, harness != .shell)
         if harness.isAgent, outcome == .succeeded {
             XCTAssertNotNil(configuration.model, "The actual runner must report its session model")
+            XCTAssertNotNil(configuration.effort, "Every agent must report an explicit resolved effort")
+            print("Resolved configuration for \(harness.rawValue): \(configuration)")
+            if let effort { XCTAssertEqual(configuration.effort, effort, harness.rawValue) }
         }
         XCTAssertTrue(snapshot.items.contains { $0.kind == .user && $0.text == prompt })
         print("---- \(harness.rawValue) log\n\(text)----")
@@ -149,6 +152,27 @@ final class LiveHarnessTests: XCTestCase {
             XCTAssertTrue(header.contains(expected), "\(harness.rawValue) header: \(header)")
         }
         XCTAssertEqual(grokDefault(), before, "a routine's model must not change Grok's default")
+    }
+
+    func testClaudeResolvesVersionedModelsAndDefaultEffortWithoutATurn() throws {
+        let result = try XCTUnwrap(ClaudeConfiguration.read(executable: Harness.claude.defaultExecutable(),
+                                                           directory: folder.path))
+        XCTAssertNotNil(result.session.effort)
+        XCTAssertEqual(result.models.first(where: \.isDefault)?.id, result.session.model)
+        XCTAssertTrue(result.models.allSatisfy { $0.id != "opus" && $0.id != "sonnet" && $0.id != "haiku" })
+        let override = try XCTUnwrap(ClaudeConfiguration.read(executable: Harness.claude.defaultExecutable(),
+            directory: folder.path, model: "haiku", effort: "low"))
+        XCTAssertEqual(override.session.effort, "low")
+    }
+
+    func testInteractiveClaudeReportsItsResolvedModelAndEffort() throws {
+        guard let directory = ProcessInfo.processInfo.environment["ROTA_INTERACTIVE_TEST_DIR"] else {
+            throw XCTSkip("Set ROTA_INTERACTIVE_TEST_DIR to a trusted test workspace")
+        }
+        try XCTSkipUnless(ClaudeUserSettings.read().trusts(directory), "The workspace must already be trusted")
+        let (outcome, log, _) = try run(.claude, prompt: "Reply with exactly: ok. Do not run tools or modify files.",
+                                        message: nil, directory: directory, mode: .claudeInteractive)
+        XCTAssertEqual(outcome, .succeeded, log)
     }
 
     func testEveryAgentReadsAnAttachedFile() throws {

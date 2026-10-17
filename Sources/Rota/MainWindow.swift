@@ -7,8 +7,8 @@ enum SidebarItem: Hashable {
     case routine(String)
 }
 
-/// Sessions first, newest on top, grouped by day, as in Claude Desktop; routines,
-/// which change rarely, below them.
+/// Routines stay above the growing session history, which is grouped by day
+/// with the newest sessions first.
 struct MainWindow: View {
     @Environment(AppModel.self) private var model
 
@@ -26,13 +26,6 @@ struct MainWindow: View {
             set: { model.sidebarVisible = $0 != .detailOnly }
         )) {
             List(selection: $model.selection) {
-                ForEach(DayGroup.group(records), id: \.title) { group in
-                    Section(group.title) {
-                        ForEach(group.records) { record in
-                            SessionRow(record: record).tag(SidebarItem.session(record.id))
-                        }
-                    }
-                }
                 Section("Routines") {
                     ForEach(model.scheduler.routines) { routine in
                         HStack(spacing: 8) {
@@ -40,6 +33,13 @@ struct MainWindow: View {
                             Text(routine.name).lineLimit(1)
                         }
                         .tag(SidebarItem.routine(routine.id))
+                    }
+                }
+                ForEach(DayGroup.group(records), id: \.title) { group in
+                    Section(group.title) {
+                        ForEach(group.records) { record in
+                            SessionRow(record: record).tag(SidebarItem.session(record.id))
+                        }
                     }
                 }
             }

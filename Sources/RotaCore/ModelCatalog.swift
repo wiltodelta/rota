@@ -7,22 +7,27 @@ public struct ModelOption: Hashable, Identifiable, Sendable {
     public var efforts: [String]
     /// The harness runs this one when the routine names none.
     public var isDefault: Bool
+    public var aliases: [String]
 
-    public init(id: String, title: String, efforts: [String], isDefault: Bool = false) {
+    public init(id: String, title: String, efforts: [String], isDefault: Bool = false, aliases: [String] = []) {
         self.id = id
         self.title = title
         self.efforts = efforts
         self.isDefault = isDefault
+        self.aliases = aliases
+    }
+
+    public func matches(_ value: String?) -> Bool {
+        guard let value else { return false }
+        return id == value || aliases.contains(value)
     }
 }
 
 /// The models each harness offers, read from the CLI where it can list them.
 /// Listing spends no quota: Codex answers `model/list` and Grok `grok models`
-/// without a prompt. Claude has no list, so its aliases stand in; each follows
-/// the newest model of its family.
+/// without a prompt. Claude answers control initialization with resolved model
+/// IDs, display names and supported efforts, without starting a model turn.
 public enum ModelCatalog {
-    /// `claude --help`, 2026-10-09.
-    static let claudeEfforts = ["low", "medium", "high", "xhigh", "max"]
     /// The `reasoning_effort` options of a Grok ACP session, 2026-10-09.
     static let grokEfforts = ["low", "medium", "high", "xhigh"]
 
@@ -30,13 +35,30 @@ public enum ModelCatalog {
     public static func models(for harness: Harness, executable: String) -> [ModelOption] {
         switch harness {
         case .claude:
-            return ["fable", "opus", "sonnet", "haiku"].map {
-                ModelOption(id: $0, title: $0.prefix(1).uppercased() + $0.dropFirst(), efforts: claudeEfforts)
-            }
+            return ClaudeConfiguration.read(executable: executable, directory: NSTemporaryDirectory())?.models ?? []
         case .codex: return codexModels(executable: executable)
         case .grok: return grokModels(executable: executable)
         case .shell: return []
         }
+    }
+
+    static func parseClaudeModels(_ value: Any) -> [ModelOption] {
+        let rows = (value as? [String: Any])?["models"] as? [[String: Any]] ?? []
+        let defaultID = rows.first { $0["value"] as? String == "default" }?["resolvedModel"] as? String
+        var options: [ModelOption] = []
+        for row in rows where row["value"] as? String != "default" {
+            guard let id = row["resolvedModel"] as? String,
+                  let title = row["displayName"] as? String, !id.isEmpty else { continue }
+            let alias = row["value"] as? String
+            if let index = options.firstIndex(where: { $0.id == id }) {
+                if let alias, alias != id { options[index].aliases.append(alias) }
+                continue
+            }
+            options.append(ModelOption(id: id, title: title,
+                                       efforts: row["supportedEffortLevels"] as? [String] ?? [],
+                                       isDefault: id == defaultID, aliases: alias.map { $0 == id ? [] : [$0] } ?? []))
+        }
+        return options
     }
 
     static func grokModels(executable: String) -> [ModelOption] {

@@ -24,6 +24,8 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     private let name: String
     private let exitFile: URL
     private let script: URL
+    private let effortFile: URL
+    private var settingsFile: URL?
     private let queue = DispatchQueue(label: "com.wiltodelta.rota.claude-interactive")
     private var transcript: URL?
     private var offset: UInt64 = 0
@@ -45,6 +47,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         name = Self.screenName(session)
         exitFile = folder.appendingPathComponent("\(name).exit")
         script = folder.appendingPathComponent("\(name).zsh")
+        effortFile = folder.appendingPathComponent("\(name)-\(UUID().uuidString).effort")
     }
 
     var attachCommand: [String]? { [ScreenRun.screen, "-r", name] }
@@ -64,7 +67,20 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let session = spec.resume ?? UUID().uuidString.lowercased()
         let run = ClaudeInteractiveRun(spec: spec, journal: journal, session: session, folder: folder)
-        try run.launch(settings: try hookSettings(in: folder))
+        let settings = try hookSettings(in: folder)
+        run.settingsFile = settings
+        run.queue.async {
+            do {
+                if let resolved = ClaudeConfiguration.read(executable: spec.executable,
+                    directory: spec.workingDirectory, model: spec.model, effort: spec.effort, resume: spec.resume) {
+                    journal.configure(resolved.session)
+                }
+                try run.launch(settings: settings)
+            } catch {
+                run.cleanUp()
+                journal.finish(.launchFailed(error.localizedDescription))
+            }
+        }
         return run
     }
 
@@ -82,11 +98,15 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     static func hookSettings(in folder: URL) throws -> URL {
         let command = #"[ -n "$ROTA_CLI" ] && "$ROTA_CLI" notify --needs-reply "#
             + #""Claude is waiting for you in its terminal. Open the session in Terminal to answer.""#
-        let settings: [String: Any] = ["hooks": ["Notification": [[
-            "matcher": "permission_prompt|elicitation_dialog",
-            "hooks": [["type": "command", "command": command]]
-        ]]]]
-        let file = folder.appendingPathComponent("claude-settings.json")
+        let effortCommand = #"if [ -n "$CLAUDE_EFFORT" ] && [ -n "$ROTA_SESSION_EFFORT" ]; then "#
+            + #"printf '%s' "$CLAUDE_EFFORT" > "$ROTA_SESSION_EFFORT"; fi"#
+        let effortHook: [[String: Any]] = [["hooks": [["type": "command", "command": effortCommand]]]]
+        let settings: [String: Any] = ["hooks": [
+            "Notification": [["matcher": "permission_prompt|elicitation_dialog",
+                              "hooks": [["type": "command", "command": command]]]],
+            "PreToolUse": effortHook, "Stop": effortHook
+        ]]
+        let file = folder.appendingPathComponent("claude-settings-\(UUID().uuidString).json")
         try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]).write(to: file)
         return file
     }
@@ -110,8 +130,10 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
             transcript = existing
             offset = (try? FileManager.default.attributesOfItem(atPath: existing.path)[.size] as? UInt64) ?? 0
         }
+        var environment = spec.environment
+        environment["ROTA_SESSION_EFFORT"] = effortFile.path
         let process = ProcessLauncher.loginShellProcess(ScreenRun.screen, ["-dmS", name, "/bin/zsh", "-l", script.path],
-                                                        in: spec.workingDirectory, environment: spec.environment)
+                                                        in: spec.workingDirectory, environment: environment)
         try process.run()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { throw LaunchError.screenFailed(process.terminationStatus) }
@@ -152,6 +174,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
 
     private func poll() {
         guard !journal.isFinished else { return }
+        readEffort()
         readTranscript()
         if let status = exitStatus ?? (isAlive() ? nil : exitStatus ?? -1) {
             return finish(status: status)
@@ -165,6 +188,13 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         }
         // Strong on purpose: the run keeps itself alive until Claude exits.
         queue.asyncAfter(deadline: .now() + 1) { self.poll() }
+    }
+
+    private func readEffort() {
+        guard let value = try? String(contentsOf: effortFile, encoding: .utf8) else { return }
+        let effort = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard ["low", "medium", "high", "xhigh", "max"].contains(effort) else { return }
+        journal.configure(SessionConfiguration(effort: effort))
     }
 
     private func readTranscript() {
@@ -240,6 +270,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     }
 
     private func finish(status: Int32) {
+        readEffort()
         readTranscript()
         let outcome: RunOutcome
         if let stopReason {
@@ -254,8 +285,13 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         }
         journal.finish(outcome)
         Self.log.info("interactive claude \(self.session, privacy: .public) ended: \(outcome.title, privacy: .public)")
-        try? FileManager.default.removeItem(at: exitFile)
-        try? FileManager.default.removeItem(at: script)
+        cleanUp()
+    }
+
+    private func cleanUp() {
+        for file in [exitFile, script, effortFile] + (settingsFile.map { [$0] } ?? []) {
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 }
 

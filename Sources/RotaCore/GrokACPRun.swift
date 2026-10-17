@@ -140,6 +140,23 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     private func sessionReady(_ id: String) {
         sessionID = id
         journal.session(id)
+        guard let effort = spec.effort else { return beginPrompt(id) }
+        // The shared leader can ignore the proxy's effort flag. Apply it to this session only.
+        peer?.request("session/set_config_option", ["sessionId": id, "configId": "reasoning_effort",
+                                                    "value": effort]) { [weak self] result in
+            guard let self else { return }
+            guard case .success(let value) = result else { return self.fail(result, "session/set_config_option") }
+            let applied = self.configure(value)
+            guard applied.effort == effort else {
+                self.journal.finish(.launchFailed("Grok did not apply the requested effort level."))
+                return self.disconnect()
+            }
+            self.beginPrompt(id)
+        }
+    }
+
+    private func beginPrompt(_ id: String) {
+        guard !journal.isFinished, stopReason == nil else { return }
         let params: [String: Any] = ["sessionId": id, "prompt": [["type": "text", "text": spec.prompt]]]
         openPrompts += 1
         peer?.request("session/prompt", params) { [weak self] result in
@@ -169,6 +186,8 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     private func handle(_ method: String, _ params: [String: Any]) {
         guard method == "session/update", !loading, let update = params["update"] as? [String: Any] else { return }
         switch update["sessionUpdate"] as? String {
+        case "config_option_update":
+            configure(update)
         case "agent_message_chunk":
             if let text = (update["content"] as? [String: Any])?["text"] as? String { journal.text(text) }
         case "tool_call":

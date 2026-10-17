@@ -269,7 +269,7 @@ private struct UserBubble: View {
     }
 }
 
-/// "Codex  GPT-6.1-Sol  High": what the answer below came from.
+/// The session's harness, resolved model and applied effort.
 private struct AgentHeader: View {
     @Environment(AppModel.self) private var model
     let record: RunRecord
@@ -278,8 +278,8 @@ private struct AgentHeader: View {
         HStack(spacing: 6) {
             HarnessLogo(harness: record.harness)
             Text(ModelLabel.name(record: record, models: model.settings.models))
-            if let effort = record.effort ?? record.reportedEffort {
-                Text(effort.capitalized).foregroundStyle(Color.secondaryText)
+            if record.reportedEffort != nil || record.effort != nil {
+                Text(ModelLabel.effort(record)).foregroundStyle(Color.secondaryText)
             }
         }
         .font(model.chatText.small)
@@ -296,12 +296,12 @@ enum ModelLabel {
     }
 
     static func model(record: RunRecord, models: [Harness: [ModelOption]], fallback: String? = nil) -> String {
-        guard let id = record.reportedModel ?? record.model ?? fallback else { return "CLI default" }
+        guard let id = record.reportedModel ?? fallback ?? record.model else { return "CLI default" }
         return title(id, harness: record.harness, models: models)
     }
 
     private static func title(_ id: String, harness: Harness, models: [Harness: [ModelOption]]) -> String {
-        if let option = models[harness]?.first(where: { $0.id == id }) { return option.title }
+        if let option = models[harness]?.first(where: { $0.matches(id) }) { return option.title }
         if harness == .claude,
            let match = id.wholeMatch(of: /^claude-(opus|sonnet|haiku|fable)-(\d+)-(\d+)(?:-\d{8})?$/) {
             return "\(match.1.capitalized) \(match.2).\(match.3)"
@@ -309,8 +309,9 @@ enum ModelLabel {
         return id
     }
 
-    static func effort(_ record: RunRecord) -> String {
-        (record.effort ?? record.reportedEffort)?.capitalized ?? "Default effort"
+    static func effort(_ record: RunRecord, fallback: String? = nil) -> String {
+        guard let effort = record.reportedEffort ?? fallback ?? record.effort else { return "Effort unavailable" }
+        return effort == "none" ? "No effort" : effort.capitalized
     }
 }
 

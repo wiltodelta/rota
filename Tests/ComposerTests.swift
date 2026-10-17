@@ -3,11 +3,11 @@
 import XCTest
 
 final class ComposerTests: XCTestCase {
-    func testModelAndEffortUseSessionValuesAndExplicitTurnOverrides() {
+    func testModelAndEffortUseAppliedSessionValues() {
         var record = RunRecord(routineID: "fixture", trigger: .manual, harness: .claude,
                                startedAt: Date(), outcome: .succeeded)
         XCTAssertEqual(ModelLabel.model(record: record, models: [:]), "CLI default")
-        XCTAssertEqual(ModelLabel.effort(record), "Default effort")
+        XCTAssertEqual(ModelLabel.effort(record), "Effort unavailable")
         record.model = "alias"
         record.reportedModel = "resolved-model"
         record.reportedEffort = "medium"
@@ -16,7 +16,22 @@ final class ComposerTests: XCTestCase {
         record.reportedModel = "claude-opus-5-5"
         XCTAssertEqual(ModelLabel.model(record: record, models: [:]), "Opus 5.5")
         record.effort = "high"
-        XCTAssertEqual(ModelLabel.effort(record), "High", "An explicit turn override wins over the thread default")
+        XCTAssertEqual(ModelLabel.effort(record), "Medium",
+                       "The adapter reports the applied effort, including turn overrides")
+    }
+
+    func testReportedEffortWinsOverRequestedLevelAndUnknownIsNotCalledDefault() {
+        var record = RunRecord(routineID: "fixture", trigger: .manual, harness: .claude,
+                               startedAt: Date(), outcome: .succeeded)
+        XCTAssertEqual(ModelLabel.effort(record), "Effort unavailable")
+        record.effort = "high"
+        XCTAssertEqual(ModelLabel.effort(record, fallback: "low"), "Low")
+        record.reportedEffort = "low"
+        XCTAssertEqual(ModelLabel.effort(record), "Low")
+    }
+
+    func testMissingClaudeExecutableDoesNotInventAnUnversionedCatalog() {
+        XCTAssertTrue(ModelCatalog.models(for: .claude, executable: "/missing/claude").isEmpty)
     }
 
     func testAttachmentHistoryRendersFromTheRealMessageProducer() throws {
@@ -46,6 +61,7 @@ final class ComposerTests: XCTestCase {
         journal.finish(.succeeded)
         record.logPath = log.path
         record.sessionID = "synthetic-session"
+        record.reportedEffort = "high"
         record.reportedModel = "claude-opus-5-5"
         XCTAssertEqual(ModelLabel.model(record: record, models: [:]), "Opus 5.5")
         record.effort = "high"

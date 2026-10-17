@@ -16,7 +16,8 @@ Desktop.
   effort to run on: Rota lists the models each agent's CLI offers. Standard five-field cron
   schedules, with common ones a click away and the next three run times shown
   as you type.
-- **Sessions are the main view.** The sidebar lists every routine's sessions,
+- **Sessions are the main view.** Routines stay at the top of the sidebar.
+  Below them, the sidebar lists every routine's sessions,
   newest first, by day. A session reads as a chat laid out like
   super.engineering's: your prompt and messages in bubbles, agent messages
   under the agent's own logo and model, basic tool activity, optional plans,
@@ -24,7 +25,8 @@ Desktop.
   actions in their recorded order. Older sessions retain their folded
   "Worked for …" sections. While a session works, the field shows the clock
   and turns its button into Stop. Its footer shows the session model and reasoning
-  effort, with explicit default labels when the CLI has not reported them. Attach
+  effort as resolved by the CLI. Model choices include their versions, and
+  unsupported or unavailable effort is labeled explicitly. Attach
   files with the paperclip or by dropping them into the composer. Rota keeps
   copies with the session and sends their local paths for the agent to read;
   originals stay untouched. The chat follows the session unless you
@@ -143,7 +145,9 @@ mv Rota.app /Applications/
   prompt and runs it with `zsh -c` in the project folder.
 - **Import** with the download button: pick routines from Claude Desktop or
   Codex. Turn each one off in its app before turning it on in Rota.
-- Select a session to read it and write to it. Under **Routines**, a routine
+- Select a session to read it and write to it. **Show Routine** in its header
+  opens the routine's page with its schedule, settings, and sessions.
+  Under **Routines**, a routine
   shows its schedule and next run, the switch that pauses it, **Run Now** and its
   sessions; **Edit…** opens its settings, Delete included. A new routine runs
   on its schedule from the start.

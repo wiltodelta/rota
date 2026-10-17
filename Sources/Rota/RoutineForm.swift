@@ -170,15 +170,18 @@ private struct ModelPickers: View {
 
     var body: some View {
         let options = model.settings.models[draft.harness] ?? []
-        // Claude names no default; its aliases share one set of efforts.
-        let selected = options.first { $0.id == draft.model } ?? options.first(where: \.isDefault)
+        // Legacy aliases display their current resolved version without rewriting the routine.
+        let selected = options.first { $0.matches(draft.model) } ?? options.first(where: \.isDefault)
             ?? (draft.model == nil ? options.first : nil)
-        Picker("Model", selection: $draft.model) {
+        Picker("Model", selection: Binding(
+            get: { options.first { $0.matches(draft.model) }?.id ?? draft.model },
+            set: { draft.model = $0 }
+        )) {
             Text(options.first(where: \.isDefault).map { "Default (\($0.title))" } ?? "Default")
                 .tag(String?.none)
             Divider()
             ForEach(options) { Text($0.title).tag(Optional($0.id)) }
-            if let current = draft.model, !options.contains(where: { $0.id == current }) {
+            if let current = draft.model, !options.contains(where: { $0.matches(current) }) {
                 Text(current).tag(Optional(current))
             }
         }
@@ -187,7 +190,7 @@ private struct ModelPickers: View {
             if let effort = draft.effort, let selected, !selected.efforts.contains(effort) { draft.effort = nil }
         }
         Picker("Effort", selection: $draft.effort) {
-            Text("Default").tag(String?.none)
+            Text(selected?.efforts.isEmpty == true ? "Not supported" : "Default").tag(String?.none)
             Divider()
             ForEach(selected?.efforts ?? [], id: \.self) { Text($0.capitalized).tag(Optional($0)) }
             if let current = draft.effort, selected?.efforts.contains(current) != true {

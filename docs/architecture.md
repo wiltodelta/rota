@@ -32,13 +32,14 @@ flowchart LR
 - A routine's explicit `model` and `effort` (nil leaves the CLI's default) are
   captured in `RunRecord` at session creation and passed through `LaunchSpec`;
   historical labels and continuations use that snapshot, even after editing
-  the routine. Old records without a snapshot show only the harness and resume
-  without explicit model or effort overrides. Each runner turns the options into its own form, Claude
+  the routine. Old records without a snapshot resume without explicit model or
+  effort overrides; their composer can recover configuration from the harness
+  or readable log as described below. Each runner turns the options into its own form, Claude
   `--model`/`--effort` and Grok `--model`/`--reasoning-effort` through
   `LaunchSpec.modelFlags`, Codex fields in `thread/start` and `turn/start`. A
   session keeps its original harness. `ModelCatalog` lists the choices without
   spending quota: Codex `model/list` with each model's efforts, `grok models`,
-  and Claude's family aliases (it has no list). Each runner writes the model
+  and Claude's control initialization with resolved model IDs and efforts. Each runner writes the model
   the CLI actually picked into its log header. A Grok model passed on the
   command line in leader mode left `grok models`' default untouched (live test,
   2026-10-09); Grok's agent-mode guide says a `session/set_config_option`
@@ -304,7 +305,10 @@ until sent or the app quits. Small chat fonts never fall below 10 pt. Reduce
 Motion stops the stop-ring rotation and suppresses shimmer.
 The File menu holds New Routine and Import, the Routine menu Run Now, Stop and
 Edit Routine for `AppModel.selectedRoutine`; sheets open from `AppModel`
-flags so menus and buttons share them. `ChatTextSettings` holds the chat's font family, monospaced family and size in
+flags so menus and buttons share them. The session header's Show Routine action
+selects its owning routine's existing detail page, where Edit opens the settings.
+At narrow widths the session header moves its utility actions onto a second row,
+keeping the labeled navigation action visible. `ChatTextSettings` holds the chat's font family, monospaced family and size in
 UserDefaults; only the chat and its composer follow them, the sidebar and
 forms keep the system's sizes. `ChatOpener` writes a `.command` file, which needs no Automation permission,
 and `TerminalLauncher` opens it in the terminal picked in Settings: Terminal,
@@ -315,8 +319,9 @@ changes while `.command` files stay with Terminal, then the `.command` handler. 
 
 Layout rules learned while measuring the narrowest window (820 pt):
 
-- Sessions are the main view: the sidebar lists them by day above the
-  routines, and `SessionView` is the chat with its composer. A routine's view
+- Routines appear first in the sidebar, above session history grouped by day,
+  so history growth does not push routine navigation below it. `SessionView`
+  is the chat with its composer. A routine's view
   is its header and sessions; the settings form, used rarely, is a sheet
   (`EditRoutineSheet`). A `Form` is never inside a `ScrollView`: it scrolls
   itself and, nested, lays out at its ideal width and overflows. Inside the old
@@ -327,6 +332,24 @@ Layout rules learned while measuring the narrowest window (820 pt):
 - The harness picker is a menu: four fixed-width segments overflow.
 - Sheets take a minimum and ideal height, never a fixed one: a 640 pt New
   routine sheet put its buttons below a 600 pt window.
+
+The session-to-routine route was checked in the signed dev bundle at
+820 x 552 and 1100 x 720 pt in both appearances, including a hidden sidebar,
+opening Edit from the routine page, and returning to the same session with its
+unsent draft preserved. Bounds checks found no overflow. The native navigation
+and terminal buttons both measured 24 pt high; visible icon-to-label gaps were
+10-11 pt, with native glyph-edge variation. Calibrated navigation-label samples
+measured 13.14:1 in light and 9.73:1 in dark. Precision candidates were existing
+section gaps, native button glyph bounds, distinct composer controls and the
+centered summary/action row; no confirmed new alignment defect remained.
+Verification used Accessibility actions, not assistive-technology task completion.
+
+The routines-first sidebar was rendered at 820 x 552 pt in both appearances
+with two synthetic routines and 40 sessions. The Routines heading appeared above
+Today in both captures, and routine/session selection still worked. Bounds checks
+found no overflow. Precision candidates were native section spacing, virtualized
+history rows, scrollbar edges and existing control glyph bounds; no new confirmed
+alignment defect remained.
 
 ## Checking the UI
 
@@ -350,12 +373,13 @@ because SwiftUI can redraw the form while its menu is open and drop the pick.
 through `RunEvents.configuration` and `RunJournal.configure`. Scheduler merges
 updates into both active and historical copies, guarded by run ID. Continuation
 clears reported values before querying the harness again. The composer prefers
-the reported model, but an explicit turn effort wins over a reported thread
-default (Codex sends effort on `turn/start`). These are configuration values,
-not per-turn execution telemetry. Claude does not report resolved default effort.
+the reported model and applied effort. Codex sends its explicit turn effort on
+`turn/start`, so its adapter combines that override with the thread configuration
+before reporting it. These are configuration values, not per-turn execution telemetry.
 Older records may recover a model from a bounded tail of Rota's readable headers;
-otherwise the footer says `CLI default` and `Default effort` rather than guessing
-from the routine's current settings.
+Claude sessions missing an effort snapshot can resolve the continuation configuration
+through a read-only control query. Unknown effort is labeled `Effort unavailable`,
+never a fictitious default. No historical record is rewritten by this query.
 
 `ChatAttachmentStore` copies regular files into UUID subfolders beside the owned
 log, in `<log>.attachments`. Picker and URL drops share this path, off the UI actor;
@@ -399,3 +423,60 @@ cleaned up, including newly created Claude `memory/` and Grok
 folders were preserved. Disposable mutation checks rejected moving originals instead of
 copying, omitting attachment retention, dropping configuration callbacks, and
 reporting a failed continuation launch as an accepted message.
+
+### Resolved Claude configuration
+
+`ClaudeConfiguration` uses `initialize` and `get_settings` control requests over
+stream-json, with no prompt and `--no-session-persistence`. Initialization supplies
+`resolvedModel`, versioned display names and supported efforts. The catalog stores
+concrete IDs, deduplicates aliases, and retains alias matches for existing routines.
+Picker bindings resolve legacy aliases for display without rewriting saved routines;
+a new selection stores the versioned ID. Codex and Grok already list versioned IDs.
+No model-version table is embedded in Rota.
+
+`get_settings.response.applied` supplies the actual model and effort after CLI
+resolution, including environment precedence and model or organization limits.
+Stream runs request it from their own process. Interactive runs query before
+launch on their runner queue, then refresh effort from `CLAUDE_EFFORT` in session-only
+PreToolUse/Stop hooks. The hook writes only the level into a per-launch cache file,
+which the runner removes on finish. Hook settings are per-launch files, also
+removed on finish, so dev and installed runs never overwrite a shared settings file.
+The user's settings and status line are unchanged.
+The ordinary transcript still supplies interactive model changes. Explicit null effort
+means no effort parameter is sent, rendered as `No effort`, not an invented level.
+
+The control wire was checked against installed Claude Code 2.1.302. Public field
+semantics are documented in [Claude status lines](https://code.claude.com/docs/en/statusline)
+and [hook input fields](https://code.claude.com/docs/en/hooks#common-input-fields).
+Run the interactive live check with `ROTA_INTERACTIVE_TEST_DIR` pointing at an
+already trusted test workspace; the test never grants trust itself.
+
+Grok's leader was observed returning `high` when its proxy was launched with
+`--reasoning-effort low`. Explicit effort now uses `session/set_config_option`
+for `reasoning_effort` before the first prompt; Rota checks the returned option
+list and also consumes `config_option_update` notifications. Model selection
+continues to use the launch flag, since setting the model through that method
+would synchronize defaults to other clients. Grok 1.0.62 accepts a string `value`
+on this wire; its bundled guide's `{ "value": "low" }` example was rejected with
+`Invalid params`. Live checks confirmed applied `low` on all three agents and
+an unchanged Grok config. Existing run records are not rewritten.
+
+
+The versioned-picker follow-up was exercised in the signed dev bundle at
+820 x 552 pt in both appearances. Legacy alias display and Cancel preserved the
+stored alias; choosing another model and saving stored its concrete ID. Claude,
+Codex and Grok selectors resolved their default versions, and Haiku 4.5 disabled
+unsupported effort. Bounds checks found no overflow. Calibrated composer-label
+samples measured 4.82:1 in light and 5.71:1 in dark. Precision candidates were
+section/action-group gaps, scrollbar bounds beside unrelated controls and native
+text-box baseline proxies; model, effort and harness controls shared the same
+right edge. No confirmed new alignment defect remained. Verification used
+Accessibility actions, not assistive-technology task completion.
+
+The separate live suite covered configuration without a turn, explicit effort
+on every agent, interactive Claude, continuations, steering, attachments and
+stopping. The external-terminal GUI test was excluded. Provider fixtures were
+removed; the pre-existing Codex daemon and installed Rota were preserved. The
+Grok configuration and development defaults matched their pre-check state.
+Disposable mutation checks rejected losing alias resolution and prioritizing
+requested effort over applied effort.
