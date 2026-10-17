@@ -152,7 +152,7 @@ final class TranscriptPagingTests: XCTestCase {
         XCTAssertEqual(reader.read(log: log).items.last?.text, "Message 7")
         XCTAssertGreaterThan(cut, lastNewline)
         // Reopen a journal with an unsupported older record outside the initial page.
-        var lines = full.split(separator: 10).map(Data.init)
+        var lines = full.split(separator: 10).map { Data($0) }
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: lines[1]) as? [String: Any])
         object["version"] = 2
         lines[1] = try JSONSerialization.data(withJSONObject: object)
