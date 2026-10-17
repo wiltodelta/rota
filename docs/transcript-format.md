@@ -70,7 +70,9 @@ validated when their page is loaded, not claimed to have been checked at open.
 The header is always validated. The producer completes a streamed entry before
 introducing the next entry; paging relies on that ordering. Continuation still
 validates the whole journal. Legacy and Shell reads retain their existing 400 KB tail limit.
-Retention and explicit routine deletion remove both files together.
+Retention, individual session deletion, and routine deletion remove both files
+together. Manual session deletion requires confirmation and protects active
+sessions; ownership and failure handling are described in [Architecture](architecture.md).
 
 ## Presentation and extension boundary
 
@@ -78,8 +80,11 @@ Retention and explicit routine deletion remove both files together.
 it while the run is active. Polling and page requests share that reader off the
 UI actor; scheduler refreshes and run completion retain already loaded pages.
 The view changes state only when the snapshot changes. A pending page request
-supersedes any older poll result. The footer copies loaded agent messages and
-labels that scope while earlier pages remain. Normalized entries render
+supersedes any older poll result. A finished session moves its trailing status
+entry matching the run outcome into one footer with the completion time, result, and duration. It does not
+repeat the status as a transcript row or offer a bulk Copy action. Earlier status
+entries from continued runs remain in order, and a missing final status uses the
+run record outcome. Legacy sessions share the footer without Copy. Normalized entries render
 in their recorded order with stable IDs and SwiftUI scroll targets. Adjacent tool
 calls form a collapsed group labeled with the number of loaded calls, including
 a single call. Expanding reveals complete, selectable titles with wrapping.
@@ -159,3 +164,11 @@ page mapping; a disposable mutation that grouped agent text fails those checks.
 Set `ROTA_TOOL_FIXTURE_DIR` while running its producer fixture test to export
 synthetic app data for this UI check. This verification uses synthetic history,
 not a live provider conversation.
+
+The completion footer follow-up was checked in the signed development app at
+820 by 600 points in both appearances using producer-generated synthetic data.
+The Accessibility regression check found two completion rows and a bulk Copy
+button before the fix, and one combined completion row without that button after
+it. Legacy logs and a legacy log missing its final status also retained exactly
+one completion row. Code-block Copy remained available. Bounds checks and
+calibrated text contrast passed; `transcriptCompletion` identifies the footer.

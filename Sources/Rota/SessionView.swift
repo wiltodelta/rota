@@ -113,6 +113,13 @@ struct SessionView: View {
                 }
                 .accessibilityIdentifier("openTerminal")
             }
+            Button("Delete Session…", systemImage: "trash", role: .destructive) {
+                model.sessionToDelete = record
+            }
+            .labelStyle(.iconOnly)
+            .help("Delete this session and its logs")
+            .disabled(!model.scheduler.canDelete(current))
+            .accessibilityIdentifier("deleteSession")
             // A session that takes messages has Stop beside its field.
             if running && !model.scheduler.canMessage(record) {
                 Button("Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }

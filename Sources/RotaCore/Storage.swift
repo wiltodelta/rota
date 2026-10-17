@@ -154,6 +154,34 @@ public struct RunHistory: Sendable {
         try? FileManager.default.removeItem(at: file(for: routineID))
     }
 
+    /// Deletes one finished session and its owned logs, preserving shared files.
+    @discardableResult
+    public func remove(_ id: UUID, for routineID: String) throws -> Bool {
+        let records = try JSONFile.read([RunRecord].self, from: file(for: routineID)) ?? []
+        guard let record = records.first(where: { $0.id == id }) else { return false }
+        guard record.outcome != .running else { throw HistoryDeletionError.running }
+        let retained = records.filter { $0.id != id }
+        if let path = record.logPath {
+            let log = URL(fileURLWithPath: path).standardizedFileURL
+            let resolvedLog = log.resolvingSymlinksInPath().path
+            let shared = retained.contains {
+                $0.logPath.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } == resolvedLog
+            }
+            let folder = location.logs.appendingPathComponent(routineID).resolvingSymlinksInPath()
+            guard folder.deletingLastPathComponent().path == location.logs.resolvingSymlinksInPath().path,
+                  log.deletingLastPathComponent().resolvingSymlinksInPath().path == folder.path,
+                  log.pathExtension == "log" else { throw HistoryDeletionError.foreignLog }
+            if !shared {
+                for url in [log, TranscriptReader.journalURL(for: log)] {
+                    do { try FileManager.default.removeItem(at: url) } catch let error as CocoaError
+                        where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile { }
+                }
+            }
+        }
+        try JSONFile.write(retained, to: file(for: routineID))
+        return true
+    }
+
     /// A normalized transcript has exactly the same retention as its readable log.
     private func removeLog(_ path: String) {
         try? FileManager.default.removeItem(atPath: path)
@@ -165,5 +193,16 @@ public struct RunHistory: Sendable {
             .replacingOccurrences(of: ":", with: "-")
         return location.logs.appendingPathComponent(record.routineID)
             .appendingPathComponent("\(stamp).log")
+    }
+}
+
+enum HistoryDeletionError: LocalizedError {
+    case running, foreignLog
+
+    var errorDescription: String? {
+        switch self {
+        case .running: "Stop the session before deleting it."
+        case .foreignLog: "The session log is outside Rota's log folder."
+        }
     }
 }

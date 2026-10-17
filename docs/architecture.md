@@ -237,6 +237,19 @@ flowchart LR
   deleting dropped logs, preserving any log still referenced by a retained
   record. Runs left `running` by a previous launch become
   `interrupted` at start.
+- Manual session deletion uses `Scheduler.deleteSession`, which reloads the
+  stored record and rejects active runs, including interactive Claude processes
+  surviving an app restart. `RunHistory.remove` deletes the readable log and
+  transcript journal only inside that routine's owned log directory, preserves
+  files referenced by another record, and tolerates missing files. Other file
+  errors retain the history entry for retry; deleting the pair is not atomic.
+  Successful deletion cancels pending resumes and clears the composer draft.
+  The UI requires confirmation, selects a neighboring session or the routine
+  when empty, and leaves the routine and provider history untouched.
+  Verification covers all finished outcomes, running/shared/foreign logs,
+  symlink escapes, missing files and deletion failures. The native confirmation,
+  Cancel, adjacent-session selection and empty history were exercised on
+  synthetic data in both appearances at the 820 pt minimum width.
 
 ## App
 

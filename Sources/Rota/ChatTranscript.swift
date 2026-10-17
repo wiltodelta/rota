@@ -21,6 +21,12 @@ struct ChatTranscript: View {
     @State private var viewport = TranscriptViewport()
     @State private var pageAnchor: TranscriptViewport.Anchor?
 
+    private var closingNote: TranscriptItem? {
+        guard !running, record.endedAt != nil, let last = items.last, last.kind == .status,
+              last.text.hasPrefix(record.outcome.title + " after ") else { return nil }
+        return last
+    }
+
     var body: some View {
         let turns = structured ? [] : TranscriptTurn.group(items)
         let rows = structured ? WorkRow.group(items) : []
@@ -38,7 +44,8 @@ struct ChatTranscript: View {
                         .accessibilityIdentifier("loadEarlierMessages")
                     }
                     if structured {
-                        ForEach(rows) { row in
+                        // The last status belongs to the footer, not a second transcript row.
+                        ForEach(rows.dropLast(closingNote == nil ? 0 : 1)) { row in
                             VStack(alignment: .leading, spacing: 0) {
                                 switch row {
                                 case .note(let item):
@@ -64,9 +71,7 @@ struct ChatTranscript: View {
                         if running {
                             WorkingLabel(since: model.scheduler.runStartedAt(record))
                         } else if record.endedAt != nil {
-                            TurnFooter(record: record, status: nil,
-                                       copy: .agents(items),
-                                       copyLabel: hasEarlier ? "Copy loaded agent messages" : "Copy agent messages")
+                            TurnFooter(record: record, status: closingNote?.text)
                         }
                     } else {
                         ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
@@ -227,7 +232,7 @@ private struct TurnView: View {
             ForEach(turn.answer) { AnswerView(item: $0) }
             ForEach(turn.notes.filter { $0 != closingNote }) { NoteView(item: $0) }
             if finished {
-                TurnFooter(record: record, status: closingNote?.text, copy: .answer(copyText))
+                TurnFooter(record: record, status: closingNote?.text)
             }
         }
     }
@@ -241,9 +246,6 @@ private struct TurnView: View {
         return count == 1 ? "1 tool call" : "\(count) tool calls"
     }
 
-    private var copyText: String {
-        turn.answer.map(\.text).joined(separator: "\n\n")
-    }
 }
 
 private struct UserBubble: View {
@@ -334,55 +336,22 @@ private struct NoteView: View {
     }
 }
 
-/// "2:31 PM · Succeeded after 15 s" and a copy button, under a finished turn.
+/// One completion line with its time, outcome and duration, under a finished turn.
 private struct TurnFooter: View {
     @Environment(AppModel.self) private var model
     let record: RunRecord
     let status: String?
-    enum CopySource {
-        case answer(String)
-        case agents([TranscriptItem])
-
-        var hasText: Bool {
-            switch self {
-            case .answer(let text): !text.isEmpty
-            case .agents(let items): items.contains { $0.kind == .agent && !$0.text.isEmpty }
-            }
-        }
-
-        var text: String {
-            switch self {
-            case .answer(let text): text
-            case .agents(let items): items.filter { $0.kind == .agent }.map(\.text).joined(separator: "\n\n")
-            }
-        }
-    }
-
-    let copy: CopySource
-    var copyLabel = "Copy the answer"
-
     var body: some View {
         HStack(spacing: 10) {
-            // The log's status line starts lowercase ("succeeded after 12 s"); here it starts the clause.
+            // Capitalize legacy status text at the start of this clause.
             Text([record.endedAt?.formatted(date: .omitted, time: .shortened),
                   status.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? record.outcome.title]
                 .compactMap { $0 }.joined(separator: " \u{00B7} "))
                 .foregroundStyle(record.outcome.isFailure ? Color.errorText : Color.secondaryText)
             Hairline()
-            if copy.hasText {
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(copy.text, forType: .string)
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(Color.secondaryText)
-                .help(copyLabel)
-                .accessibilityLabel(copyLabel)
-            }
         }
         .font(model.chatText.small)
+        .accessibilityIdentifier("transcriptCompletion")
     }
 }
 

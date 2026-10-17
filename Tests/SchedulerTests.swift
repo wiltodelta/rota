@@ -87,6 +87,43 @@ final class SchedulerTests: XCTestCase {
         XCTAssertNil(scheduler.routine("report")?.nextFire)
     }
 
+    func testSessionDeletionRechecksActiveStateAndCancelsPendingResume() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        var stale = try XCTUnwrap(scheduler.active[routine.id])
+        stale.outcome = .succeeded
+        XCTAssertFalse(scheduler.canDelete(stale))
+        XCTAssertFalse(scheduler.deleteSession(stale))
+        XCTAssertEqual(scheduler.history.records(for: routine.id).count, 1)
+        launcher.completions[0](.succeeded)
+        let finished = try XCTUnwrap(scheduler.history.records(for: routine.id).first)
+        XCTAssertTrue(scheduler.canDelete(finished))
+        scheduler.pendingResumes[finished.id] = routine.id
+        let version = scheduler.historyVersion
+        XCTAssertTrue(scheduler.deleteSession(finished), scheduler.lastError ?? "")
+        XCTAssertNil(scheduler.pendingResumes[finished.id])
+        XCTAssertTrue(scheduler.history.records(for: routine.id).isEmpty)
+        XCTAssertNotNil(scheduler.routine(routine.id))
+        XCTAssertGreaterThan(scheduler.historyVersion, version)
+        scheduler.markRead(finished)
+        XCTAssertTrue(scheduler.history.records(for: routine.id).isEmpty, "Closing the deleted view must not revive it")
+    }
+
+    func testDeletionRechecksAnInteractiveSessionThatOutlivedTheApp() throws {
+        let routine = addDailyRoutine()
+        var record = RunRecord(routineID: routine.id, trigger: .manual, harness: .claude,
+                               startedAt: clock, endedAt: clock, outcome: .interrupted)
+        record.sessionID = "synthetic-session"
+        scheduler.saveRecord(record)
+        var probes = 0
+        scheduler.sessionAlive = { _ in probes += 1; return true }
+        XCTAssertTrue(scheduler.canDelete(record))
+        XCTAssertEqual(probes, 0, "Drawing the UI must not probe a process")
+        XCTAssertFalse(scheduler.deleteSession(record))
+        XCTAssertEqual(probes, 1)
+        XCTAssertEqual(scheduler.history.records(for: routine.id), [record])
+    }
+
     func testFiresWhenDueAndBuildsTheHarnessCommand() throws {
         _ = addDailyRoutine()
         clock = makeDate(hour: 9, minute: 59)

@@ -20,7 +20,7 @@ Desktop.
   newest first, by day. A session reads as a chat laid out like
   super.engineering's: your prompt and messages in bubbles, agent messages
   under the agent's own logo and model, basic tool activity, optional plans,
-  and a footer with the time and a copy button. New sessions keep messages and
+  and one completion line with the time, result, and duration. New sessions keep messages and
   actions in their recorded order. Older sessions retain their folded
   "Worked for …" sections. While a session works, the field shows the clock
   and turns its button into Stop. The chat follows the session unless you
@@ -49,6 +49,9 @@ Desktop.
   each script until you tick "Suppress this message permanently" once. The last
   50 finished sessions of each routine are kept. Running sessions are protected;
   skipped slots have a separate history limit and never displace sessions.
+  Delete a finished session and its local logs with the trash button or
+  **Delete Session…** in its context menu. Confirmation is required; the
+  routine and the agent's own history stay unchanged.
 - **Agents manage routines.** A Claude Code, Codex or Grok Build session can
   schedule a routine ("run this every weekday at 9"), change, run, pause or
   delete one, and read or message its sessions, through Rota's MCP server.

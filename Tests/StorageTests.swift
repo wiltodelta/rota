@@ -66,6 +66,110 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(closed[0].endedAt, Date(timeIntervalSince1970: 60))
     }
 
+    func testDeletingOneSessionRemovesBothLogsAndPreservesItsNeighbor() throws {
+        let history = RunHistory(location: location)
+        let first = try savedSession(history, at: 0)
+        let second = try savedSession(history, at: 60)
+        XCTAssertTrue(try history.remove(first.id, for: "a"))
+        XCTAssertEqual(history.records(for: "a"), [second])
+        for record in [first, second] {
+            let log = try XCTUnwrap(record.logPath)
+            XCTAssertEqual(FileManager.default.fileExists(atPath: log), record.id == second.id)
+            XCTAssertEqual(FileManager.default.fileExists(atPath: TranscriptReader.journalURL(
+                for: URL(fileURLWithPath: log)).path), record.id == second.id)
+        }
+        XCTAssertFalse(try history.remove(first.id, for: "a"))
+    }
+
+    func testDeletionProtectsRunningAndSharedLogsAndToleratesMissingFiles() throws {
+        let history = RunHistory(location: location)
+        var active = try savedSession(history, at: 0)
+        active.outcome = .running
+        try history.upsert(active)
+        XCTAssertThrowsError(try history.remove(active.id, for: "a"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(active.logPath)))
+        var old = active
+        old.id = UUID()
+        old.outcome = .succeeded
+        old.logPath = try XCTUnwrap(old.logPath).replacingOccurrences(of: "/logs/a/", with: "/logs/a/../a/")
+        try history.upsert(old)
+        XCTAssertTrue(try history.remove(old.id, for: "a"))
+        XCTAssertEqual(history.records(for: "a"), [active])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(active.logPath)))
+        let missing = try savedSession(history, at: 120)
+        try FileManager.default.removeItem(atPath: try XCTUnwrap(missing.logPath))
+        XCTAssertTrue(try history.remove(missing.id, for: "a"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: TranscriptReader.journalURL(
+            for: URL(fileURLWithPath: try XCTUnwrap(missing.logPath))).path))
+    }
+
+    func testDeletionRefusesForeignLogsAndPropagatesStorageFailures() throws {
+        let history = RunHistory(location: location)
+        var record = try savedSession(history, at: 0)
+        let foreign = directory.appendingPathComponent("unrelated.log")
+        try Data("unrelated".utf8).write(to: foreign)
+        record.logPath = foreign.path
+        try history.upsert(record)
+        XCTAssertThrowsError(try history.remove(record.id, for: "a"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: foreign.path))
+        XCTAssertEqual(history.records(for: "a"), [record])
+        try Data("broken history".utf8).write(to: location.historyDirectory.appendingPathComponent("a.json"))
+        XCTAssertThrowsError(try history.remove(record.id, for: "a"))
+    }
+
+    func testLogDeletionFailureKeepsTheHistoryEntryForRetry() throws {
+        let history = RunHistory(location: location)
+        let record = try savedSession(history, at: 0)
+        let log = try XCTUnwrap(record.logPath)
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: log)
+        defer { try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: log) }
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: log)[.immutable] as? Bool, true)
+        XCTAssertThrowsError(try history.remove(record.id, for: "a"))
+        XCTAssertEqual(history.records(for: "a"), [record])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: log))
+        try FileManager.default.setAttributes([.immutable: false], ofItemAtPath: log)
+        XCTAssertTrue(try history.remove(record.id, for: "a"))
+    }
+
+    func testEveryFinishedOutcomeCanBeDeleted() throws {
+        let history = RunHistory(location: location)
+        let outcomes: [RunOutcome] = [.succeeded, .failed(exitCode: 1), .timedOut, .cancelled,
+                                      .interrupted, .launchFailed("synthetic"), .skipped("synthetic")]
+        for (index, outcome) in outcomes.enumerated() {
+            var record = try savedSession(history, at: TimeInterval(index * 60))
+            record.outcome = outcome
+            try history.upsert(record)
+            XCTAssertTrue(try history.remove(record.id, for: "a"), outcome.title)
+            XCTAssertTrue(history.records(for: "a").isEmpty)
+        }
+    }
+
+    func testDeletionDoesNotFollowALogDirectoryOutsideStorage() throws {
+        let history = RunHistory(location: location)
+        let outside = directory.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: location.logs, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: location.logs.appendingPathComponent("a"),
+                                                  withDestinationURL: outside)
+        let record = try savedSession(history, at: 0)
+        XCTAssertThrowsError(try history.remove(record.id, for: "a"))
+        XCTAssertEqual(history.records(for: "a"), [record])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(record.logPath)))
+    }
+
+    private func savedSession(_ history: RunHistory, at seconds: TimeInterval) throws -> RunRecord {
+        var record = RunRecord(routineID: "a", trigger: .manual, harness: .codex,
+                               startedAt: Date(timeIntervalSince1970: seconds),
+                               endedAt: Date(timeIntervalSince1970: seconds + 30), outcome: .succeeded)
+        let log = history.logFile(for: record)
+        try FileManager.default.createDirectory(at: log.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("log".utf8).write(to: log)
+        try Data("journal".utf8).write(to: TranscriptReader.journalURL(for: log))
+        record.logPath = log.path
+        try history.upsert(record)
+        return record
+    }
+
     func testModelSnapshotRoundTripsAndOldRecordsDecodeWithoutIt() throws {
         var record = RunRecord(routineID: "a", trigger: .manual, harness: .codex,
                                startedAt: Date(timeIntervalSince1970: 0), outcome: .succeeded)

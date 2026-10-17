@@ -91,6 +91,7 @@ final class AppModel {
     var sessionDrafts: [UUID: String] = [:]
     var presentingNew = false
     var presentingImport = false
+    var sessionToDelete: RunRecord?
     /// The routine whose settings sheet is open.
     var editingRoutineID: String?
     /// Whether the sessions and routines list shows; kept across launches.
@@ -115,6 +116,21 @@ final class AppModel {
         guard let routine = selectedRoutine else { return }
         selection = .routine(routine.id)
         editingRoutineID = routine.id
+    }
+
+    func deleteSession(_ record: RunRecord) {
+        let records = selection == .session(record.id) ? scheduler.allRecords() : []
+        guard scheduler.deleteSession(record) else { return }
+        sessionDrafts[record.id] = nil
+        if selection == .session(record.id) {
+            let remaining = records.filter { $0.id != record.id }
+            if remaining.isEmpty {
+                selection = .routine(record.routineID)
+            } else {
+                let index = min(records.firstIndex { $0.id == record.id } ?? 0, remaining.count - 1)
+                selection = .session(remaining[index].id)
+            }
+        }
     }
     let settings = AppSettings()
     let chatText = ChatTextSettings()

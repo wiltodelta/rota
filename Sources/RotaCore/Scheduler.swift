@@ -158,6 +158,31 @@ public final class Scheduler {
         persist()
     }
 
+    public func canDelete(_ record: RunRecord) -> Bool {
+        guard let stored = current(record.id, routineID: record.routineID) else { return false }
+        return stored.outcome != .running && !isActive(stored)
+    }
+
+    /// The confirmation can outlive the record it showed, so check current state again.
+    @discardableResult
+    public func deleteSession(_ record: RunRecord) -> Bool {
+        guard let stored = current(record.id, routineID: record.routineID),
+              stored.outcome != .running, !isActive(stored), !stillRunning(stored) else {
+            lastError = "The session is running or is no longer in history."
+            return false
+        }
+        do {
+            guard try history.remove(record.id, for: record.routineID) else { return false }
+            pendingResumes[record.id] = nil
+            historyVersion += 1
+            return true
+        } catch {
+            lastError = "Could not delete the session: \(error.localizedDescription)"
+            Self.log.error("Could not delete session: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+    }
+
     private func persist() {
         do {
             try store.save(routines)

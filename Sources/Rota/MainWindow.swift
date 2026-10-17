@@ -82,6 +82,20 @@ struct MainWindow: View {
         }
         .sheet(isPresented: $model.presentingImport) { ImportSheet() }
         .sheet(isPresented: $model.presentingNew) { NewRoutineSheet() }
+        .confirmationDialog("Delete Session?", isPresented: Binding(
+            get: { model.sessionToDelete != nil },
+            set: { if !$0 { model.sessionToDelete = nil } }
+        ), titleVisibility: .visible, presenting: model.sessionToDelete) { record in
+            Button("Delete Session", role: .destructive) {
+                model.deleteSession(record)
+                model.sessionToDelete = nil
+            }
+            .accessibilityIdentifier("confirmDeleteSession")
+        } message: { record in
+            let date = record.startedAt.formatted(date: .abbreviated, time: .shortened)
+            Text("Permanently delete the session from \(date) and its logs? "
+                 + "The routine and the agent's own history stay unchanged.")
+        }
         .alert("Rota", isPresented: Binding(
             get: { model.scheduler.lastError != nil },
             set: { if !$0 { model.scheduler.lastError = nil } }
@@ -203,6 +217,10 @@ private struct SessionRow: View {
                 dot(.accentColor, size: 7)
                     .accessibilityLabel("Unread")
             }
+        }
+        .contextMenu {
+            Button("Delete Session…", role: .destructive) { model.sessionToDelete = record }
+                .disabled(!model.scheduler.canDelete(record))
         }
     }
 
