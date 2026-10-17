@@ -89,6 +89,17 @@ final class AppModel {
     var selection: SidebarItem?
     /// Unsent messages survive switching between sessions for this app launch.
     var sessionDrafts: [UUID: String] = [:]
+    var sessionAttachments: [UUID: [ChatAttachment]] = [:]
+
+    func discardDraftAttachments() {
+        guard !sessionAttachments.isEmpty else { return }
+        for record in scheduler.allRecords() {
+            guard let files = sessionAttachments[record.id],
+                  let store = try? scheduler.history.attachments(for: record) else { continue }
+            for file in files { try? store.discard(file) }
+        }
+        sessionAttachments = [:]
+    }
     var presentingNew = false
     var presentingImport = false
     var sessionToDelete: RunRecord?
@@ -122,6 +133,7 @@ final class AppModel {
         let records = selection == .session(record.id) ? scheduler.allRecords() : []
         guard scheduler.deleteSession(record) else { return }
         sessionDrafts[record.id] = nil
+        sessionAttachments[record.id] = nil
         if selection == .session(record.id) {
             let remaining = records.filter { $0.id != record.id }
             if remaining.isEmpty {
@@ -246,6 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        model.discardDraftAttachments()
         controlServer?.stop()
     }
 

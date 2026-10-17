@@ -48,6 +48,9 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     /// Explicit model and effort requested when this session started; absent in old records or for CLI defaults.
     public var model: String?
     public var effort: String?
+    /// The session configuration reported by the harness, rather than a current CLI default.
+    public var reportedModel: String?
+    public var reportedEffort: String?
     public var startedAt: Date
     public var endedAt: Date?
     public var outcome: RunOutcome

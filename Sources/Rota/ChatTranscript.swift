@@ -255,9 +255,12 @@ private struct UserBubble: View {
     var body: some View {
         HStack {
             Spacer(minLength: 80)
-            Text(text)
+            let message = ChatMessage.decode(text)
+            VStack(alignment: .leading, spacing: 8) {
+                if !message.text.isEmpty { Text(message.text).textSelection(.enabled) }
+                if !message.attachments.isEmpty { AttachmentChips(attachments: message.attachments) }
+            }
                 .font(model.chatText.body)
-                .textSelection(.enabled)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
                 .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
@@ -275,7 +278,7 @@ private struct AgentHeader: View {
         HStack(spacing: 6) {
             HarnessLogo(harness: record.harness)
             Text(ModelLabel.name(record: record, models: model.settings.models))
-            if let effort = record.effort {
+            if let effort = record.effort ?? record.reportedEffort {
                 Text(effort.capitalized).foregroundStyle(Color.secondaryText)
             }
         }
@@ -287,9 +290,27 @@ private struct AgentHeader: View {
 /// The harness, and the model when the routine picked one, by the title its CLI lists.
 enum ModelLabel {
     static func name(record: RunRecord, models: [Harness: [ModelOption]]) -> String {
-        guard let id = record.model else { return record.harness.title }
-        let title = models[record.harness]?.first { $0.id == id }?.title ?? id
+        guard let id = record.reportedModel ?? record.model else { return record.harness.title }
+        let title = title(id, harness: record.harness, models: models)
         return "\(record.harness.title)  \(title)"
+    }
+
+    static func model(record: RunRecord, models: [Harness: [ModelOption]], fallback: String? = nil) -> String {
+        guard let id = record.reportedModel ?? record.model ?? fallback else { return "CLI default" }
+        return title(id, harness: record.harness, models: models)
+    }
+
+    private static func title(_ id: String, harness: Harness, models: [Harness: [ModelOption]]) -> String {
+        if let option = models[harness]?.first(where: { $0.id == id }) { return option.title }
+        if harness == .claude,
+           let match = id.wholeMatch(of: /^claude-(opus|sonnet|haiku|fable)-(\d+)-(\d+)(?:-\d{8})?$/) {
+            return "\(match.1.capitalized) \(match.2).\(match.3)"
+        }
+        return id
+    }
+
+    static func effort(_ record: RunRecord) -> String {
+        (record.effort ?? record.reportedEffort)?.capitalized ?? "Default effort"
     }
 }
 

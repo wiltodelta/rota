@@ -253,6 +253,34 @@ flowchart LR
 
 ## App
 
+`ImportSheet` separates the fixed search header and action footer from the
+scrolling source groups. It is 640 x 500 pt and fits the 820 x 520 pt minimum content size.
+Search matches names, folders and source apps; imported routines are hidden
+by default and remain readable but unselectable when shown. Select All acts
+only on visible, supported, not-yet-imported rows. Filtering preserves the
+selection, and the footer counts all selected rows, including hidden ones.
+Source activity uses neutral row text; the selected-active warning occupies a
+reserved footer area so controls do not move when selection changes. Import
+rechecks availability, saves paused routines, and clears model/effort only
+when changing the original agent. Source stores remain read only.
+Rows use native checkbox toggles with the whole label as the selection target;
+already imported rows are checked and disabled, outside the selection count.
+The signed development sheet was checked at minimum window size in both
+appearances. Synthetic instances of the shipping view exercised long names,
+search, hidden selections, filtered Select All, imported and unsupported rows,
+Cancel, and actual scheduler saves into isolated storage. No source routine was
+imported or run during verification.
+
+Settings success labels (`Allowed`, `Installed`, CLI versions) share
+`StatusLabelStyle`: a green symbol, readable secondary text and a 4 pt
+icon-to-title layout gap. Check consistency between sibling states, including
+rendered glyph edges, rather than judging each row in isolation. A native
+520 pt Settings fixture using the production permission row and label style
+was checked in both appearances at 2x: visible icon-to-letter gaps were
+5.5-6 pt (different letter bearings), and status text contrast was 4.83:1 in
+light and 5.64:1 in dark. The fixture supplies granted permissions; it does not
+change system grants or install the command.
+
 Chat implementation research and proposed changes, including the evidence and
 limits of inspecting super.engineering, live in [Chat UI research](chat-ui-research.md).
 The intended direction is a small provider-independent transcript contract
@@ -314,3 +342,60 @@ row's 8 pt inset and up or down as far as the list (a pinned section header
 floats over the rows). Every
 capture runs it. `choose` reads the pop-up back and retries,
 because SwiftUI can redraw the form while its menu is open and drop the pick.
+
+## Session configuration and attachments
+
+`RunRecord.model` and `effort` remain requested snapshots. Optional
+`reportedModel` and `reportedEffort` hold session configuration from each adapter
+through `RunEvents.configuration` and `RunJournal.configure`. Scheduler merges
+updates into both active and historical copies, guarded by run ID. Continuation
+clears reported values before querying the harness again. The composer prefers
+the reported model, but an explicit turn effort wins over a reported thread
+default (Codex sends effort on `turn/start`). These are configuration values,
+not per-turn execution telemetry. Claude does not report resolved default effort.
+Older records may recover a model from a bounded tail of Rota's readable headers;
+otherwise the footer says `CLI default` and `Default effort` rather than guessing
+from the routine's current settings.
+
+`ChatAttachmentStore` copies regular files into UUID subfolders beside the owned
+log, in `<log>.attachments`. Picker and URL drops share this path, off the UI actor;
+a failed batch rolls back only its new copies. `ChatMessage` appends a versioned
+JSON manifest to ordinary message text. All adapters receive the same text and
+local paths, letting agent tools read files without requiring native attachment
+payload support in every provider. This does not promise native multimodal input
+or support for every file format. The transcript decodes the manifest into file
+chips, including file-only messages; malformed manifests remain visible text.
+
+Draft text and attachment references are keyed by session ID in `AppModel`, so
+switching sessions preserves both. Removing a draft chip deletes only its owned
+copy; normal app termination discards remaining draft copies. Accepted messages
+clear draft state and retain their files for replay. Rejected scheduler sends
+preserve the draft. As before, acceptance by Scheduler is not a provider delivery
+acknowledgment. Session deletion, routine deletion and retention remove owned
+logs, transcript journals and attachment folders together, preserving shared
+logs. Crash-time or interrupted-copy leftovers are bounded by session retention.
+
+The composer follow-up was verified in the Developer ID-signed dev bundle with
+producer-generated synthetic history at 820 x 552 pt in both appearances and
+1100 x 720 pt in dark appearance. Picker selection and cancellation, duplicate
+picker prevention, file-only Send availability, removing a draft file, switching
+between routine and session, and draft-copy cleanup on normal quit were exercised.
+No real routine was fired by the GUI check. Attach and Send measured 28 x 28 pt,
+with an 8 pt gap; both label rows use a 14 pt harness mark and 6 pt text gap.
+Bounds checks found no overflow. Calibrated pixel samples passed 4.5:1 for model
+and filename text in both appearances. Precision candidates came from deliberate
+section gaps, native header controls, distinct Delete Session/Remove Attachment
+actions, and glyph bounds inside equal-height chips; no new confirmed near-miss
+remained. The Finder drag route and assistive-technology task completion were not
+exercised. `ComposerTests` can export the synthetic history with
+`ROTA_COMPOSER_FIXTURE_DIR`; captures stay outside the public repository.
+
+The ordinary suite passed with live tests disabled. A separate 11-test live
+run covered Claude stream mode, Codex, Grok and Shell, including every agent
+reading an independently copied attachment. The unchanged external-terminal
+GUI test was excluded. Provider sessions and the test-started idle daemons were
+cleaned up, including newly created Claude `memory/` and Grok
+`prompt_history.jsonl` companions in those fixture folders. Older fixture
+folders were preserved. Disposable mutation checks rejected moving originals instead of
+copying, omitting attachment retention, dropping configuration callbacks, and
+reporting a failed continuation launch as an accepted message.

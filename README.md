@@ -23,7 +23,11 @@ Desktop.
   and one completion line with the time, result, and duration. New sessions keep messages and
   actions in their recorded order. Older sessions retain their folded
   "Worked for …" sections. While a session works, the field shows the clock
-  and turns its button into Stop. The chat follows the session unless you
+  and turns its button into Stop. Its footer shows the session model and reasoning
+  effort, with explicit default labels when the CLI has not reported them. Attach
+  files with the paperclip or by dropping them into the composer. Rota keeps
+  copies with the session and sends their local paths for the agent to read;
+  originals stay untouched. The chat follows the session unless you
   scroll up. Adjacent tool calls stay collapsed behind a count; expand them
   to read the full commands. Code blocks name their language and copy in one click.
 - **Keep talking to a session, on every agent, while it works or after.** The
@@ -83,7 +87,9 @@ Desktop.
 - **Import from Claude Desktop and Codex.** Reads the routines Claude Desktop
   schedules and the automations of the Codex app (read-only), with their
   schedules in words, and copies the ones you pick, turned off, so nothing runs
-  twice. Codex automations keep their model and reasoning effort. Grok Build
+  twice. Search by name, project folder, or source app; already imported routines
+  stay hidden until you ask to see them. Selection survives filtering, and the
+  footer shows how many routines will be imported. Codex automations keep their model and reasoning effort. Grok Build
   has no saved schedules to import: its `/loop` tasks live in one session.
 - **Safe defaults, as in Claude Desktop.** Slots missed while the Mac slept or
   Rota was closed run once, late, marked as a catch-up, if the last one is

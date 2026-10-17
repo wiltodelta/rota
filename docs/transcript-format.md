@@ -172,3 +172,13 @@ button before the fix, and one combined completion row without that button after
 it. Legacy logs and a legacy log missing its final status also retained exactly
 one completion row. Code-block Copy remained available. Bounds checks and
 calibrated text contrast passed; `transcriptCompletion` identifies the footer.
+
+## File references in user messages
+
+User text may end with `ChatMessage`'s `[Rota attachments v1]` JSON manifest.
+The journal still stores an ordinary user item's text, with no schema bump.
+Rota renders valid manifests as filename chips; agent adapters receive the same
+text with local file paths. Copies live in the log's `.attachments` companion
+folder and follow its retention. This is local file access through agent tools,
+not a provider-specific image or document upload. Invalid manifests remain
+literal text. Original files are never removed by session cleanup.

@@ -237,12 +237,17 @@ public final class Scheduler {
     }
 
     /// Launches `spec` as `record`, which becomes the routine's active run.
-    private func start(_ record: RunRecord, spec: LaunchSpec) {
+    @discardableResult
+    private func start(_ record: RunRecord, spec: LaunchSpec) -> Bool {
         var record = record
         let id = record.routineID
+        let runID = record.id
         let events = RunEvents(
             session: { [weak self] session in self?.attachSession(session, to: id) },
-            finished: { [weak self] outcome in self?.finish(id, outcome: outcome) })
+            finished: { [weak self] outcome in self?.finish(id, outcome: outcome) },
+            configuration: { [weak self] configuration in
+                self?.updateConfiguration(configuration, routineID: id, runID: runID)
+            })
         do {
             active[id] = record
             runStarts[id] = now()
@@ -251,12 +256,14 @@ public final class Scheduler {
             // on a process spins the run loop), so save what is active, not the copy.
             saveRecord(active[id] ?? record)
             Self.log.info("Started \(id, privacy: .public) on \(record.harness.rawValue, privacy: .public)")
+            return true
         } catch {
             active[id] = nil
             record.outcome = .launchFailed(error.localizedDescription)
             record.endedAt = now()
             saveRecord(record)
             if let routine = self.routine(id) { notifier?.runEnded(record, routine: routine) }
+            return false
         }
     }
 
@@ -268,44 +275,26 @@ public final class Scheduler {
         controls.values.forEach { $0.stop() }
     }
 
-    /// Every routine's sessions, newest first. Skipped slots stay in each
-    /// routine's own history: they have nothing to open.
-    public func allRecords() -> [RunRecord] {
-        routines.flatMap { history.records(for: $0.id) }.filter { !$0.isSkip }
-            .sorted { $0.startedAt > $1.startedAt }
-    }
-
-    /// Whether Rota can message `record`'s session now, running or finished.
-    public func canMessage(_ record: RunRecord) -> Bool {
-        guard record.sessionID != nil else { return false }
-        let running = isActive(record)
-        // While another run of the routine works, its finished sessions wait.
-        if !running && active[record.routineID] != nil { return false }
-        return record.harness.takesMessages
-    }
-
     /// Sends `message` into `record`'s session: into the live session while it
     /// runs, or by continuing the finished session as a run of its own.
-    public func message(_ message: String, to record: RunRecord) {
-        guard canMessage(record) else { return }
+    @discardableResult
+    public func message(_ message: String, to record: RunRecord) -> Bool {
+        guard var record = current(record.id, routineID: record.routineID), canMessage(record),
+              isActive(record) ? controls[record.routineID] != nil : record.logPath != nil else { return false }
         // Answering is what the session waited for; the continued run saves this copy, so it must not carry the mark.
         dismissAttention(record)
-        var record = record
         record.attention = nil
         if isActive(record) {
             controls[record.routineID]?.send(message)
         } else {
-            continueSession(record, with: message)
+            return continueSession(record, with: message)
         }
+        return true
     }
 
     /// When `record`'s run started, while it runs: a continued session's run, not the session's first.
     public func runStartedAt(_ record: RunRecord) -> Date? {
         isActive(record) ? runStarts[record.routineID] : nil
-    }
-
-    public func isActive(_ record: RunRecord) -> Bool {
-        active[record.routineID]?.id == record.id
     }
 
     /// The terminal command for `record`'s session, with the harness's executable filled in.
@@ -319,13 +308,16 @@ public final class Scheduler {
         return (program ?? executable(record.harness), arguments)
     }
 
-    func continueSession(_ record: RunRecord, with message: String) {
+    @discardableResult
+    func continueSession(_ record: RunRecord, with message: String) -> Bool {
         guard let routine = routine(record.routineID), let session = record.sessionID,
-              let logPath = record.logPath else { return }
+              let logPath = record.logPath else { return false }
         var record = record
         record.outcome = .running
         record.endedAt = nil
-        start(record, spec: spec(for: routine, record: record, harness: record.harness, prompt: message,
+        record.reportedModel = nil
+        record.reportedEffort = nil
+        return start(record, spec: spec(for: routine, record: record, harness: record.harness, prompt: message,
                                  log: URL(fileURLWithPath: logPath), resume: session))
     }
 

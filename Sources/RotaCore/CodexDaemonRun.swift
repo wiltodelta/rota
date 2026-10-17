@@ -113,6 +113,8 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         threadID = id
         // The header names the model the daemon picked, so a chosen one can be checked.
         let model = (value as? [String: Any])?["model"] as? String
+        journal.configure(SessionConfiguration(model: model,
+            effort: (value as? [String: Any])?["reasoningEffort"] as? String))
         if spec.resume == nil { journal.line("[codex thread \(id)" + (model.map { ", \($0)" } ?? "") + "]") }
         journal.session(id)
         var params: [String: Any] = ["threadId": id, "input": [["type": "text", "text": spec.prompt]]]

@@ -12,6 +12,7 @@ final class RunJournal: @unchecked Sendable {
     private var pendingText = ""
     private var pendingID: Int?
     private var transcript: TranscriptJournal?
+    private var reportedConfiguration = SessionConfiguration()
 
     init(output: FileHandle, events: RunEvents, transcript: TranscriptJournal? = nil) {
         self.output = output
@@ -86,6 +87,18 @@ final class RunJournal: @unchecked Sendable {
 
     func session(_ id: String) {
         DispatchQueue.main.async { self.events.session(id) }
+    }
+
+    func configure(_ configuration: SessionConfiguration) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !finished else { return }
+        var next = reportedConfiguration
+        if let model = configuration.model { next.model = model }
+        if let effort = configuration.effort { next.effort = effort }
+        guard next != reportedConfiguration else { return }
+        reportedConfiguration = next
+        DispatchQueue.main.async { [next] in self.events.configuration(next) }
     }
 
     /// Reports the outcome once and closes the log.

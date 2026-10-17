@@ -107,7 +107,8 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
             loading = true
             peer?.request("session/load", params) { [weak self] result in
                 self?.loading = false
-                guard case .success = result else { return self?.fail(result, "session/load") ?? () }
+                guard case .success(let value) = result else { return self?.fail(result, "session/load") ?? () }
+                self?.configure(value)
                 self?.sessionReady(session)
             }
         } else {
@@ -121,10 +122,19 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         guard case .success(let value) = result, let id = (value as? [String: Any])?["sessionId"] as? String else {
             return fail(result, "session/new")
         }
+        let configuration = configure(value)
+        journal.line("[grok session \(id)" + (configuration.model.map { ", \($0)" } ?? "") + "]")
+        sessionReady(id)
+    }
+
+    @discardableResult
+    private func configure(_ value: Any) -> SessionConfiguration {
         let options = (value as? [String: Any])?["configOptions"] as? [[String: Any]] ?? []
         let model = options.first { $0["id"] as? String == "model" }?["currentValue"] as? String
-        journal.line("[grok session \(id)" + (model.map { ", \($0)" } ?? "") + "]")
-        sessionReady(id)
+        let effort = options.first { $0["id"] as? String == "reasoning_effort" }?["currentValue"] as? String
+        let configuration = SessionConfiguration(model: model, effort: effort)
+        journal.configure(configuration)
+        return configuration
     }
 
     private func sessionReady(_ id: String) {

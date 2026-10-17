@@ -139,7 +139,7 @@ private struct PermissionRow: View {
         LabeledContent(title) {
             if granted {
                 Label("Allowed", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+                    .labelStyle(StatusLabelStyle())
             } else {
                 Button("Allow\u{2026}", action: request)
             }

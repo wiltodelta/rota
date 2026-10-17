@@ -34,6 +34,7 @@ final class LiveHarnessTests: XCTestCase {
         nonisolated(unsafe) var outcome: RunOutcome?
         nonisolated(unsafe) var session: String?
         nonisolated(unsafe) var control: RunControl?
+        nonisolated(unsafe) var configuration = SessionConfiguration()
         let events = RunEvents(session: { id in
             session = id
             if let stopAfter {
@@ -44,6 +45,8 @@ final class LiveHarnessTests: XCTestCase {
         }, finished: { result in
             outcome = result
             ended.fulfill()
+        }, configuration: { value in
+            configuration = value
         })
         control = try ProcessLauncher().launch(spec, events: events)
         wait(for: [ended], timeout: timeout + 30)
@@ -52,6 +55,9 @@ final class LiveHarnessTests: XCTestCase {
         let snapshot = reader.read(log: log, shell: harness == .shell, finished: true)
         XCTAssertNil(snapshot.problem, snapshot.problem ?? "")
         XCTAssertEqual(snapshot.structured, harness != .shell)
+        if harness.isAgent, outcome == .succeeded {
+            XCTAssertNotNil(configuration.model, "The actual runner must report its session model")
+        }
         XCTAssertTrue(snapshot.items.contains { $0.kind == .user && $0.text == prompt })
         print("---- \(harness.rawValue) log\n\(text)----")
         return (try XCTUnwrap(outcome), text, session)
@@ -143,6 +149,22 @@ final class LiveHarnessTests: XCTestCase {
             XCTAssertTrue(header.contains(expected), "\(harness.rawValue) header: \(header)")
         }
         XCTAssertEqual(grokDefault(), before, "a routine's model must not change Grok's default")
+    }
+
+    func testEveryAgentReadsAnAttachedFile() throws {
+        let source = folder.appendingPathComponent("fixture.txt")
+        for harness in [Harness.claude, .codex, .grok] {
+            let contents = UUID().uuidString
+            try contents.write(to: source, atomically: true, encoding: .utf8)
+            let store = ChatAttachmentStore(log: folder.appendingPathComponent("\(harness.rawValue).log"))
+            let attachments = try store.stage([source])
+            try "The original changed after attaching.".write(to: source, atomically: true, encoding: .utf8)
+            let prompt = try ChatMessage(text: "Read the attached file and reply with its contents only.",
+                                         attachments: attachments).encoded()
+            let (outcome, log, _) = try run(harness, prompt: prompt, message: nil)
+            XCTAssertEqual(outcome, .succeeded, log)
+            XCTAssertTrue(log.contains(contents), "\(harness.rawValue) must read the staged copy: \(log)")
+        }
     }
 
     /// Each installed terminal Rota knows, and the default, runs the session

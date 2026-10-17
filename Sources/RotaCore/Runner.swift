@@ -63,10 +63,13 @@ public struct RunEvents {
     public var session: (String) -> Void
     /// Fires once, when the run's work is over.
     public var finished: (RunOutcome) -> Void
+    public var configuration: (SessionConfiguration) -> Void
 
-    public init(session: @escaping (String) -> Void, finished: @escaping (RunOutcome) -> Void) {
+    public init(session: @escaping (String) -> Void, finished: @escaping (RunOutcome) -> Void,
+                configuration: @escaping (SessionConfiguration) -> Void = { _ in }) {
         self.session = session
         self.finished = finished
+        self.configuration = configuration
     }
 }
 

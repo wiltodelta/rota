@@ -227,8 +227,9 @@ reduces presentation churn rather than promising universal compatibility.
 | 3 | Add partial text updates and revision-based Markdown caching where supported and justified. | Completed-message adapters still work; count parsing and updates before claiming reduced work. |
 
 Rich tool cards, queue editing, dedicated question and approval forms, nested
-agents, transcript navigation, attachments, and richer Markdown are outside
-the initial scope. They are extension points, not a committed backlog.
+agents, transcript navigation, and richer Markdown were outside
+the initial scope. Basic local file attachments were added in the follow-up
+described below. They are extension points, not a committed backlog.
 Rota's existing bubble layout, summaries, plan cards, model labels, copy
 actions and composer already cover much of the visible design.
 
@@ -246,3 +247,22 @@ Inspect each chosen address range with `xcrun llvm-objdump --disassemble
 "$APP_BINARY"`. Keep intermediate extracts outside the repository and remove
 them after recording evidence. Address ranges and inferred field meanings
 must be rechecked after an update.
+
+## Composer follow-up, October 17
+
+A second read-only CUA observation found the current composer configuration
+shown as model plus effort, with elapsed time, a paperclip and Stop alongside
+it. The model/effort shown above a previous answer differed from the composer,
+so Rota keeps requested and reported session configuration separate from the
+routine's editable settings. The selector was not exercised and no message or
+setting was changed.
+
+**Disassembly** of `AttachmentStore::put` in the installed ARM64 binary showed
+calls to MIME normalization, content digest and extension helpers, with locking.
+**Symbols** also named staged text-like previews and document/image attachment
+renderers. This establishes a separate storage path, not its complete lifetime
+or provider transport contract. Rota uses its own smaller implementation:
+session-owned copies, filename chips, and a text manifest of local paths across
+harnesses. See [Architecture](architecture.md#session-configuration-and-attachments)
+for the implemented contract. Binary extracts and private screenshots remain
+outside this repository.

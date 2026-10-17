@@ -119,6 +119,7 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
             if event["subtype"] as? String == "init", let session = event["session_id"] as? String {
                 // The header names the model Claude picked, so a chosen one can be checked.
                 if let header = StreamJSONFormatter.format(line) { journal.line(header) }
+                journal.configure(SessionConfiguration(model: event["model"] as? String))
                 journal.session(session)
             }
         case "result":

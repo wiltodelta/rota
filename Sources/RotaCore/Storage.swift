@@ -123,11 +123,15 @@ public struct RunHistory: Sendable {
             return sessions <= Self.limit
         }
         try JSONFile.write(retained, to: file(for: record.routineID))
+        guard retained.count != records.count else { return }
         let keptIDs = Set(retained.map(\.id))
-        let keptLogs = Set(retained.compactMap(\.logPath))
+        let keptLogs = Set(retained.compactMap {
+            $0.logPath.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
+        })
         for dropped in records where !keptIDs.contains(dropped.id) {
-            if let path = dropped.logPath, !keptLogs.contains(path) {
-                removeLog(path)
+            if let path = dropped.logPath,
+               !keptLogs.contains(URL(fileURLWithPath: path).resolvingSymlinksInPath().path) {
+                removeLog(path, routineID: record.routineID)
             }
         }
     }
@@ -149,7 +153,7 @@ public struct RunHistory: Sendable {
 
     public func removeAll(for routineID: String) {
         for record in records(for: routineID) {
-            if let path = record.logPath { removeLog(path) }
+            if let path = record.logPath { removeLog(path, routineID: routineID) }
         }
         try? FileManager.default.removeItem(at: file(for: routineID))
     }
@@ -162,17 +166,13 @@ public struct RunHistory: Sendable {
         guard record.outcome != .running else { throw HistoryDeletionError.running }
         let retained = records.filter { $0.id != id }
         if let path = record.logPath {
-            let log = URL(fileURLWithPath: path).standardizedFileURL
+            let log = try ownedLog(path, routineID: routineID)
             let resolvedLog = log.resolvingSymlinksInPath().path
             let shared = retained.contains {
                 $0.logPath.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } == resolvedLog
             }
-            let folder = location.logs.appendingPathComponent(routineID).resolvingSymlinksInPath()
-            guard folder.deletingLastPathComponent().path == location.logs.resolvingSymlinksInPath().path,
-                  log.deletingLastPathComponent().resolvingSymlinksInPath().path == folder.path,
-                  log.pathExtension == "log" else { throw HistoryDeletionError.foreignLog }
             if !shared {
-                for url in [log, TranscriptReader.journalURL(for: log)] {
+                for url in [log, TranscriptReader.journalURL(for: log), ChatAttachmentStore.folder(for: log)] {
                     do { try FileManager.default.removeItem(at: url) } catch let error as CocoaError
                         where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile { }
                 }
@@ -182,10 +182,26 @@ public struct RunHistory: Sendable {
         return true
     }
 
+    public func attachments(for record: RunRecord) throws -> ChatAttachmentStore {
+        guard let path = record.logPath else { throw HistoryDeletionError.foreignLog }
+        return ChatAttachmentStore(log: try ownedLog(path, routineID: record.routineID))
+    }
+
+    private func ownedLog(_ path: String, routineID: String) throws -> URL {
+        let log = URL(fileURLWithPath: path).standardizedFileURL
+        let folder = location.logs.appendingPathComponent(routineID).resolvingSymlinksInPath()
+        guard folder.deletingLastPathComponent().path == location.logs.resolvingSymlinksInPath().path,
+              log.deletingLastPathComponent().resolvingSymlinksInPath().path == folder.path,
+              log.pathExtension == "log" else { throw HistoryDeletionError.foreignLog }
+        return log
+    }
+
     /// A normalized transcript has exactly the same retention as its readable log.
-    private func removeLog(_ path: String) {
-        try? FileManager.default.removeItem(atPath: path)
-        try? FileManager.default.removeItem(at: TranscriptReader.journalURL(for: URL(fileURLWithPath: path)))
+    private func removeLog(_ path: String, routineID: String) {
+        guard let log = try? ownedLog(path, routineID: routineID) else { return }
+        try? FileManager.default.removeItem(at: log)
+        try? FileManager.default.removeItem(at: TranscriptReader.journalURL(for: log))
+        try? FileManager.default.removeItem(at: ChatAttachmentStore.folder(for: log))
     }
 
     public func logFile(for record: RunRecord) -> URL {

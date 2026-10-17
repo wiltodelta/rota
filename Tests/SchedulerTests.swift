@@ -109,6 +109,24 @@ final class SchedulerTests: XCTestCase {
         XCTAssertTrue(scheduler.history.records(for: routine.id).isEmpty, "Closing the deleted view must not revive it")
     }
 
+    func testReportedConfigurationSurvivesFinishAndStaleRecordsDoNotResetIt() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        let initial = try XCTUnwrap(scheduler.active[routine.id])
+        launcher.events[0].session("fixture-session")
+        launcher.events[0].configuration(SessionConfiguration(model: "reported-model", effort: "high"))
+        XCTAssertNil(scheduler.current(initial.id, routineID: routine.id)?.model)
+        XCTAssertEqual(scheduler.active[routine.id]?.reportedModel, "reported-model")
+        XCTAssertEqual(scheduler.history.records(for: routine.id).first?.reportedEffort, "high")
+        XCTAssertTrue(scheduler.message("message from a stale view", to: initial))
+        XCTAssertEqual(launcher.controls[0].sent, ["message from a stale view"])
+        launcher.completions[0](.succeeded)
+        XCTAssertEqual(scheduler.history.records(for: routine.id).first?.reportedModel, "reported-model")
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].configuration(SessionConfiguration(model: "stale-model"))
+        XCTAssertNil(scheduler.active[routine.id]?.reportedModel, "Old sessions cannot overwrite a new run")
+    }
+
     func testDeletionRechecksAnInteractiveSessionThatOutlivedTheApp() throws {
         let routine = addDailyRoutine()
         var record = RunRecord(routineID: routine.id, trigger: .manual, harness: .claude,
@@ -423,6 +441,17 @@ final class SchedulerTests: XCTestCase {
         XCTAssertFalse(scheduler.canMessage(old))
         scheduler.message("hello", to: old)
         XCTAssertEqual(launcher.specs.count, 2, "no third launch")
+    }
+
+    func testMessageIsRejectedWhenContinuationCannotLaunch() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("thread-1")
+        launcher.completions[0](.succeeded)
+        let record = try XCTUnwrap(scheduler.history.records(for: routine.id).first)
+        launcher.failure = NSError(domain: "Synthetic launch failure", code: 1)
+        XCTAssertFalse(scheduler.message("Keep my draft", to: record))
+        XCTAssertNil(scheduler.active[routine.id])
     }
 
     func testShellRoutineRunsItsCommandWithoutSkillScanning() throws {

@@ -198,6 +198,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
             unanswered = max(0, unanswered - 1)
             journal.record(.user, text)
         case .assistant(let model, let items):
+            journal.configure(SessionConfiguration(model: model))
             if !headerWritten, let model {
                 headerWritten = true
                 journal.line("[session started, \(model)]")
