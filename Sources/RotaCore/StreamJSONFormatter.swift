@@ -23,26 +23,40 @@ public enum StreamJSONFormatter {
         }
     }
 
+    /// Only known assistant blocks cross the adapter boundary. Unknown neighbors
+    /// never suppress supported text, and tool argument schemas remain optional.
+    static func items(_ data: Data) -> [TranscriptItem] {
+        guard let event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              event["type"] as? String == "assistant" else { return [] }
+        return assistantItems(event)
+    }
+
     private static func assistantText(_ event: [String: Any]) -> String? {
+        let parts = assistantItems(event).map { RunJournal.readable($0.kind, $0.text) }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
+    }
+
+    static func assistantItems(_ event: [String: Any]) -> [TranscriptItem] {
         guard let message = event["message"] as? [String: Any],
-              let content = message["content"] as? [[String: Any]] else { return nil }
-        let parts: [String] = content.compactMap { item in
+              let content = message["content"] as? [[String: Any]] else { return [] }
+        return content.enumerated().compactMap { index, item in
             switch item["type"] as? String {
             case "text":
-                return item["text"] as? String
+                return (item["text"] as? String).map { TranscriptItem(id: index, kind: .agent, text: $0) }
             case "tool_use":
                 if item["name"] as? String == "TodoWrite",
                    let todos = (item["input"] as? [String: Any])?["todos"] as? [[String: Any]] {
-                    return PlanStep.lines(todos.map {
+                    let steps = todos.map {
                         PlanStep(status: $0["status"] as? String, text: $0["content"] as? String ?? "")
-                    })
+                    }
+                    return TranscriptItem(id: index, kind: .plan, text: PlanStep.body(steps))
                 }
-                return "-> \(item["name"] as? String ?? "tool")\(toolDetail(item["input"]))"
+                return TranscriptItem(id: index, kind: .tool,
+                                      text: (item["name"] as? String ?? "tool") + toolDetail(item["input"]))
             default:
                 return nil
             }
         }
-        return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
 
     private static func toolDetail(_ input: Any?) -> String {

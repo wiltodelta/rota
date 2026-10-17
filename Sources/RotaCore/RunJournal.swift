@@ -10,10 +10,13 @@ final class RunJournal: @unchecked Sendable {
     private var finished = false
     private var closed = false
     private var pendingText = ""
+    private var pendingID: Int?
+    private var transcript: TranscriptJournal?
 
-    init(output: FileHandle, events: RunEvents) {
+    init(output: FileHandle, events: RunEvents, transcript: TranscriptJournal? = nil) {
         self.output = output
         self.events = events
+        self.transcript = transcript
     }
 
     var isFinished: Bool {
@@ -22,25 +25,63 @@ final class RunJournal: @unchecked Sendable {
         return finished
     }
 
+    /// Diagnostic lines are Rota's own metadata, never provider message content.
     func line(_ text: String) {
         lock.lock()
         defer { lock.unlock() }
+        guard !closed else { return }
         flushText()
         write(text)
+        if let (kind, body) = Transcript.classify(text, shell: false) {
+            appendItem(kind, body)
+        } else {
+            persist(TranscriptRecord(type: "checkpoint", required: false, logSize: output.offsetInFile))
+        }
     }
 
-    /// Streamed message text, joined until the next line or the end.
+    /// The adapter chooses the kind before content reaches either storage format.
+    func record(_ kind: TranscriptItem.Kind, _ text: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !closed else { return }
+        flushText()
+        write(Self.readable(kind, text))
+        appendItem(kind, text)
+    }
+
+    /// Partial text is visible immediately; the readable log gets one completed message.
     func text(_ chunk: String) {
         lock.lock()
+        defer { lock.unlock() }
+        guard !closed, !chunk.isEmpty else { return }
         pendingText += chunk
-        lock.unlock()
+        if let pendingID {
+            persist(TranscriptRecord(type: "append", id: pendingID, text: chunk, logSize: output.offsetInFile))
+        } else if let transcript {
+            let id = transcript.allocateID()
+            pendingID = id
+            persist(TranscriptRecord(type: "item", id: id, kind: "agent", text: chunk,
+                                     complete: false, logSize: output.offsetInFile))
+        }
     }
 
-    /// Ends the streamed message, so the next turn's text starts on its own line.
     func endText() {
         lock.lock()
         defer { lock.unlock() }
         flushText()
+    }
+
+    static func readable(_ kind: TranscriptItem.Kind, _ text: String) -> String {
+        switch kind {
+        case .user: return Transcript.userLines(text)
+        case .tool: return "-> " + text
+        case .status: return "[rota: " + text + "]"
+        case .error: return "[error] " + text
+        case .plan:
+            return ([PlanStep.prefix + PlanStep.header] + text.components(separatedBy: "\n")
+                .map { PlanStep.prefix + $0 }).joined(separator: "\n")
+        case .agent, .output: return text
+        }
     }
 
     func session(_ id: String) {
@@ -53,7 +94,9 @@ final class RunJournal: @unchecked Sendable {
         guard !finished else { return lock.unlock() }
         finished = true
         flushText()
-        write("[rota: \(outcome.title) after \(Int(Date().timeIntervalSince(startedAt))) s]")
+        let note = "\(outcome.title) after \(Int(Date().timeIntervalSince(startedAt))) s"
+        write(Self.readable(.status, note))
+        appendItem(.status, Transcript.readableDurations(note))
         closed = true
         try? output.close()
         lock.unlock()
@@ -63,7 +106,27 @@ final class RunJournal: @unchecked Sendable {
     private func flushText() {
         guard !pendingText.isEmpty else { return }
         write(pendingText.trimmingCharacters(in: .newlines))
+        if let pendingID {
+            persist(TranscriptRecord(type: "complete", id: pendingID, logSize: output.offsetInFile))
+        }
+        pendingID = nil
         pendingText = ""
+    }
+
+    private func appendItem(_ kind: TranscriptItem.Kind, _ text: String) {
+        guard let transcript else { return }
+        persist(TranscriptRecord(type: "item", id: transcript.allocateID(), kind: kind.rawValue,
+                                 text: text, logSize: output.offsetInFile))
+    }
+
+    private func persist(_ record: TranscriptRecord) {
+        do { try transcript?.append(record) } catch {
+            // The log size will no longer match the last accepted record. Readers
+            // show an explicit fallback rather than presenting a stale journal as complete.
+            transcript = nil
+            write("[error] Couldn't save chat history. The readable log is still available.")
+            ProcessLauncher.log.error("Couldn't save normalized chat history")
+        }
     }
 
     private func write(_ text: String) {

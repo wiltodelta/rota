@@ -8,7 +8,10 @@ struct SessionView: View {
     @Environment(AppModel.self) private var model
     let record: RunRecord
     let routine: Routine
-    @State private var log = ""
+    @State private var transcript = TranscriptSnapshot()
+    @State private var reader = TranscriptSessionReader()
+    @State private var loadingEarlier = false
+    @State private var pageRequest = 0
     /// Messages sent from this view that the session has not shown yet.
     @State private var outbox: [Outgoing] = []
 
@@ -31,9 +34,18 @@ struct SessionView: View {
                     model.scheduler.dismissAttention(current)
                 }
             }
-            let items = Transcript.parse(log, shell: record.harness == .shell)
+            if let problem = transcript.problem {
+                Text(problem)
+                    .font(.callout)
+                    .foregroundStyle(Color.secondaryText)
+                    .padding(12)
+                    .accessibilityIdentifier("transcriptProblem")
+            }
+            let items = transcript.items
             ChatTranscript(items: items, running: running, record: record,
-                           sending: outbox.filter { !$0.delivered(in: items) }.map(\.text))
+                           sending: outbox.filter { !$0.delivered(in: items) }.map(\.text),
+                           structured: transcript.structured, hasEarlier: transcript.hasEarlier,
+                           loadingEarlier: loadingEarlier, loadEarlier: loadEarlier)
             Composer(record: record) { text in
                 outbox.append(Outgoing(text: text, seen: Outgoing.count(text, in: items)))
             }
@@ -43,11 +55,30 @@ struct SessionView: View {
         .task(id: RefreshKey(record: record.id, running: running, version: model.scheduler.historyVersion)) {
             // Follow the log while the session works; read it once otherwise.
             repeat {
-                log = readLog()
+                if let path = record.logPath {
+                    let request = pageRequest
+                    let next = await reader.read(log: URL(fileURLWithPath: path), shell: record.harness == .shell,
+                                           finished: !running)
+                    guard !Task.isCancelled else { return }
+                    if request == pageRequest, next != transcript { transcript = next }
+                }
                 try? await Task.sleep(for: .seconds(1))
             } while running && !Task.isCancelled
             // Open and finished: read. A session finishing while open is read too.
             model.scheduler.markRead(record)
+        }
+    }
+
+    private func loadEarlier() {
+        guard !loadingEarlier, let path = record.logPath else { return }
+        loadingEarlier = true
+        pageRequest += 1
+        Task {
+            let next = await reader.read(log: URL(fileURLWithPath: path), shell: record.harness == .shell,
+                                         finished: !running, earlier: true)
+            guard !Task.isCancelled else { return }
+            transcript = next
+            loadingEarlier = false
         }
     }
 
@@ -90,15 +121,6 @@ struct SessionView: View {
         }
     }
 
-    /// The last 400 KB: a whole session for any routine so far, without loading a runaway log.
-    private func readLog() -> String {
-        guard let path = record.logPath, let handle = FileHandle(forReadingAtPath: path) else { return "" }
-        defer { try? handle.close() }
-        let limit: UInt64 = 400_000
-        let size = (try? handle.seekToEnd()) ?? 0
-        try? handle.seek(toOffset: size > limit ? size - limit : 0)
-        return lossyUTF8((try? handle.readToEnd()) ?? Data())
-    }
 }
 
 /// The field under the chat, as super.engineering draws it: one rounded gray

@@ -2,10 +2,8 @@ import AppKit
 import RotaCore
 import SwiftUI
 
-/// The session as turns, laid out the way super.engineering lays out an agent
-/// chat: the user's message in a gray bubble on the right; the agent's answer as
-/// plain text under a line naming what it ran on; the tool calls that led there
-/// folded into one "N tool calls" rule; a footer with the time and a copy button.
+/// Normalized sessions display ordered entries with durable IDs. Legacy logs
+/// keep their inferred turn layout until those sessions leave history.
 struct ChatTranscript: View {
     @Environment(AppModel.self) private var model
     let items: [TranscriptItem]
@@ -13,18 +11,51 @@ struct ChatTranscript: View {
     let record: RunRecord
     /// Messages sent and not yet in the log.
     var sending: [String] = []
+    var structured = false
+    var hasEarlier = false
+    var loadingEarlier = false
+    var loadEarlier: () -> Void = {}
     @State private var following = true
+    @State private var visibleItem: Int?
+    @State private var viewport = TranscriptViewport()
+    @State private var pageAnchor: TranscriptViewport.Anchor?
 
     var body: some View {
-        let turns = TranscriptTurn.group(items)
+        let turns = structured ? [] : TranscriptTurn.group(items)
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
-                    ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
-                        TurnView(turn: turn, isLast: index == turns.count - 1, running: running,
-                                 only: turns.count == 1, record: record)
+                    if hasEarlier {
+                        Button(loadingEarlier ? "Loading…" : "Load Earlier Messages") {
+                            following = false
+                            pageAnchor = viewport.capture()
+                            loadEarlier()
+                        }
+                        .disabled(loadingEarlier)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("loadEarlierMessages")
                     }
-                    if turns.isEmpty && running {
+                    if structured {
+                        ForEach(items) { item in
+                            TranscriptRow(item: item, record: record)
+                                .accessibilityIdentifier("transcriptItem-\(item.id)")
+                                .id(item.id)
+                                .background(TranscriptMarker(id: item.id, viewport: viewport))
+                        }
+                        if running {
+                            WorkingLabel(since: model.scheduler.runStartedAt(record))
+                        } else if record.endedAt != nil {
+                            TurnFooter(record: record, status: nil,
+                                       copy: .agents(items),
+                                       copyLabel: hasEarlier ? "Copy loaded agent messages" : "Copy agent messages")
+                        }
+                    } else {
+                        ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
+                            TurnView(turn: turn, isLast: index == turns.count - 1, running: running,
+                                     only: turns.count == 1, record: record)
+                        }
+                    }
+                    if !structured && turns.isEmpty && running {
                         WorkingLabel(since: model.scheduler.runStartedAt(record))
                     }
                     ForEach(Array(sending.enumerated()), id: \.offset) { _, text in
@@ -34,12 +65,24 @@ struct ChatTranscript: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .trailing)
                     }
-                    Color.clear.frame(height: 1).id("end")
+                    Color.clear.frame(height: 1).id(Int.min)
                 }
+                .scrollTargetLayout()
                 .padding(.horizontal, 24)
                 .padding(.vertical, 20)
                 .frame(maxWidth: 760)
                 .frame(maxWidth: .infinity)
+            }
+            .scrollPosition(id: $visibleItem, anchor: .top)
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            .onScrollPhaseChange { _, phase, context in
+                if phase == .interacting { viewport.cancel() }
+                if phase == .interacting || phase == .decelerating || phase == .idle {
+                    let geometry = context.geometry
+                    following = geometry.contentOffset.y + geometry.containerSize.height
+                        >= geometry.contentSize.height - 60
+                    if !following { viewport.remember() }
+                }
             }
             // Follow the session only while the reader is at its end, as super.engineering does;
             // scrolled up to read, they keep their place and get a button back down.
@@ -50,18 +93,33 @@ struct ChatTranscript: View {
             } action: { old, new in
                 if new.height != old.height {
                     // The session wrote more: a reader at the end stays there.
-                    if following { proxy.scrollTo("end", anchor: .bottom) }
+                    if following { proxy.scrollTo(Int.min, anchor: .bottom) }
                 } else if new.offset != old.offset {
                     // The reader scrolled: following resumes only back at the end.
                     following = new.atEnd
+                    if !following { viewport.remember() }
                 }
             }
-            .onChange(of: items.count + sending.count) { if following { proxy.scrollTo("end", anchor: .bottom) } }
-            .onAppear { proxy.scrollTo("end", anchor: .bottom) }
+            .onChange(of: items) {
+                guard !following else { return }
+                if let anchor = pageAnchor {
+                    // Materialize the old row after a prepend, then correct the lazy estimate.
+                    proxy.scrollTo(anchor.id, anchor: anchor.point)
+                    viewport.restoreAfterLayout(anchor)
+                    pageAnchor = nil
+                } else if let anchor = viewport.anchorForUpdate() {
+                    viewport.restoreAfterLayout(anchor)
+                }
+            }
+            .onDisappear { viewport.cancel() }
+            .onChange(of: items.count + sending.count) { if following { proxy.scrollTo(Int.min, anchor: .bottom) } }
+            .onAppear { proxy.scrollTo(Int.min, anchor: .bottom) }
             .overlay(alignment: .bottom) {
                 if !following {
                     Button {
-                        withAnimation { proxy.scrollTo("end", anchor: .bottom) }
+                        following = true
+                        viewport.cancel()
+                        proxy.scrollTo(Int.min, anchor: .bottom)
                     } label: {
                         Image(systemName: "arrow.down")
                             .font(.system(size: 13, weight: .semibold))
@@ -78,6 +136,36 @@ struct ChatTranscript: View {
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
+    }
+}
+
+/// A normalized transcript keeps the adapter's order. It never infers a final
+/// answer from the position of the last tool call.
+private struct TranscriptRow: View {
+    @Environment(AppModel.self) private var model
+    let item: TranscriptItem
+    let record: RunRecord
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switch item.kind {
+            case .user: UserBubble(text: item.text)
+            case .agent:
+                AgentHeader(record: record)
+                AnswerView(item: item)
+            case .tool:
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "wrench.and.screwdriver")
+                    Text(item.text).textSelection(.enabled)
+                }
+                .font(model.chatText.small)
+                .foregroundStyle(Color.secondaryText)
+            case .plan: PlanCard(steps: PlanStep.parse(item.text))
+            case .output: CodeBox(text: item.text)
+            case .status, .error: NoteView(item: item)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -118,7 +206,7 @@ private struct TurnView: View {
             ForEach(turn.answer) { AnswerView(item: $0) }
             ForEach(turn.notes.filter { $0 != closingNote }) { NoteView(item: $0) }
             if finished {
-                TurnFooter(record: record, status: closingNote?.text, copyText: copyText)
+                TurnFooter(record: record, status: closingNote?.text, copy: .answer(copyText))
             }
         }
     }
@@ -230,7 +318,27 @@ private struct TurnFooter: View {
     @Environment(AppModel.self) private var model
     let record: RunRecord
     let status: String?
-    let copyText: String
+    enum CopySource {
+        case answer(String)
+        case agents([TranscriptItem])
+
+        var hasText: Bool {
+            switch self {
+            case .answer(let text): !text.isEmpty
+            case .agents(let items): items.contains { $0.kind == .agent && !$0.text.isEmpty }
+            }
+        }
+
+        var text: String {
+            switch self {
+            case .answer(let text): text
+            case .agents(let items): items.filter { $0.kind == .agent }.map(\.text).joined(separator: "\n\n")
+            }
+        }
+    }
+
+    let copy: CopySource
+    var copyLabel = "Copy the answer"
 
     var body: some View {
         HStack(spacing: 10) {
@@ -240,17 +348,17 @@ private struct TurnFooter: View {
                 .compactMap { $0 }.joined(separator: " \u{00B7} "))
                 .foregroundStyle(record.outcome.isFailure ? Color.errorText : Color.secondaryText)
             Hairline()
-            if !copyText.isEmpty {
+            if copy.hasText {
                 Button {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(copyText, forType: .string)
+                    NSPasteboard.general.setString(copy.text, forType: .string)
                 } label: {
                     Image(systemName: "doc.on.doc")
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(Color.secondaryText)
-                .help("Copy the answer")
-                .accessibilityLabel("Copy the answer")
+                .help(copyLabel)
+                .accessibilityLabel(copyLabel)
             }
         }
         .font(model.chatText.small)
@@ -294,45 +402,6 @@ struct Hairline: View {
             .fill(Color(nsColor: .separatorColor))
             .frame(height: 1)
             .frame(maxWidth: .infinity)
-    }
-}
-
-/// An agent message drawn block by block: headings, lists and code as such,
-/// inline Markdown (bold, code spans, links) inside each.
-private struct MarkdownText: View {
-    @Environment(AppModel.self) private var model
-    let source: String
-
-    var body: some View {
-        let text = model.chatText
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(MarkdownBlock.parse(source).enumerated()), id: \.offset) { _, block in
-                switch block {
-                case .heading(let level, let content):
-                    Text(inline(content))
-                        .font(text.heading(level: level))
-                        .padding(.top, 4)
-                case .listItem(let marker, let content, let indent):
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(marker).foregroundStyle(Color.secondaryText)
-                        Text(inline(content))
-                    }
-                    .font(text.body)
-                    .padding(.leading, CGFloat(indent) * 16)
-                case .code(let content, let language):
-                    CodeBlockView(code: content, language: language)
-                case .paragraph(let content):
-                    Text(inline(content)).font(text.body)
-                }
-            }
-        }
-        .textSelection(.enabled)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func inline(_ text: String) -> AttributedString {
-        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
     }
 }
 

@@ -2,7 +2,7 @@ import Foundation
 
 /// One entry of a session as the chat shows it.
 public struct TranscriptItem: Equatable, Identifiable, Sendable {
-    public enum Kind: Equatable, Sendable {
+    public enum Kind: String, Codable, Sendable {
         /// The routine's prompt or a message the user sent.
         case user
         /// What the agent said.
@@ -21,6 +21,7 @@ public struct TranscriptItem: Equatable, Identifiable, Sendable {
     public var id: Int
     public var kind: Kind
     public var text: String
+    public var isComplete = true
 }
 
 /// Reads a run log into chat entries. Runners write the log with line prefixes:
@@ -191,10 +192,15 @@ public struct PlanStep: Equatable, Sendable {
         self.text = text
     }
 
+    static func body(_ steps: [PlanStep]) -> String {
+        steps.map { $0.status.rawValue + " " + $0.text.replacingOccurrences(of: "\n", with: " ") }
+            .joined(separator: "\n")
+    }
+
     /// The log lines for a plan.
     public static func lines(_ steps: [PlanStep]) -> String {
-        let rows = steps.map { prefix + $0.status.rawValue + " " + $0.text.replacingOccurrences(of: "\n", with: " ") }
-        return ([prefix + header] + rows).joined(separator: "\n")
+        ([prefix + header] + body(steps).components(separatedBy: "\n")
+            .filter { !$0.isEmpty }.map { prefix + $0 }).joined(separator: "\n")
     }
 
     /// The steps of a plan item's text.

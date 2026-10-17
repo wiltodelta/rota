@@ -48,6 +48,11 @@ final class LiveHarnessTests: XCTestCase {
         control = try ProcessLauncher().launch(spec, events: events)
         wait(for: [ended], timeout: timeout + 30)
         let text = try String(contentsOf: log, encoding: .utf8)
+        var reader = TranscriptReader()
+        let snapshot = reader.read(log: log, shell: harness == .shell, finished: true)
+        XCTAssertNil(snapshot.problem, snapshot.problem ?? "")
+        XCTAssertEqual(snapshot.structured, harness != .shell)
+        XCTAssertTrue(snapshot.items.contains { $0.kind == .user && $0.text == prompt })
         print("---- \(harness.rawValue) log\n\(text)----")
         return (try XCTUnwrap(outcome), text, session)
     }

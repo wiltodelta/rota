@@ -82,7 +82,7 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     func send(_ message: String) {
         queue.async {
             guard !self.journal.isFinished, let input = self.input else { return }
-            self.journal.line(Transcript.userLines(message))
+            self.journal.record(.user, message)
             do {
                 try input.write(contentsOf: Self.userMessage(message))
             } catch {
@@ -124,7 +124,7 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         case "result":
             turnEnded(event)
         default:
-            if let text = StreamJSONFormatter.format(line) { journal.line(text) }
+            for item in StreamJSONFormatter.items(data) { journal.record(item.kind, item.text) }
         }
     }
 

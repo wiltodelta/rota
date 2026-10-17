@@ -36,7 +36,7 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     func send(_ message: String) {
         queue.async {
             guard let sessionID = self.sessionID, !self.journal.isFinished else { return }
-            self.journal.line(Transcript.userLines(message))
+            self.journal.record(.user, message)
             self.openPrompts += 1
             let params: [String: Any] = ["sessionId": sessionID, "prompt": [["type": "text", "text": message]]]
             self.peer?.request("session/prompt", params) { result in
@@ -162,12 +162,12 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         case "agent_message_chunk":
             if let text = (update["content"] as? [String: Any])?["text"] as? String { journal.text(text) }
         case "tool_call":
-            journal.line("-> \(update["title"] as? String ?? "tool")")
+            journal.record(.tool, update["title"] as? String ?? "tool")
         case "plan":
             let steps = (update["entries"] as? [[String: Any]] ?? []).map {
                 PlanStep(status: $0["status"] as? String, text: $0["content"] as? String ?? "")
             }
-            if !steps.isEmpty { journal.line(PlanStep.lines(steps)) }
+            if !steps.isEmpty { journal.record(.plan, PlanStep.body(steps)) }
         default:
             break
         }

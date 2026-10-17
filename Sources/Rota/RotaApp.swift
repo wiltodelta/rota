@@ -41,6 +41,7 @@ struct RotaApp: App {
                     .keyboardShortcut("-")
                 Button("Actual Size") { AppModel.shared.chatText.reset() }
                     .keyboardShortcut("0")
+                Divider()
             }
             CommandGroup(replacing: .help) {
                 Button("Rota Help") {

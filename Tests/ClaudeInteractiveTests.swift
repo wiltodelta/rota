@@ -22,7 +22,9 @@ final class ClaudeInteractiveTests: XCTestCase {
         XCTAssertEqual(entry(["type": "attachment", "attachment": ["type": "skill_listing"]]), .other)
         XCTAssertEqual(entry(["type": "assistant", "message": ["model": "claude-haiku-5-5", "content": [
             ["type": "text", "text": "Looking."], ["type": "tool_use", "name": "Bash", "input": ["command": "ls"]]]]]),
-                       .assistant(model: "claude-haiku-5-5", text: "Looking.\n-> Bash ls"))
+                       .assistant(model: "claude-haiku-5-5", items: [
+                        TranscriptItem(id: 0, kind: .agent, text: "Looking."),
+                        TranscriptItem(id: 1, kind: .tool, text: "Bash ls")]))
         XCTAssertEqual(entry(["type": "assistant", "isApiErrorMessage": true, "message": [
             "model": "<synthetic>", "content": [["type": "text", "text": "API Error: overloaded"]]]]),
                        .apiError("API Error: overloaded"))

@@ -34,7 +34,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     func send(_ message: String) {
         queue.async {
             guard let threadID = self.threadID, let turnID = self.turnID, !self.journal.isFinished else { return }
-            self.journal.line(Transcript.userLines(message))
+            self.journal.record(.user, message)
             self.peer?.request("turn/steer", ["threadId": threadID, "expectedTurnId": turnID,
                                               "input": [["type": "text", "text": message]]]) { result in
                 if case .failure(let error) = result {
@@ -130,15 +130,19 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     private func handle(_ method: String, _ params: [String: Any]) {
         switch method {
         case "item/started":
-            if let line = Self.describe(started: params["item"] as? [String: Any]) { journal.line(line) }
+            if let title = Self.describe(started: params["item"] as? [String: Any]) {
+                journal.record(.tool, title)
+            }
         case "item/completed":
             let item = params["item"] as? [String: Any]
-            if item?["type"] as? String == "agentMessage", let text = item?["text"] as? String { journal.line(text) }
+            if item?["type"] as? String == "agentMessage", let text = item?["text"] as? String {
+                journal.record(.agent, text)
+            }
         case "turn/plan/updated":
             let steps = (params["plan"] as? [[String: Any]] ?? []).map {
                 PlanStep(status: $0["status"] as? String, text: $0["step"] as? String ?? "")
             }
-            if !steps.isEmpty { journal.line(PlanStep.lines(steps)) }
+            if !steps.isEmpty { journal.record(.plan, PlanStep.body(steps)) }
         case "turn/completed":
             turnCompleted(params["turn"] as? [String: Any])
         default:
@@ -161,11 +165,11 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
 
     static func describe(started item: [String: Any]?) -> String? {
         switch item?["type"] as? String {
-        case "commandExecution": return (item?["command"] as? String).map { "-> $ \($0)" }
-        case "mcpToolCall": return (item?["tool"] as? String).map { "-> \($0)" }
-        case "dynamicToolCall": return (item?["tool"] as? String).map { "-> \($0)" }
-        case "fileChange": return "-> edit files"
-        case "webSearch": return (item?["query"] as? String).map { "-> search \($0)" }
+        case "commandExecution": return (item?["command"] as? String).map { "$ \($0)" }
+        case "mcpToolCall": return item?["tool"] as? String
+        case "dynamicToolCall": return item?["tool"] as? String
+        case "fileChange": return "edit files"
+        case "webSearch": return (item?["query"] as? String).map { "search \($0)" }
         default: return nil
         }
     }

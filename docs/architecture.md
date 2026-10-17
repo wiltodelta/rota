@@ -178,17 +178,23 @@ flowchart LR
   session id, appending to the same log: Claude `--resume <session id>`, Codex
   `thread/resume`, Grok `session/load` with its replayed updates ignored.
   Verified live 2026-10-09 by the `*Continues*` tests in `LiveHarnessTests`.
-- Runners write the log as chat lines (`Transcript`): `[you] ` before every
-  line of user text, `-> ` for a tool, `[rota: …]` for status, `[error] `;
-  everything else is the agent's text. `Transcript.parse` turns it into
-  items and `TranscriptTurn.group` into turns, split at each user message:
-  what comes up to a turn's last tool call is its work, folded behind one rule
-  in `ChatTranscript` (open while the turn runs), and the text after it is the
-  answer. The layout follows super.engineering's chat.
+- Runner adapters map supported output into a small Rota transcript contract.
+  `RunJournal` serializes normalized JSONL and a readable log under one lock.
+  `TranscriptReader` incrementally replays stable IDs, completed messages and
+  partial text. New agent sessions display those entries in recorded order;
+  tool schemas and provider event names never reach the view. Unknown optional
+  output does not hide supported text. Storage, compatibility, failure and
+  extension rules, incremental paging, and write consistency:
+  [Transcript format](transcript-format.md).
+- Legacy sessions and Shell retain their readable-log reader (`Transcript`):
+  `[you] ` for user text, `-> ` for a tool, `[rota: …]` for status, `[error] `.
+  `TranscriptTurn.group` preserves their existing inferred turn layout. Legacy
+  continuation does not manufacture a normalized history from old log text.
 - Agent text renders through `MarkdownBlock` (headings, list items, fenced
   code, paragraphs; inline Markdown inside each), because SwiftUI `Text` draws
-  inline Markdown only. `Transcript.parse` keeps a fenced block with blank
-  lines in one message.
+  inline Markdown only. Typed messages preserve their complete text, including
+  service-looking prefixes and code fences; the legacy parser keeps a fenced
+  block with blank lines in one message.
 - Scheduling follows Claude Desktop's policy: a missed slot runs once late, as
   `RunTrigger.catchUp`, when under `missedRunGrace` (7 days) old, otherwise a
   skip is recorded; an overlap is skipped without a notification. Skips stay
@@ -233,6 +239,13 @@ flowchart LR
   `interrupted` at start.
 
 ## App
+
+Chat implementation research and proposed changes, including the evidence and
+limits of inspecting super.engineering, live in [Chat UI research](chat-ui-research.md).
+The intended direction is a small provider-independent transcript contract
+with tolerant handling of optional output, not full harness output parity.
+The proposed adapter, journal, and view boundary is documented in that report;
+the implemented subset and journal schema are in [Transcript format](transcript-format.md).
 
 AppKit shell, SwiftUI content, the same structure as watch-me-sleep:
 `AppDelegate` owns an `NSStatusItem`, the borderless `NSPanel` dropdown

@@ -36,6 +36,8 @@ final class StorageTests: XCTestCase {
             try FileManager.default.createDirectory(at: log.deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)
             FileManager.default.createFile(atPath: log.path, contents: Data("x".utf8))
+            FileManager.default.createFile(atPath: TranscriptReader.journalURL(for: log).path,
+                                           contents: Data("sidecar".utf8))
             record.logPath = log.path
             logs.append(log)
             try history.upsert(record)
@@ -46,6 +48,10 @@ final class StorageTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: logs[0].path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: logs[1].path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: logs[2].path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: TranscriptReader.journalURL(for: logs[0]).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: TranscriptReader.journalURL(for: logs[2]).path))
+        history.removeAll(for: "a")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: TranscriptReader.journalURL(for: logs[2]).path))
     }
 
     func testOrphanedRunsBecomeInterrupted() throws {

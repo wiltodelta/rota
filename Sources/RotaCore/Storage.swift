@@ -127,7 +127,7 @@ public struct RunHistory: Sendable {
         let keptLogs = Set(retained.compactMap(\.logPath))
         for dropped in records where !keptIDs.contains(dropped.id) {
             if let path = dropped.logPath, !keptLogs.contains(path) {
-                try? FileManager.default.removeItem(atPath: path)
+                removeLog(path)
             }
         }
     }
@@ -149,9 +149,15 @@ public struct RunHistory: Sendable {
 
     public func removeAll(for routineID: String) {
         for record in records(for: routineID) {
-            if let path = record.logPath { try? FileManager.default.removeItem(atPath: path) }
+            if let path = record.logPath { removeLog(path) }
         }
         try? FileManager.default.removeItem(at: file(for: routineID))
+    }
+
+    /// A normalized transcript has exactly the same retention as its readable log.
+    private func removeLog(_ path: String) {
+        try? FileManager.default.removeItem(atPath: path)
+        try? FileManager.default.removeItem(at: TranscriptReader.journalURL(for: URL(fileURLWithPath: path)))
     }
 
     public func logFile(for record: RunRecord) -> URL {

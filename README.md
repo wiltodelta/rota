@@ -18,14 +18,13 @@ Desktop.
   as you type.
 - **Sessions are the main view.** The sidebar lists every routine's sessions,
   newest first, by day. A session reads as a chat laid out like
-  super.engineering's: your prompt and messages in bubbles, the agent's answer
-  as plain text under the agent's own logo and model, the tool calls that led
-  there folded into one "Worked for …" line you can open, and a footer with
-  the time and a copy button. While a session works the line reads "Working
-  for 12s", calls in a row read as what they did ("ran 2 commands, read 1
-  file"), the agent's plan shows with each step's state, the field shows the
-  clock and turns its button into Stop, and the chat follows the session
-  unless you scroll up. Code blocks name their language and copy in one click.
+  super.engineering's: your prompt and messages in bubbles, agent messages
+  under the agent's own logo and model, basic tool activity, optional plans,
+  and a footer with the time and a copy button. New sessions keep messages and
+  actions in their recorded order. Older sessions retain their folded
+  "Worked for …" sections. While a session works, the field shows the clock
+  and turns its button into Stop. The chat follows the session unless you
+  scroll up. Code blocks name their language and copy in one click.
 - **Keep talking to a session, on every agent, while it works or after.** The
   field under the chat sends your message:
   - Claude Code runs interactively, as in a terminal, inside a detached
@@ -138,6 +137,11 @@ mv Rota.app /Applications/
   shows its schedule and next run, the switch that pauses it, **Run Now** and its
   sessions; **Edit…** opens its settings, Delete included. A new routine runs
   on its schedule from the start.
+- Chat shows messages and basic tool activity. Unsupported optional output is
+  omitted; if chat history cannot be read, Rota shows a warning and uses the
+  readable log. Long chats open at the latest 50 entries; Load Earlier Messages
+  brings in previous entries. See [Transcript format](docs/transcript-format.md) for the
+  storage and compatibility contract.
 - The sidebar folds away with the button beside the title, View > Hide
   Sidebar or Control-Command-S, and stays as you left it.
 - Menus: File > New Routine… (Command-N) and Import Routines…;

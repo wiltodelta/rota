@@ -112,9 +112,9 @@ public final class ProcessLauncher: RoutineLaunching {
         }
         let output = try FileHandle(forWritingTo: spec.log)
         output.seekToEndOfFile()
-        output.write(Data((Transcript.userLines(spec.prompt) + "\n").utf8))
         Self.log.info("Starting \(spec.executable, privacy: .public) in \(spec.workingDirectory, privacy: .public)")
-        let journal = RunJournal(output: output, events: events)
+        let journal = Self.journal(for: spec, output: output, events: events)
+        journal.record(.user, spec.prompt)
         switch spec.mode {
         case .claudeStream:
             if let notice = spec.notice { journal.line("[rota: \(notice)]") }
@@ -127,6 +127,25 @@ public final class ProcessLauncher: RoutineLaunching {
             return GrokACPRun.start(spec, journal: journal)
         case .screen:
             return try ScreenRun.start(spec, journal: journal)
+        }
+    }
+
+    /// Presentation storage is optional: damaged chat history must not prevent
+    /// a harness session from continuing, and must never be overwritten.
+    static func journal(for spec: LaunchSpec, output: FileHandle, events: RunEvents) -> RunJournal {
+        let url = TranscriptReader.journalURL(for: spec.log)
+        guard spec.mode != .screen, spec.resume == nil || FileManager.default.fileExists(atPath: url.path) else {
+            return RunJournal(output: output, events: events)
+        }
+        do {
+            let transcript = try TranscriptJournal(log: spec.log, resuming: spec.resume != nil,
+                                                   logSize: output.offsetInFile)
+            return RunJournal(output: output, events: events, transcript: transcript)
+        } catch {
+            let journal = RunJournal(output: output, events: events)
+            journal.line("[error] Couldn't open chat history. This run will use the readable log.")
+            Self.log.error("Couldn't open normalized chat history")
+            return journal
         }
     }
 

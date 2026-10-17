@@ -193,16 +193,16 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
             promptPending = false
             unanswered = max(0, unanswered - 1)
             turnEnded = false
-            journal.line(Transcript.userLines(text))
+            journal.record(.user, text)
         case .queued(let text):
             unanswered = max(0, unanswered - 1)
-            journal.line(Transcript.userLines(text))
-        case .assistant(let model, let text):
+            journal.record(.user, text)
+        case .assistant(let model, let items):
             if !headerWritten, let model {
                 headerWritten = true
                 journal.line("[session started, \(model)]")
             }
-            if let text { journal.line(text) }
+            for item in items { journal.record(item.kind, item.text) }
         case .apiError(let text):
             failed = true
             journal.line("[error] \(text)")
@@ -265,7 +265,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
 enum ClaudeTranscript: Equatable {
     case user(String)
     case queued(String)
-    case assistant(model: String?, text: String?)
+    case assistant(model: String?, items: [TranscriptItem])
     case apiError(String)
     case turnEnded
     case other
@@ -290,7 +290,7 @@ enum ClaudeTranscript: Equatable {
                 return .apiError(text.flatMap { $0.isEmpty ? nil : $0 } ?? "Claude could not answer.")
             }
             let model = (message?["model"] as? String).flatMap { $0 == "<synthetic>" ? nil : $0 }
-            return .assistant(model: model, text: StreamJSONFormatter.format(lossyUTF8(data)))
+            return .assistant(model: model, items: StreamJSONFormatter.assistantItems(entry))
         case "system" where entry["subtype"] as? String == "turn_duration":
             return .turnEnded
         default:
