@@ -122,6 +122,48 @@ final class InterfaceScaleTests: XCTestCase {
         XCTAssertEqual(controller.preferredContentSize.width, 780)
     }
 
+    func testPickerValuesKeepTheSameGapToTheirArrows() throws {
+        _ = NSApplication.shared
+        var trailingEdges: [CGFloat] = []
+        for selected in ["System", "JetBrains Mono"] {
+            let picker = InterfacePicker(title: "Font", selection: .constant(selected), choices: [
+                .item("System", "System"), .item("JetBrains Mono", "JetBrains Mono"),
+                .item("A considerably longer font name", "long")
+            ])
+            let host = NSHostingView(rootView: Form { picker }.formStyle(.grouped)
+                .frame(width: 520, height: 100).environment(\.interfaceScale, InterfaceScale(factor: 1.5)))
+            host.appearance = NSAppearance(named: .aqua)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 100),
+                                  styleMask: [], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            defer { window.close() }
+            window.contentView = host
+            host.layoutSubtreeIfNeeded()
+            let button = try XCTUnwrap(popup(in: host))
+            XCTAssertEqual(button.title, selected, "The fixture must render both selected values")
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            let backingScale = CGFloat(bitmap.pixelsWide) / host.bounds.width
+            let rect = button.convert(button.bounds, to: host)
+            let top = host.isFlipped ? rect.minY : host.bounds.height - rect.maxY
+            // Exclude the arrow; compare the visible trailing edge of each value.
+            let start = Int(rect.minX * backingScale)
+            let end = Int((rect.maxX - 30) * backingScale)
+            let rows = Int((top + rect.height / 4) * backingScale)..<Int((top + rect.height * 3 / 4) * backingScale)
+            var lastInk: Int?
+            for x in start..<end {
+                for y in rows {
+                    guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                    if color.alphaComponent > 0.5,
+                       max(color.redComponent, color.greenComponent, color.blueComponent) < 0.3 { lastInk = x }
+                }
+            }
+            trailingEdges.append(CGFloat(try XCTUnwrap(lastInk)) / backingScale)
+        }
+        XCTAssertEqual(trailingEdges[0], trailingEdges[1], accuracy: 2,
+                       "Short and long values must end at the same distance from their arrows")
+    }
+
     func testInvalidStoredAndAssignedValuesCannotEscapeSupportedLevels() throws {
         let name = "rota-scale-test-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))

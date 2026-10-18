@@ -313,11 +313,17 @@ icons with help text when their full titles no longer fit. The routine header
 also moves its actions onto a second row instead of truncating their labels. `ChatTextSettings` holds the chat's
 font family, monospaced family and base size in UserDefaults. `InterfaceScaleSettings`
 stores one app-wide scale (80%, 90%, 100%, 110%, 125% or 150%). View menu zoom
-commands and Settings > General change that same value. `InterfaceScale` in the
+commands and Settings > General change that same value. AppKit inserts a separator
+before the native `toggleFullScreen:` action after AppKit menu changes finish,
+because SwiftUI can discard a trailing command-group divider. The check
+uses the action selector and preserves an existing separator after menu rebuilds.
+`InterfaceScale` in the
 SwiftUI environment scales layout dimensions; semantic font modifiers resolve
 system fonts at their final size. `InterfacePicker` uses an `NSPopUpButton` with
 an explicit final font, because SwiftUI's macOS Picker retains its default title
-font even when the surrounding environment font changes. Native button labels
+font even when the surrounding environment font changes. Popup values align
+right beside their arrows; the native intrinsic width includes the longest menu
+item, so default alignment leaves short values far from the arrow. Native button labels
 also receive an explicit scaled font. Menu items keep the system font.
 Chat fonts multiply their base size by the same
 observable scale without rewriting chat preferences. No layer, bitmap or view

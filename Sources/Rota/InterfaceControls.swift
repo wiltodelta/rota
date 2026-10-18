@@ -60,6 +60,8 @@ private struct InterfacePopUp<Selection: Hashable>: NSViewRepresentable {
         let button = NSPopUpButton(frame: .zero, pullsDown: false)
         button.target = context.coordinator
         button.action = #selector(PopUpCoordinator.select(_:))
+        // Intrinsic width includes the longest menu item; keep the selected value beside its arrow.
+        button.alignment = .right
         button.cell?.lineBreakMode = .byTruncatingMiddle
         return button
     }

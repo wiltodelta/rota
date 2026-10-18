@@ -215,6 +215,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         NSApp.setActivationPolicy(.accessory)
         NSWindow.allowsAutomaticWindowTabbing = false
+        for name in [NSMenu.didAddItemNotification, NSMenu.didChangeItemNotification,
+                     NSMenu.didRemoveItemNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(menuCommandsChanged(_:)),
+                                                   name: name, object: nil)
+        }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
@@ -242,6 +247,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             Logger(subsystem: "com.wiltodelta.rota", category: "app")
                 .info("Panel window \(self.panel.windowNumber, privacy: .public)")
         }
+    }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    @objc private func menuCommandsChanged(_ notification: Notification) {
+        guard let menu = notification.object as? NSMenu,
+              NSApp.mainMenu?.items.contains(where: { $0.submenu === menu }) == true else { return }
+        // Wait until SwiftUI and AppKit finish assembling the command group.
+        DispatchQueue.main.async { MainMenu.separateFullScreen(in: menu) }
     }
 
     /// The status item can be hidden behind the notch or by the system, so
