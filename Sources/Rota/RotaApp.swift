@@ -31,15 +31,17 @@ struct RotaApp: App {
                 }
             }
             RoutineCommands()
-            // Chat text size, as chat apps and browsers do it.
+            // A single zoom for all app content; chat fonts remain independently configurable.
             CommandGroup(after: .toolbar) {
                 SidebarToggleCommand()
                 Divider()
-                Button("Bigger") { AppModel.shared.chatText.bigger() }
+                Button("Zoom In") { AppModel.shared.interfaceScale.increase() }
+                    .disabled(!AppModel.shared.interfaceScale.canIncrease)
                     .keyboardShortcut("+")
-                Button("Smaller") { AppModel.shared.chatText.smaller() }
+                Button("Zoom Out") { AppModel.shared.interfaceScale.decrease() }
+                    .disabled(!AppModel.shared.interfaceScale.canDecrease)
                     .keyboardShortcut("-")
-                Button("Actual Size") { AppModel.shared.chatText.reset() }
+                Button("Actual Size") { AppModel.shared.interfaceScale.reset() }
                     .keyboardShortcut("0")
                 Divider()
             }
@@ -145,12 +147,16 @@ final class AppModel {
         }
     }
     let settings = AppSettings()
-    let chatText = ChatTextSettings()
+    let interfaceScale: InterfaceScaleSettings
+    let chatText: ChatTextSettings
     private let notifier = Notifier()
     @ObservationIgnored var openMainWindow: () -> Void = {}
     @ObservationIgnored var openSettingsWindow: () -> Void = {}
 
     private init() {
+        let scale = InterfaceScaleSettings()
+        interfaceScale = scale
+        chatText = ChatTextSettings(interfaceScale: scale)
         // Development hook: render in one appearance without changing the system's.
         if let style = ProcessInfo.processInfo.environment["ROTA_APPEARANCE"] {
             NSApp.appearance = NSAppearance(named: style == "dark" ? .darkAqua : .aqua)
@@ -217,7 +223,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             addShowMenuAction(to: button)
         }
-        panel = MenuBarPanelController(rootView: MenuBarContent().environment(model),
+        panel = MenuBarPanelController(rootView: MenuBarContent()
+            .interfaceScale(model.interfaceScale).environment(model),
                                        size: NSSize(width: 340, height: 300))
         model.openMainWindow = { [weak self] in self?.showMainWindow() }
         model.openSettingsWindow = { [weak self] in self?.showSettingsWindow() }
@@ -399,7 +406,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func showMainWindow() {
         panel.close()
         if mainWindow == nil {
-            let hosting = NSHostingController(rootView: MainWindow().environment(model))
+            let content = MainWindow().interfaceScale(model.interfaceScale).environment(model)
+            let hosting = NSHostingController(rootView: content)
             hosting.sceneBridgingOptions = [.toolbars, .title]
             let window = NSWindow(contentViewController: hosting)
             window.title = "Rota"

@@ -10,6 +10,7 @@ enum SidebarItem: Hashable {
 /// Routines stay above the growing session history, which is grouped by day
 /// with the newest sessions first.
 struct MainWindow: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
 
     private var records: [RunRecord] {
@@ -26,32 +27,40 @@ struct MainWindow: View {
             set: { model.sidebarVisible = $0 != .detailOnly }
         )) {
             List(selection: $model.selection) {
-                Section("Routines") {
+                Section {
                     ForEach(model.scheduler.routines) { routine in
-                        HStack(spacing: 8) {
+                        HStack(spacing: metrics.points(8)) {
                             StatusDot(routine: routine)
                             Text(routine.name).lineLimit(1)
                         }
+                        .interfaceFont(.body)
                         .tag(SidebarItem.routine(routine.id))
                     }
+                } header: {
+                    Text("Routines").interfaceFont(.caption).fontWeight(.semibold)
                 }
                 ForEach(DayGroup.group(records), id: \.title) { group in
-                    Section(group.title) {
+                    Section {
                         ForEach(group.records) { record in
-                            SessionRow(record: record).tag(SidebarItem.session(record.id))
+                            SessionRow(record: record).interfaceFont(.body).tag(SidebarItem.session(record.id))
                         }
+                    } header: {
+                        Text(group.title).interfaceFont(.caption).fontWeight(.semibold)
                     }
                 }
             }
-            .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
+            .navigationSplitViewColumnWidth(min: min(metrics.points(240), 280),
+                                            ideal: min(metrics.points(280), 360),
+                                            max: metrics.points(360))
             .overlay {
                 if model.scheduler.routines.isEmpty {
                     ContentUnavailableView {
-                        Label("No routines", systemImage: "calendar.badge.clock")
+                        Label("No routines", systemImage: "calendar.badge.clock").interfaceFont(.title2)
                     } description: {
                         Text("Import the routines Claude Desktop or Codex schedules, or add one.")
+                            .interfaceFont(.body)
                     } actions: {
-                        Button("Import Routines") { model.presentingImport = true }
+                        Button(interfaceTitle: "Import Routines") { model.presentingImport = true }
                     }
                 }
             }
@@ -135,16 +144,18 @@ struct MainWindow: View {
         Group {
             if model.scheduler.routines.isEmpty {
                 ContentUnavailableView {
-                    Label("No sessions yet", systemImage: "bubble.left.and.text.bubble.right")
+                    Label("No sessions yet", systemImage: "bubble.left.and.text.bubble.right").interfaceFont(.title2)
                 } description: {
                     Text("Add a routine with + or import one from Claude Desktop or Codex. "
                          + "Each run becomes a session here.")
+                        .interfaceFont(.body)
                 }
             } else if model.scheduler.allRecords().isEmpty {
                 ContentUnavailableView {
-                    Label("No sessions yet", systemImage: "bubble.left.and.text.bubble.right")
+                    Label("No sessions yet", systemImage: "bubble.left.and.text.bubble.right").interfaceFont(.title2)
                 } description: {
                     Text("Routines start a session when they run. Pick a routine and choose Run Now.")
+                        .interfaceFont(.body)
                 }
             } else {
                 Text("Select a session").foregroundStyle(Color.secondaryText)
@@ -182,27 +193,28 @@ struct DayGroup {
 }
 
 private struct SessionRow: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: metrics.points(8)) {
             Group {
                 if record.outcome == .running {
                     // A working session spins, as in super.engineering's list.
-                    ProgressView().controlSize(.mini).frame(width: 8, height: 8)
+                    ProgressView().controlSize(.mini).frame(width: metrics.points(8), height: metrics.points(8))
                 } else {
                     dot(color, size: 8)
                 }
             }
             .accessibilityElement()
             .accessibilityLabel(record.outcome.title)
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: metrics.points(1)) {
                 Text(model.scheduler.routine(record.routineID)?.name ?? record.routineID)
                     .fontWeight(record.isUnread ? .semibold : .regular)
                     .lineLimit(1)
                 Text(details)
-                    .font(.caption)
+                    .interfaceFont(.caption)
                     .foregroundStyle(Color.secondaryText)
                     .lineLimit(1)
             }
@@ -229,7 +241,7 @@ private struct SessionRow: View {
             .fill(fill)
             // The selected row's accent fill hides a blue or green dot.
             .overlay { if model.selection == .session(record.id) { Circle().strokeBorder(.white, lineWidth: 1.5) } }
-            .frame(width: size, height: size)
+            .frame(width: metrics.points(size), height: metrics.points(size))
     }
 
     private var details: String {

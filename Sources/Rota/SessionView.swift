@@ -5,6 +5,7 @@ import SwiftUI
 /// One session as a chat: the routine's prompt, what the agent said and did,
 /// and the user's messages, with a field to write the next one.
 struct SessionView: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
     let routine: Routine
@@ -26,8 +27,8 @@ struct SessionView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
+                .padding(.horizontal, metrics.points(20))
+                .padding(.vertical, metrics.points(12))
             Divider()
             if let question = current.attention {
                 AttentionBanner(text: question, canReply: model.scheduler.canMessage(current)) {
@@ -36,9 +37,9 @@ struct SessionView: View {
             }
             if let problem = transcript.problem {
                 Text(problem)
-                    .font(.callout)
+                    .interfaceFont(.callout)
                     .foregroundStyle(Color.secondaryText)
-                    .padding(12)
+                    .padding(metrics.points(12))
                     .accessibilityIdentifier("transcriptProblem")
             }
             let items = transcript.items
@@ -50,7 +51,7 @@ struct SessionView: View {
                 outbox.append(Outgoing(text: text, seen: Outgoing.count(text, in: items)))
             }
         }
-        .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(routine.name)
         .task(id: RefreshKey(record: record.id, running: running, version: model.scheduler.historyVersion)) {
             // Follow the log while the session works; read it once otherwise.
@@ -90,19 +91,19 @@ struct SessionView: View {
 
     private var header: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
+            HStack(spacing: metrics.points(12)) {
                 sessionSummary
                 Spacer(minLength: 12)
                 showRoutine
                 sessionActions
             }
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: metrics.points(8)) {
+                HStack(spacing: metrics.points(12)) {
                     sessionSummary
                     Spacer(minLength: 12)
                     showRoutine
                 }
-                HStack(spacing: 12) {
+                HStack(spacing: metrics.points(12)) {
                     Spacer(minLength: 0)
                     sessionActions
                 }
@@ -111,40 +112,48 @@ struct SessionView: View {
     }
 
     private var sessionSummary: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: metrics.points(2)) {
             Text(record.startedAt.formatted(date: .abbreviated, time: .shortened))
-                .font(.callout)
+                .interfaceFont(.callout)
             Text([record.harness.title, record.trigger == .catchUp ? "missed slot, run late" : nil,
                   record.outcome.title].compactMap { $0 }.joined(separator: " \u{00B7} "))
-                .font(.caption)
+                .interfaceFont(.caption)
                 .foregroundStyle(record.outcome.isFailure ? Color.errorText : Color.secondaryText)
         }
     }
 
     private var showRoutine: some View {
-        Button("Show Routine", systemImage: "calendar") { model.selection = .routine(routine.id) }
+        Button(interfaceTitle: "Show Routine", systemImage: "calendar") { model.selection = .routine(routine.id) }
             .fixedSize()
             .help("Show \(routine.name)'s schedule, settings, and sessions")
             .accessibilityIdentifier("showSessionRoutine")
     }
 
-    @ViewBuilder
     private var sessionActions: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: metrics.points(12)) { actionButtons }.fixedSize()
+            HStack(spacing: metrics.points(12)) { actionButtons.labelStyle(.iconOnly) }.fixedSize()
+        }
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
         if let path = record.logPath {
-            Button("Show Log in Finder", systemImage: "folder") {
+            Button(interfaceTitle: "Show Log in Finder", systemImage: "folder") {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
             }
             .labelStyle(.iconOnly)
             .help("Show log in Finder")
         }
         if model.scheduler.terminalCommand(for: record) != nil {
-            Button(running ? "Open in Terminal" : "Continue in Terminal", systemImage: "terminal") {
+            Button(interfaceTitle: running ? "Open in Terminal" : "Continue in Terminal", systemImage: "terminal") {
                 ChatOpener.open(record, workingDirectory: routine.workingDirectory, scheduler: model.scheduler,
                                 terminal: model.settings.terminalApp)
             }
+            .help(running ? "Open this session in Terminal" : "Continue this session in Terminal")
             .accessibilityIdentifier("openTerminal")
         }
-        Button("Delete Session…", systemImage: "trash", role: .destructive) {
+        Button(interfaceTitle: "Delete Session…", systemImage: "trash", role: .destructive) {
             model.sessionToDelete = record
         }
         .labelStyle(.iconOnly)
@@ -153,7 +162,7 @@ struct SessionView: View {
         .accessibilityIdentifier("deleteSession")
         // A session that takes messages has Stop beside its field.
         if running && !model.scheduler.canMessage(record) {
-            Button("Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }
+            Button(interfaceTitle: "Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }
                 .accessibilityIdentifier("stopSession")
         }
     }
@@ -164,31 +173,33 @@ struct SessionView: View {
 /// A session that takes no message (a command, or one whose routine runs again)
 /// cannot be answered here, so the banner asks for a look and a Done instead.
 private struct AttentionBanner: View {
+    @Environment(\.interfaceScale) private var metrics
     let text: String
     let canReply: Bool
     let dismiss: () -> Void
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: metrics.points(10)) {
             Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(canReply ? "Needs your reply" : "Needs your attention").font(.callout.weight(.semibold))
+            VStack(alignment: .leading, spacing: metrics.points(2)) {
+                Text(canReply ? "Needs your reply" : "Needs your attention")
+                    .interfaceFont(.callout).fontWeight(.semibold)
                     .accessibilityIdentifier("attentionBanner")
-                Text(text).font(.callout).textSelection(.enabled)
+                Text(text).interfaceFont(.callout).textSelection(.enabled)
             }
             Spacer(minLength: 8)
-            Button(canReply ? "Dismiss" : "Done", action: dismiss)
+            Button(interfaceTitle: canReply ? "Dismiss" : "Done", action: dismiss)
                 .help(canReply ? "Clear the mark without replying" : "Clear the mark")
                 .accessibilityIdentifier("dismissAttention")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, metrics.points(14))
+        .padding(.vertical, metrics.points(10))
         // A card inside the column: an edge-to-edge band shows through the translucent sidebar.
-        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: metrics.points(10)))
         // The chat's column, so the card lines up with the messages under it.
-        .padding(.horizontal, 24)
-        .padding(.top, 12)
-        .frame(maxWidth: 760)
+        .padding(.horizontal, metrics.points(24))
+        .padding(.top, metrics.points(12))
+        .frame(maxWidth: metrics.points(760))
         .frame(maxWidth: .infinity)
     }
 }

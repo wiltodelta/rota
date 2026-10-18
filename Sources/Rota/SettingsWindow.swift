@@ -19,7 +19,7 @@ final class SettingsTabController: NSTabViewController {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     private func add(_ view: some View, label: String, symbol: String, model: AppModel) {
-        let hosting = SettingsPaneController(rootView: view.environment(model))
+        let hosting = SettingsPaneController(rootView: view.interfaceScale(model.interfaceScale).environment(model))
         // The tab controller copies the selected child's title to the window.
         hosting.title = label
         let item = NSTabViewItem(viewController: hosting)
@@ -66,13 +66,17 @@ final class SettingsTabController: NSTabViewController {
 }
 
 /// The form keeps its natural height inside a scroll view when the screen is shorter.
-private final class SettingsPaneController: NSViewController {
+final class SettingsPaneController: NSViewController {
     private let hosting: NSHostingController<AnyView>
+    private var pendingSize: CGSize?
 
     init(rootView: some View) {
-        hosting = NSHostingController(rootView: AnyView(rootView))
+        hosting = NSHostingController(rootView: AnyView(EmptyView()))
         hosting.sizingOptions = [.preferredContentSize]
         super.init(nibName: nil, bundle: nil)
+        hosting.rootView = AnyView(rootView.onGeometryChange(for: CGSize.self) { $0.size } action: { [weak self] size in
+            self?.scheduleSize(size)
+        })
     }
 
     @available(*, unavailable)
@@ -86,17 +90,24 @@ private final class SettingsPaneController: NSViewController {
         addChild(hosting)
         scroll.documentView = hosting.view
         view = scroll
-        updateSize()
+        updateSize(hosting.preferredContentSize)
     }
 
-    override func preferredContentSizeDidChange(for viewController: NSViewController) {
-        super.preferredContentSizeDidChange(for: viewController)
-        guard isViewLoaded else { return }
-        updateSize()
+    /// The hosting controller's preferred size can retain its first proposal.
+    /// Follow the form's measured size and coalesce updates after SwiftUI layout.
+    private func scheduleSize(_ size: CGSize) {
+        guard size.width > 0, size.height > 0, size.width.isFinite, size.height.isFinite else { return }
+        let scheduled = pendingSize != nil
+        pendingSize = size
+        guard !scheduled else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let size = self.pendingSize else { return }
+            self.pendingSize = nil
+            self.updateSize(size)
+        }
     }
 
-    private func updateSize() {
-        let size = hosting.preferredContentSize
+    private func updateSize(_ size: CGSize) {
         guard size.height > 0, preferredContentSize != size else { return }
         hosting.view.setFrameSize(size)
         preferredContentSize = size

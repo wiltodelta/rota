@@ -3,6 +3,7 @@ import SwiftUI
 
 /// A selection sheet. Source apps are read only; imported routines start paused.
 struct ImportSheet: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var scans: [ImportScan]?
@@ -25,7 +26,7 @@ struct ImportSheet: View {
             Divider()
             footer
         }
-        .frame(width: 640, height: 500)
+        .frame(width: metrics.sheetWidth(640), height: min(metrics.points(500), 500))
         .task {
             guard scans == nil else { return }
             scans = await Task.detached(priority: .userInitiated) { RoutineImport.scanAll() }.value
@@ -33,22 +34,22 @@ struct ImportSheet: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Import Routines").font(.title2.bold())
+        VStack(alignment: .leading, spacing: metrics.points(12)) {
+            VStack(alignment: .leading, spacing: metrics.points(6)) {
+                Text("Import Routines").interfaceFont(.title2).fontWeight(.bold)
                 Text("Choose routines to copy into Rota. They start paused.")
                     .foregroundStyle(Color.secondaryText)
             }
-            HStack(spacing: 16) {
-                HStack(spacing: 6) {
+            HStack(spacing: metrics.points(16)) {
+                HStack(spacing: metrics.points(6)) {
                     Image(systemName: "magnifyingglass").foregroundStyle(Color.secondaryText)
                     TextField("Search routines", text: $search)
                         .textFieldStyle(.plain)
                         .accessibilityIdentifier("importSearch")
                 }
-                .padding(8)
-                .background(.background, in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.separator.opacity(0.5)))
+                .padding(metrics.points(8))
+                .background(.background, in: RoundedRectangle(cornerRadius: metrics.points(7)))
+                .overlay(RoundedRectangle(cornerRadius: metrics.points(7)).strokeBorder(.separator.opacity(0.5)))
                 if importedCount > 0 {
                     Toggle("Show imported (\(importedCount))", isOn: $showImported)
                         .toggleStyle(.checkbox)
@@ -58,16 +59,16 @@ struct ImportSheet: View {
             }
             .disabled(scans == nil)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 16)
+        .padding(.horizontal, metrics.points(24))
+        .padding(.vertical, metrics.points(16))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder private var results: some View {
         if let scans {
             if scans.allSatisfy({ visible($0).isEmpty && $0.problem == nil }) {
-                VStack(spacing: 8) {
-                    Text(search.isEmpty ? "No routines to import" : "No matching routines").font(.headline)
+                VStack(spacing: metrics.points(8)) {
+                    Text(search.isEmpty ? "No routines to import" : "No matching routines").interfaceFont(.headline)
                     Text(search.isEmpty
                          ? (importedCount > 0 ? "Already imported routines can be shown above."
                             : "No routines found in Claude Desktop or Codex.")
@@ -77,7 +78,7 @@ struct ImportSheet: View {
                 .accessibilityIdentifier("importEmpty")
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 20) {
+                    LazyVStack(alignment: .leading, spacing: metrics.points(20)) {
                         ForEach(scans, id: \.source) { scan in
                             let rows = visible(scan)
                             if !rows.isEmpty || scan.problem != nil {
@@ -85,8 +86,8 @@ struct ImportSheet: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 16)
+                    .padding(.horizontal, metrics.points(24))
+                    .padding(.vertical, metrics.points(16))
                 }
                 .accessibilityIdentifier("importResults")
             }
@@ -96,15 +97,15 @@ struct ImportSheet: View {
     }
 
     private func sourceSection(_ scan: ImportScan, rows: [ImportCandidate]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: metrics.points(8)) {
             HStack {
-                Text(scan.source.title).font(.headline)
+                Text(scan.source.title).interfaceFont(.headline)
                 Text("\(rows.count)").foregroundStyle(Color.secondaryText)
                 Spacer()
                 let ids = rows.filter(canImport).map(\.id)
                 let all = !ids.isEmpty && Set(ids).isSubset(of: chosen)
                 if !ids.isEmpty {
-                    Button(all ? "Deselect All" : "Select All") {
+                    Button(interfaceTitle: all ? "Deselect All" : "Select All") {
                         if all { chosen.subtract(ids) } else { chosen.formUnion(ids) }
                     }
                     .buttonStyle(.link)
@@ -113,13 +114,13 @@ struct ImportSheet: View {
             }
             if let problem = scan.problem {
                 Text(problem).foregroundStyle(Color.secondaryText)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, metrics.points(12))
             }
             VStack(spacing: 0) {
                 ForEach(rows) { candidate in
                     ImportRow(candidate: candidate, inRota: isImported(candidate), chosen: $chosen)
                     if candidate.id != rows.last?.id {
-                        Divider().padding(.leading, 21)
+                        Divider().padding(.leading, metrics.points(21))
                     }
                 }
             }
@@ -127,41 +128,38 @@ struct ImportSheet: View {
     }
 
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: metrics.points(8)) {
             HStack {
                 Text("Agent").foregroundStyle(Color.secondaryText)
-                Picker("Agent", selection: $harness) {
-                    Text("Original agent").tag(Harness?.none)
-                    Divider()
-                    ForEach(Harness.agents) { Text($0.title).tag(Optional($0)) }
-                }
-                .labelsHidden()
-                .fixedSize()
-                .accessibilityIdentifier("importAgent")
+                InterfacePicker(title: "Agent", selection: $harness,
+                                choices: [.item("Original agent", nil), .separator]
+                                    + Harness.agents.map { .item($0.title, Optional($0)) },
+                                identifier: "importAgent", hidesLabel: true)
+                    .fixedSize()
                 Spacer()
                 Text("\(chosen.count) selected").foregroundStyle(Color.secondaryText)
                     .accessibilityIdentifier("importSelectionCount")
             }
-            HStack(spacing: 12) {
+            HStack(spacing: metrics.points(12)) {
                 // A fixed notice area keeps the action row stable in both states.
                 Text(stillOn > 0
                      ? "Still active in source: \(stillOn). Pause there before enabling in Rota."
                      : "Source apps stay unchanged. Enable imported routines when you’re ready.")
-                    .font(.caption)
+                    .interfaceFont(.caption)
                     .foregroundStyle(stillOn > 0 ? Color.warningText : Color.secondaryText)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .frame(height: 32, alignment: .leading)
+                    .frame(height: metrics.points(32), alignment: .leading)
                     .accessibilityIdentifier("importNotice")
-                Button("Cancel", role: .cancel) { dismiss() }
+                Button(interfaceTitle: "Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button(chosen.isEmpty ? "Import" : "Import \(chosen.count)", action: importChosen)
+                Button(interfaceTitle: chosen.isEmpty ? "Import" : "Import \(chosen.count)", action: importChosen)
                     .keyboardShortcut(.defaultAction)
                     .disabled(chosen.isEmpty)
                     .accessibilityIdentifier("confirmImport")
             }
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 12)
+        .padding(.horizontal, metrics.points(24))
+        .padding(.vertical, metrics.points(12))
     }
 
     private var candidates: [ImportCandidate] { scans?.flatMap(\.candidates) ?? [] }
@@ -204,6 +202,7 @@ struct ImportSheet: View {
 }
 
 private struct ImportRow: View {
+    @Environment(\.interfaceScale) private var metrics
     let candidate: ImportCandidate
     let inRota: Bool
     @Binding var chosen: Set<String>
@@ -218,28 +217,28 @@ private struct ImportRow: View {
         .toggleStyle(.checkbox)
         .disabled(inRota || candidate.unsupported != nil)
         .accessibilityIdentifier(inRota ? "imported-\(candidate.id)" : "importChoice-\(candidate.id)")
-        .padding(.vertical, 12)
+        .padding(.vertical, metrics.points(12))
         .help("\(candidate.routine.name)\n\(detail)")
     }
 
     private var content: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .firstTextBaseline, spacing: metrics.points(12)) {
+            VStack(alignment: .leading, spacing: metrics.points(4)) {
                 Text(candidate.routine.name)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(inRota ? Color.secondaryText : .primary)
-                Text(detail).font(.caption).foregroundStyle(Color.secondaryText)
+                Text(detail).interfaceFont(.caption).foregroundStyle(Color.secondaryText)
                     .lineLimit(2)
                 if let reason = candidate.unsupported {
-                    Text(reason).font(.caption).foregroundStyle(Color.errorText)
+                    Text(reason).interfaceFont(.caption).foregroundStyle(Color.errorText)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Text(inRota ? "Already imported" : (candidate.onInSource ? "Active in source" : ""))
-                .font(.caption)
+                .interfaceFont(.caption)
                 .foregroundStyle(Color.secondaryText)
-                .frame(width: 100, alignment: .trailing)
+                .frame(width: metrics.points(100), alignment: .trailing)
                 .accessibilityHidden(!inRota && !candidate.onInSource)
         }
     }

@@ -5,6 +5,7 @@ import SwiftUI
 /// Normalized sessions display ordered entries with durable IDs. Legacy logs
 /// keep their inferred turn layout until those sessions leave history.
 struct ChatTranscript: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let items: [TranscriptItem]
     let running: Bool
@@ -32,9 +33,9 @@ struct ChatTranscript: View {
         let rows = structured ? WorkRow.group(items) : []
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 22) {
+                LazyVStack(alignment: .leading, spacing: metrics.points(22)) {
                     if hasEarlier {
-                        Button(loadingEarlier ? "Loading…" : "Load Earlier Messages") {
+                        Button(interfaceTitle: loadingEarlier ? "Loading…" : "Load Earlier Messages") {
                             following = false
                             pageAnchor = viewport.capture()
                             loadEarlier()
@@ -83,18 +84,18 @@ struct ChatTranscript: View {
                         WorkingLabel(since: model.scheduler.runStartedAt(record))
                     }
                     ForEach(Array(sending.enumerated()), id: \.offset) { _, text in
-                        VStack(alignment: .trailing, spacing: 4) {
+                        VStack(alignment: .trailing, spacing: metrics.points(4)) {
                             UserBubble(text: text).opacity(0.6)
                             Text("Sending\u{2026}").font(model.chatText.small).foregroundStyle(Color.secondaryText)
                         }
                         .frame(maxWidth: .infinity, alignment: .trailing)
                     }
-                    Color.clear.frame(height: 1).id(Int.min)
+                    Color.clear.frame(height: metrics.points(1)).id(Int.min)
                 }
                 .scrollTargetLayout()
-                .padding(.horizontal, 24)
-                .padding(.vertical, 20)
-                .frame(maxWidth: 760)
+                .padding(.horizontal, metrics.points(24))
+                .padding(.vertical, metrics.points(20))
+                .frame(maxWidth: metrics.points(760))
                 .frame(maxWidth: .infinity)
             }
             .scrollPosition(id: $visibleItem, anchor: .top)
@@ -137,6 +138,14 @@ struct ChatTranscript: View {
                     viewport.restoreAfterLayout(anchor)
                 }
             }
+            .onChange(of: metrics) {
+                if following {
+                    proxy.scrollTo(Int.min, anchor: .bottom)
+                } else if let anchor = viewport.anchorForUpdate() {
+                    proxy.scrollTo(anchor.id, anchor: anchor.point)
+                    viewport.restoreAfterLayout(anchor)
+                }
+            }
             .onDisappear { viewport.cancel() }
             .onChange(of: items.count + sending.count) { if following { proxy.scrollTo(Int.min, anchor: .bottom) } }
             .onAppear { proxy.scrollTo(Int.min, anchor: .bottom) }
@@ -148,13 +157,13 @@ struct ChatTranscript: View {
                         proxy.scrollTo(Int.min, anchor: .bottom)
                     } label: {
                         Image(systemName: "arrow.down")
-                            .font(.system(size: 13, weight: .semibold))
-                            .frame(width: 30, height: 30)
+                            .interfaceSystemFont(size: 13, weight: .semibold)
+                            .frame(width: metrics.points(30), height: metrics.points(30))
                             .background(.regularMaterial, in: Circle())
                             .overlay { Circle().strokeBorder(Color.primary.opacity(0.1)) }
                     }
                     .buttonStyle(.plain)
-                    .padding(.bottom, 12)
+                    .padding(.bottom, metrics.points(12))
                     .help("Scroll to the latest")
                     .accessibilityLabel("Scroll to the latest")
                     .accessibilityIdentifier("scrollToLatest")
@@ -168,19 +177,20 @@ struct ChatTranscript: View {
 /// A normalized transcript keeps the adapter's order. It never infers a final
 /// answer from the position of the last tool call.
 private struct TranscriptRow: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let item: TranscriptItem
     let record: RunRecord
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: metrics.points(8)) {
             switch item.kind {
             case .user: UserBubble(text: item.text)
             case .agent:
                 AgentHeader(record: record)
                 AnswerView(item: item)
             case .tool:
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: metrics.points(6)) {
                     Image(systemName: "wrench.and.screwdriver")
                     Text(item.text).textSelection(.enabled)
                 }
@@ -196,6 +206,7 @@ private struct TranscriptRow: View {
 }
 
 private struct TurnView: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let turn: TranscriptTurn
     let isLast: Bool
@@ -214,13 +225,13 @@ private struct TurnView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: metrics.points(12)) {
             if let prompt = turn.prompt {
                 UserBubble(text: prompt.text)
             }
             if !turn.work.isEmpty || !turn.answer.isEmpty || live {
                 AgentHeader(record: record)
-                    .padding(.top, 4)
+                    .padding(.top, metrics.points(4))
             }
             if !turn.work.isEmpty || live {
                 WorkSection(items: turn.work, live: live, since: model.scheduler.runStartedAt(record),
@@ -249,6 +260,7 @@ private struct TurnView: View {
 }
 
 private struct UserBubble: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let text: String
 
@@ -256,26 +268,29 @@ private struct UserBubble: View {
         HStack {
             Spacer(minLength: 80)
             let message = ChatMessage.decode(text)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: metrics.points(8)) {
                 if !message.text.isEmpty { Text(message.text).textSelection(.enabled) }
                 if !message.attachments.isEmpty { AttachmentChips(attachments: message.attachments) }
             }
                 .font(model.chatText.body)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
-                .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.primary.opacity(0.06)) }
+                .padding(.horizontal, metrics.points(14))
+                .padding(.vertical, metrics.points(9))
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: metrics.points(16)))
+                .overlay {
+                    RoundedRectangle(cornerRadius: metrics.points(16)).strokeBorder(Color.primary.opacity(0.06))
+                }
         }
     }
 }
 
 /// The session's harness, resolved model and applied effort.
 private struct AgentHeader: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: metrics.points(6)) {
             HarnessLogo(harness: record.harness)
             Text(ModelLabel.name(record: record, models: model.settings.models))
             if record.reportedEffort != nil || record.effort != nil {
@@ -329,23 +344,24 @@ private struct AnswerView: View {
 
 /// Rota's notes inside the chat: a centered line between rules, or a framed error.
 private struct NoteView: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let item: TranscriptItem
 
     var body: some View {
         if item.kind == .error {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: metrics.points(8)) {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.errorText)
                 Text(item.text).textSelection(.enabled)
                 Spacer(minLength: 0)
             }
             .font(model.chatText.body)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Color.errorText.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
-            .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.errorText.opacity(0.45)) }
+            .padding(.horizontal, metrics.points(14))
+            .padding(.vertical, metrics.points(10))
+            .background(Color.errorText.opacity(0.06), in: RoundedRectangle(cornerRadius: metrics.points(10)))
+            .overlay { RoundedRectangle(cornerRadius: metrics.points(10)).strokeBorder(Color.errorText.opacity(0.45)) }
         } else {
-            HStack(spacing: 10) {
+            HStack(spacing: metrics.points(10)) {
                 Hairline()
                 Text(item.text)
                     .font(model.chatText.small)
@@ -360,11 +376,12 @@ private struct NoteView: View {
 
 /// One completion line with its time, outcome and duration, under a finished turn.
 private struct TurnFooter: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
     let status: String?
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: metrics.points(10)) {
             // Capitalize legacy status text at the start of this clause.
             Text([record.endedAt?.formatted(date: .omitted, time: .shortened),
                   status.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? record.outcome.title]
@@ -394,6 +411,7 @@ private struct WorkingLabel: View {
 }
 
 struct CodeBox: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let text: String
 
@@ -402,17 +420,18 @@ struct CodeBox: View {
             .font(model.chatText.code)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
-            .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.06)) }
+            .padding(metrics.points(12))
+            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: metrics.points(10)))
+            .overlay { RoundedRectangle(cornerRadius: metrics.points(10)).strokeBorder(Color.primary.opacity(0.06)) }
     }
 }
 
 struct Hairline: View {
+    @Environment(\.interfaceScale) private var metrics
     var body: some View {
         Rectangle()
             .fill(Color(nsColor: .separatorColor))
-            .frame(height: 1)
+            .frame(height: metrics.points(1))
             .frame(maxWidth: .infinity)
     }
 }
@@ -420,6 +439,7 @@ struct Hairline: View {
 /// A harness's own mark (`HarnessLogos.xcassets`, sources in `docs/harness-logos.md`):
 /// Claude in its orange, the others in the text color; a shell gets the terminal glyph.
 struct HarnessLogo: View {
+    @Environment(\.interfaceScale) private var metrics
     let harness: Harness
 
     var body: some View {
@@ -435,7 +455,7 @@ struct HarnessLogo: View {
         }
         .foregroundStyle(harness == .claude ? Color(red: 0xD9 / 255, green: 0x77 / 255, blue: 0x57 / 255)
                          : Color.primary)
-        .frame(width: 14, height: 14)
+        .frame(width: metrics.points(14), height: metrics.points(14))
         .accessibilityHidden(true)
     }
 }

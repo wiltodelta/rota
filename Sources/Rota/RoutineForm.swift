@@ -4,6 +4,7 @@ import SwiftUI
 
 /// The editable fields of a routine, with schedule preview and harness warnings.
 struct RoutineForm: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     @Binding var draft: Routine
     /// Set for a new routine, whose skill names it; an existing routine keeps its id.
@@ -28,20 +29,18 @@ struct RoutineForm: View {
                         .labelsHidden()
                         .truncationMode(.middle)
                         .accessibilityIdentifier("routineFolder")
-                    Button("Choose\u{2026}") { chooseFolder() }
+                    Button(interfaceTitle: "Choose\u{2026}") { chooseFolder() }
                 }
             }
             if !draft.workingDirectory.isEmpty && !FileManager.default.fileExists(atPath: draft.workingDirectory) {
                 Label("No folder at this path.", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(Color.errorText)
-                    .font(.callout)
+                    .interfaceFont(.callout)
             }
             ScheduleField(schedule: $draft.schedule)
             // A menu, not segments: four fixed-width segments overflow a narrow window.
-            Picker("Runs on", selection: $draft.harness) {
-                ForEach(Harness.allCases) { Text($0.title).tag($0) }
-            }
-            .accessibilityIdentifier("routineHarness")
+            InterfacePicker(title: "Runs on", selection: $draft.harness,
+                            choices: Harness.allCases.map { .item($0.title, $0) }, identifier: "routineHarness")
             .onChange(of: draft.harness) {
                 // Model ids and efforts belong to one harness.
                 draft.model = nil
@@ -52,15 +51,16 @@ struct RoutineForm: View {
             }
             HarnessWarnings(routine: draft)
             TimeLimitField(minutes: $draft.timeLimitMinutes)
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: metrics.points(6)) {
                 Text(draft.harness.isAgent ? "Prompt" : "Command")
                 TextEditor(text: $draft.prompt)
                     .accessibilityIdentifier("routinePrompt")
-                    .font(.body.monospaced())
-                    .frame(minHeight: 90)
+                    .interfaceFont(.body).monospaced()
+                    .frame(minHeight: metrics.points(90))
                     .scrollContentBackground(.hidden)
-                    .padding(4)
-                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                    .padding(metrics.points(4))
+                    .background(Color(nsColor: .textBackgroundColor),
+                                in: RoundedRectangle(cornerRadius: metrics.points(6)))
             }
         }
         .formStyle(.grouped)
@@ -81,16 +81,17 @@ struct RoutineForm: View {
 }
 
 private struct ScheduleField: View {
+    @Environment(\.interfaceScale) private var metrics
     @Binding var schedule: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: metrics.points(4)) {
             LabeledContent("Schedule") {
-                HStack(spacing: 8) {
+                HStack(spacing: metrics.points(8)) {
                     TextField("Schedule", text: $schedule, prompt: Text("minute hour day month weekday"))
                         .accessibilityIdentifier("routineSchedule")
                         .labelsHidden()
-                        .font(.body.monospaced())
+                        .interfaceFont(.body).monospaced()
                         .multilineTextAlignment(.trailing)
                     // Common schedules, so a first routine needs no cron.
                     Menu {
@@ -120,7 +121,7 @@ private struct ScheduleField: View {
                     Text(error.localizedDescription).foregroundStyle(Color.errorText)
                 }
             }
-            .font(.caption)
+            .interfaceFont(.caption)
             .foregroundStyle(Color.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -129,6 +130,7 @@ private struct ScheduleField: View {
 
 /// Explains which tools the skill uses that the chosen harness lacks.
 struct HarnessWarnings: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let routine: Routine
 
@@ -136,16 +138,16 @@ struct HarnessWarnings: View {
         let needs = model.scheduler.requirements(of: routine)
         let gaps = SkillRequirements.gaps(needs, on: routine.harness)
         if !gaps.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: metrics.points(4)) {
                 ForEach(gaps, id: \.0) { capability, support in
                     Label(message(capability, support), systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(support == .missing ? Color.errorText : Color.warningText)
                 }
             }
-            .font(.callout)
+            .interfaceFont(.callout)
         } else if !needs.isEmpty {
             Text("Uses " + needs.map(\.title).sorted().joined(separator: " and ") + ", available here.")
-                .font(.caption)
+                .interfaceFont(.caption)
                 .foregroundStyle(Color.secondaryText)
         }
     }
@@ -173,32 +175,33 @@ private struct ModelPickers: View {
         // Legacy aliases display their current resolved version without rewriting the routine.
         let selected = options.first { $0.matches(draft.model) } ?? options.first(where: \.isDefault)
             ?? (draft.model == nil ? options.first : nil)
-        Picker("Model", selection: Binding(
+        let modelChoices: [InterfaceChoice<String?>] = [
+            .item(options.first(where: \.isDefault).map { "Default (\($0.title))" } ?? "Default", nil), .separator
+        ] + options.map { .item($0.title, $0.id) } + missingModel(options: options)
+        InterfacePicker(title: "Model", selection: Binding(
             get: { options.first { $0.matches(draft.model) }?.id ?? draft.model },
             set: { draft.model = $0 }
-        )) {
-            Text(options.first(where: \.isDefault).map { "Default (\($0.title))" } ?? "Default")
-                .tag(String?.none)
-            Divider()
-            ForEach(options) { Text($0.title).tag(Optional($0.id)) }
-            if let current = draft.model, !options.contains(where: { $0.matches(current) }) {
-                Text(current).tag(Optional(current))
-            }
-        }
-        .accessibilityIdentifier("routineModel")
+        ), choices: modelChoices, identifier: "routineModel")
         .onChange(of: draft.model) {
             if let effort = draft.effort, let selected, !selected.efforts.contains(effort) { draft.effort = nil }
         }
-        Picker("Effort", selection: $draft.effort) {
-            Text(selected?.efforts.isEmpty == true ? "Not supported" : "Default").tag(String?.none)
-            Divider()
-            ForEach(selected?.efforts ?? [], id: \.self) { Text($0.capitalized).tag(Optional($0)) }
-            if let current = draft.effort, selected?.efforts.contains(current) != true {
-                Text(current.capitalized).tag(Optional(current))
-            }
-        }
-        .accessibilityIdentifier("routineEffort")
+        let efforts = selected?.efforts ?? []
+        let effortChoices: [InterfaceChoice<String?>] = [
+            .item(efforts.isEmpty ? "Not supported" : "Default", nil), .separator
+        ] + efforts.map { .item($0.capitalized, $0) } + missingEffort(efforts)
+        InterfacePicker(title: "Effort", selection: $draft.effort,
+                        choices: effortChoices, identifier: "routineEffort")
         .disabled(selected?.efforts.isEmpty ?? true)
+    }
+
+    private func missingModel(options: [ModelOption]) -> [InterfaceChoice<String?>] {
+        guard let current = draft.model, !options.contains(where: { $0.matches(current) }) else { return [] }
+        return [.item(current, current)]
+    }
+
+    private func missingEffort(_ efforts: [String]) -> [InterfaceChoice<String?>] {
+        guard let current = draft.effort, !efforts.contains(current) else { return [] }
+        return [.item(current.capitalized, current)]
     }
 }
 

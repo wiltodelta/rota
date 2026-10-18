@@ -301,16 +301,42 @@ The content has an appearance-adaptive backing over the glass to maintain text
 contrast across backdrops. Settings forms scroll when the screen is shorter
 than their natural height, and the window frame stays inside the visible screen.
 Unsent composer drafts live in `AppModel.sessionDrafts`, keyed by session ID,
-until sent or the app quits. Small chat fonts never fall below 10 pt. Reduce
+until sent or the app quits. The chat's base fonts never fall below 10 pt before interface scaling. Reduce
 Motion stops the stop-ring rotation and suppresses shimmer.
 The File menu holds New Routine and Import, the Routine menu Run Now, Stop and
 Edit Routine for `AppModel.selectedRoutine`; sheets open from `AppModel`
 flags so menus and buttons share them. The session header's Show Routine action
 selects its owning routine's existing detail page, where Edit opens the settings.
 At narrow widths the session header moves its utility actions onto a second row,
-keeping the labeled navigation action visible. `ChatTextSettings` holds the chat's font family, monospaced family and size in
-UserDefaults; only the chat and its composer follow them, the sidebar and
-forms keep the system's sizes. `ChatOpener` writes a `.command` file, which needs no Automation permission,
+keeping the labeled navigation action visible. Utility actions use accessible
+icons with help text when their full titles no longer fit. The routine header
+also moves its actions onto a second row instead of truncating their labels. `ChatTextSettings` holds the chat's
+font family, monospaced family and base size in UserDefaults. `InterfaceScaleSettings`
+stores one app-wide scale (80%, 90%, 100%, 110%, 125% or 150%). View menu zoom
+commands and Settings > General change that same value. `InterfaceScale` in the
+SwiftUI environment scales layout dimensions; semantic font modifiers resolve
+system fonts at their final size. `InterfacePicker` uses an `NSPopUpButton` with
+an explicit final font, because SwiftUI's macOS Picker retains its default title
+font even when the surrounding environment font changes. Native button labels
+also receive an explicit scaled font. Menu items keep the system font.
+Chat fonts multiply their base size by the same
+observable scale without rewriting chat preferences. No layer, bitmap or view
+transform enlarges an already rendered interface. Every hosted root, including
+Settings and the menu bar panel, receives the scale; sheets inherit it. Detail
+views can shrink below their old 520 pt minimum, sheets cap their width at 780 pt,
+and the panel retains its 340 pt width while content reflows. Its footer moves
+whole actions to two rows when they no longer fit. Import caps its height at
+500 pt so its action row remains inside the minimum-height window. System-owned menus,
+window chrome, Settings toolbar tabs and file dialogs retain their native size.
+New views must use the shared scaled fonts and point dimensions for app content.
+The root modifier reads the observable scale inside its SwiftUI body. Reading it
+only when AppKit constructs a hosting controller freezes that window's initial
+scale. Verification must change the setting on an existing host and measure the
+resulting font or geometry, rather than merely check the selected percentage.
+Settings reports the form's actual geometry to AppKit after layout, coalescing
+updates before changing its preferred size. The hosting controller's cached
+preferred size alone does not resize an already open Settings pane after zoom.
+`ChatOpener` writes a `.command` file, which needs no Automation permission,
 and `TerminalLauncher` opens it in the terminal picked in Settings: Terminal,
 iTerm2 or another app as a document, Ghostty as a new instance with `-e`
 (it does not run a script handed to it), or in the macOS default terminal:

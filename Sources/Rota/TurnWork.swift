@@ -8,6 +8,7 @@ import SwiftUI
 /// "Worked for 3m 12s" and folds the work away. Calls in a row become one line
 /// that says what they did ("ran 2 commands, read 1 file").
 struct WorkSection: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let items: [TranscriptItem]
     let live: Bool
@@ -17,13 +18,13 @@ struct WorkSection: View {
     @State private var expanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: metrics.points(6)) {
+            HStack(spacing: metrics.points(10)) {
                 Hairline()
                 Button {
                     expanded.toggle()
                 } label: {
-                    HStack(spacing: 5) {
+                    HStack(spacing: metrics.points(5)) {
                         if live {
                             TimelineView(.periodic(from: .now, by: 1)) { context in
                                 let seconds = since.map { context.date.timeIntervalSince($0) } ?? 0
@@ -34,7 +35,7 @@ struct WorkSection: View {
                         } else {
                             Text(label)
                             Image(systemName: "chevron.right")
-                                .font(.caption2.weight(.semibold))
+                                .interfaceFont(.caption2).fontWeight(.semibold)
                                 .rotationEffect(.degrees(expanded ? 90 : 0))
                         }
                     }
@@ -50,7 +51,7 @@ struct WorkSection: View {
             .font(model.chatText.small)
             if expanded || live {
                 let rows = WorkRow.group(items)
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: metrics.points(4)) {
                     ForEach(rows) { row in
                         switch row {
                         case .note(let item): WorkNoteView(item: item)
@@ -58,7 +59,7 @@ struct WorkSection: View {
                         }
                     }
                 }
-                .padding(.leading, 4)
+                .padding(.leading, metrics.points(4))
             }
         }
     }
@@ -109,6 +110,7 @@ enum WorkRow: Identifiable {
 
 /// Calls in a row: one call as itself, several as what they did, unfolding into each call.
 private struct ToolRunRow: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let calls: [TranscriptItem]
     /// The run the agent is in now: it shimmers.
@@ -117,7 +119,7 @@ private struct ToolRunRow: View {
 
     var body: some View {
         let lines = calls.map(\.text)
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: metrics.points(3)) {
             if calls.count == 1 {
                 // One call reads as itself; there is nothing to unfold.
                 header(lines).help(lines[0])
@@ -127,7 +129,7 @@ private struct ToolRunRow: View {
                     .help(expanded ? "Hide the calls" : "Show the calls")
             }
             if expanded, calls.count > 1 {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: metrics.points(3)) {
                     ForEach(calls) { call in
                         Text(call.text)
                             .font(model.chatText.smallCode)
@@ -136,20 +138,21 @@ private struct ToolRunRow: View {
                             .help(call.text)
                     }
                 }
-                .padding(.leading, 12)
+                .padding(.leading, metrics.points(12))
                 .overlay(alignment: .leading) {
                     // The rail the calls hang off, under the run's icon.
-                    Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1).padding(.leading, 6)
+                    Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1)
+                        .padding(.leading, metrics.points(6))
                 }
             }
         }
     }
 
     private func header(_ lines: [String]) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: metrics.points(6)) {
             let kind = lines.count == 1 ? ToolStep.kind(of: lines[0]) : ToolStep.dominant(lines)
             Image(systemName: kind.symbol)
-                .frame(width: 14)
+                .frame(width: metrics.points(14))
             let change = lines.count == 1 ? FileChangeTitle.title(lines[0], live: live) : nil
             Text(change ?? (lines.count == 1 ? lines[0] : ToolStep.summary(lines).capitalizedFirst))
                 .font(lines.count == 1 && change == nil ? model.chatText.smallCode : model.chatText.small)
@@ -158,7 +161,7 @@ private struct ToolRunRow: View {
                 .shimmering(live)
             if lines.count > 1 {
                 Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
+                    .interfaceFont(.caption2).fontWeight(.semibold)
                     .rotationEffect(.degrees(expanded ? 90 : 0))
             }
         }
@@ -169,6 +172,7 @@ private struct ToolRunRow: View {
 
 /// What the agent said along the way, quieter than its answer.
 private struct WorkNoteView: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let item: TranscriptItem
 
@@ -181,7 +185,7 @@ private struct WorkNoteView: View {
                 .font(model.chatText.small)
                 .foregroundStyle(Color.secondaryText)
                 .textSelection(.enabled)
-                .padding(.vertical, 2)
+                .padding(.vertical, metrics.points(2))
         }
     }
 }
@@ -242,11 +246,12 @@ extension View {
 
 /// The agent's latest plan in a turn: each step with its state, done ones struck through.
 struct PlanCard: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let steps: [PlanStep]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: metrics.points(6)) {
             let done = steps.filter { $0.status == .completed }.count
             HStack {
                 Text("Plan").fontWeight(.semibold)
@@ -255,7 +260,7 @@ struct PlanCard: View {
             }
             .font(model.chatText.small)
             ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: metrics.points(8)) {
                     Image(systemName: Self.symbol(step.status))
                         .foregroundStyle(step.status == .inProgress ? Color.accentColor : Color.secondaryText)
                     Text(step.text)
@@ -268,9 +273,9 @@ struct PlanCard: View {
                                     : step.status == .inProgress ? "In progress" : "To do")
             }
         }
-        .padding(12)
+        .padding(metrics.points(12))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.12)) }
+        .overlay { RoundedRectangle(cornerRadius: metrics.points(10)).strokeBorder(Color.primary.opacity(0.12)) }
     }
 
     static func symbol(_ status: PlanStep.Status) -> String {

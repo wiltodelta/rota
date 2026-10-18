@@ -13,6 +13,7 @@ struct GeneralSettings: View {
     var body: some View {
         @Bindable var settings = model.settings
         Form {
+            InterfaceScaleSection()
             Section {
                 Toggle("Notify when a run succeeds", isOn: $settings.notifyOnSuccess)
             } footer: {
@@ -42,7 +43,7 @@ struct GeneralSettings: View {
                     get: { Updater.shared.automaticallyChecks },
                     set: { Updater.shared.automaticallyChecks = $0 }
                 ))
-                Button("Check for Updates\u{2026}") { Updater.shared.checkForUpdates() }
+                Button(interfaceTitle: "Check for Updates\u{2026}") { Updater.shared.checkForUpdates() }
             } header: {
                 Text("Updates")
             } footer: {
@@ -141,7 +142,7 @@ private struct PermissionRow: View {
                 Label("Allowed", systemImage: "checkmark.circle.fill")
                     .labelStyle(StatusLabelStyle())
             } else {
-                Button("Allow\u{2026}", action: request)
+                Button(interfaceTitle: "Allow\u{2026}", action: request)
             }
         }
     }
@@ -150,8 +151,16 @@ private struct PermissionRow: View {
 extension View {
     /// A settings tab's form: grouped, the window's width, as tall as its content.
     func settingsPane() -> some View {
-        formStyle(.grouped)
-            .frame(width: 520)
+        modifier(SettingsPaneModifier())
+    }
+}
+
+private struct SettingsPaneModifier: ViewModifier {
+    @Environment(\.interfaceScale) private var scale
+
+    func body(content: Content) -> some View {
+        content.formStyle(.grouped)
+            .frame(width: scale.sheetWidth(520))
             .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -159,6 +168,7 @@ extension View {
 /// Picks which installed copy of an agent CLI runs: the first one found, one
 /// of the others, or any file chosen in an open panel.
 private struct ExecutablePicker: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let harness: Harness
     private static let chooseTag = "\u{0}choose"
@@ -168,23 +178,16 @@ private struct ExecutablePicker: View {
         let installed = settings.installed[harness] ?? []
         let chosen = settings.chosenExecutable(for: harness)
         let effective = settings.executable(for: harness)
-        VStack(alignment: .leading, spacing: 4) {
-            Picker(harness.title, selection: Binding(
-                get: { chosen ?? "" },
-                set: { choose($0) }
-            )) {
-                Text(installed.first.map { "Automatic (\(Self.display($0.path)))" } ?? "Automatic")
-                    .tag("")
-                Divider()
-                ForEach(installed) { copy in
-                    Text(Self.display(copy.path)).tag(copy.path)
-                }
-                if let chosen, !installed.contains(where: { $0.path == chosen }) {
-                    Text(Self.display(chosen)).tag(chosen)
-                }
-                Divider()
-                Text("Choose Other\u{2026}").tag(Self.chooseTag)
-            }
+        VStack(alignment: .leading, spacing: metrics.points(4)) {
+            let choices: [InterfaceChoice<String>] = [
+                .item(installed.first.map { "Automatic (\(Self.display($0.path)))" } ?? "Automatic", ""), .separator
+            ] + installed.map { .item(Self.display($0.path), $0.path) }
+                + (chosen.map { value in
+                    installed.contains(where: { $0.path == value }) ? [] : [.item(Self.display(value), value)]
+                } ?? []) + [.separator, .item("Choose Other\u{2026}", Self.chooseTag)]
+            InterfacePicker(title: harness.title, selection: Binding(
+                get: { chosen ?? "" }, set: { choose($0) }
+            ), choices: choices)
             status(effective: effective, installed: installed)
         }
     }
@@ -195,11 +198,11 @@ private struct ExecutablePicker: View {
             Label("Not installed. Install \(harness.commandName) or choose its file.",
                   systemImage: "xmark.circle.fill")
                 .foregroundStyle(Color.errorText)
-                .font(.caption)
+                .interfaceFont(.caption)
         } else if let version = installed.first(where: { $0.path == effective })?.version {
             Label(version, systemImage: "checkmark.circle.fill")
                 .labelStyle(StatusLabelStyle())
-                .font(.caption)
+                .interfaceFont(.caption)
         }
     }
 
@@ -240,7 +243,7 @@ private struct AgentAccessSection: View {
                 if commandInstalled {
                     Label("Installed", systemImage: "checkmark.circle.fill").labelStyle(StatusLabelStyle())
                 } else {
-                    Button("Install") { installCommand() }
+                    Button(interfaceTitle: "Install") { installCommand() }
                 }
             } label: {
                 Text("rota command")
@@ -251,7 +254,7 @@ private struct AgentAccessSection: View {
                     if busy == harness {
                         ProgressView().controlSize(.small)
                     } else if let isAdded = added[harness] {
-                        Button(isAdded ? "Remove" : "Add") { change(harness, add: !isAdded) }
+                        Button(interfaceTitle: isAdded ? "Remove" : "Add") { change(harness, add: !isAdded) }
                             .accessibilityIdentifier("agentAccess-\(harness.rawValue)")
                     } else {
                         ProgressView().controlSize(.small)
@@ -259,7 +262,7 @@ private struct AgentAccessSection: View {
                 }
             }
             if let problem {
-                Text(problem).font(.caption).foregroundStyle(Color.errorText)
+                Text(problem).interfaceFont(.caption).foregroundStyle(Color.errorText)
             }
         } header: {
             Text("Routines from agents")
@@ -323,19 +326,15 @@ private struct TerminalPicker: View {
         let chosen = model.settings.terminalApp
         // A closure, not `set: choose`: Swift 6.3.3 (Xcode 26.6) crashed in IRGen on the
         // method reference's @isolated(any) thunk.
-        Picker("Terminal", selection: Binding(get: { chosen ?? "" }, set: { choose($0) })) {
-            Text(handler.map { "Default (\(Self.name($0.path)))" } ?? "Default").tag("")
-            Divider()
-            ForEach(installed, id: \.self) { terminal in
-                if let url = terminal.url { Text(terminal.title).tag(url.path) }
-            }
-            if let chosen, !installed.contains(where: { $0.url?.path == chosen }) {
-                Text(Self.name(chosen)).tag(chosen)
-            }
-            Divider()
-            Text("Choose Other\u{2026}").tag(Self.chooseTag)
-        }
-        .accessibilityIdentifier("terminalApp")
+        let choices: [InterfaceChoice<String>] = [
+            .item(handler.map { "Default (\(Self.name($0.path)))" } ?? "Default", ""), .separator
+        ] + installed.compactMap { terminal in
+            terminal.url.map { .item(terminal.title, $0.path) }
+        } + (chosen.map { value in
+            installed.contains(where: { $0.url?.path == value }) ? [] : [.item(Self.name(value), value)]
+        } ?? []) + [.separator, .item("Choose Other\u{2026}", Self.chooseTag)]
+        InterfacePicker(title: "Terminal", selection: Binding(get: { chosen ?? "" }, set: { choose($0) }),
+                        choices: choices, identifier: "terminalApp")
         .task {
             installed = TerminalLauncher.installed()
             handler = TerminalLauncher.defaultTerminal()
@@ -364,8 +363,9 @@ private struct TerminalPicker: View {
 
 /// A green check before secondary text, as the status under a picker reads.
 private struct StatusLabelStyle: LabelStyle {
+    @Environment(\.interfaceScale) private var metrics
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: metrics.points(4)) {
             configuration.icon.foregroundStyle(.green)
             configuration.title.foregroundStyle(Color.secondaryText)
         }
@@ -374,6 +374,7 @@ private struct StatusLabelStyle: LabelStyle {
 
 /// Font, monospaced font and size of the chat, with a sample in them.
 private struct ChatTextSection: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     @State private var families: [String] = []
     @State private var monospaced: [String] = []
@@ -381,34 +382,50 @@ private struct ChatTextSection: View {
     var body: some View {
         @Bindable var text = model.chatText
         Section("Chat text") {
-            Picker("Font", selection: $text.family) {
-                Text("System").tag("")
-                Divider()
-                ForEach(families, id: \.self) { Text($0).tag($0) }
-            }
-            Picker("Code font", selection: $text.codeFamily) {
-                Text("System monospaced").tag("")
-                Divider()
-                ForEach(monospaced, id: \.self) { Text($0).tag($0) }
-            }
+            InterfacePicker(title: "Font", selection: $text.family,
+                            choices: fontChoices(families, selected: text.family, defaultTitle: "System"))
+            InterfacePicker(title: "Code font", selection: $text.codeFamily,
+                            choices: fontChoices(monospaced, selected: text.codeFamily,
+                                                 defaultTitle: "System monospaced"))
             LabeledContent("Size") {
                 HStack {
                     Slider(value: $text.size, in: ChatTextSettings.sizes, step: 1)
                     Text("\(Int(text.size)) pt")
                         .monospacedDigit()
-                        .frame(width: 44, alignment: .trailing)
+                        .frame(width: metrics.points(44), alignment: .trailing)
                 }
             }
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: metrics.points(6)) {
                 Text("Clicks are down 8% week over week.").font(text.body)
                 Text("$ git log --oneline -5").font(text.code).foregroundStyle(Color.secondaryText)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, metrics.points(4))
             .accessibilityLabel("Sample")
         }
         .task {
             families = ChatTextSettings.families
             monospaced = ChatTextSettings.monospacedFamilies
+        }
+    }
+
+    private func fontChoices(_ families: [String], selected: String,
+                             defaultTitle: String) -> [InterfaceChoice<String>] {
+        [.item(defaultTitle, ""), .separator] + families.map { .item($0, $0) }
+            + (!selected.isEmpty && !families.contains(selected) ? [.item(selected, selected)] : [])
+    }
+}
+
+/// One zoom for every app-owned surface, with the current percentage visible.
+private struct InterfaceScaleSection: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var scale = model.interfaceScale
+        Section("Appearance") {
+            InterfacePicker(title: "Interface scale", selection: $scale.factor,
+                            choices: InterfaceScaleSettings.levels.map {
+                                .item($0.formatted(.percent.precision(.fractionLength(0))), $0)
+                            }, identifier: "interfaceScale")
         }
     }
 }

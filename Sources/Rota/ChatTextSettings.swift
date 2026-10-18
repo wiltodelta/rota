@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// The chat's text: one family for messages, a monospaced one for commands and
-/// output, and one size both follow. The sidebar and forms keep the system's.
+/// output, and one base size both follow, multiplied by the app-wide scale.
 @MainActor
 @Observable
 final class ChatTextSettings {
@@ -10,6 +10,7 @@ final class ChatTextSettings {
     static let defaultSize: Double = 14
 
     private let defaults: UserDefaults
+    private let interfaceScale: InterfaceScaleSettings?
 
     /// A font family name, or empty for the system font.
     var family: String {
@@ -29,7 +30,8 @@ final class ChatTextSettings {
         }
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, interfaceScale: InterfaceScaleSettings? = nil) {
+        self.interfaceScale = interfaceScale
         self.defaults = defaults
         family = defaults.string(forKey: "chatFontFamily") ?? ""
         codeFamily = defaults.string(forKey: "chatCodeFontFamily") ?? ""
@@ -48,17 +50,18 @@ final class ChatTextSettings {
     }
     var smallCode: Font { codeFont(size: size * 0.82) }
 
-    func bigger() { size += 1 }
-    func smaller() { size -= 1 }
-    func reset() { size = Self.defaultSize }
+    /// Clamp the base size before zooming; zoom must not overwrite the user's preference.
+    func effectiveSize(_ size: Double) -> Double {
+        max(Self.sizes.lowerBound, size) * (interfaceScale?.factor ?? 1)
+    }
 
     private func font(_ family: String, size: Double) -> Font {
-        let size = max(Self.sizes.lowerBound, size)
+        let size = effectiveSize(size)
         return family.isEmpty ? .system(size: size) : .custom(family, size: size)
     }
 
     private func codeFont(size: Double) -> Font {
-        let size = max(Self.sizes.lowerBound, size)
+        let size = effectiveSize(size)
         return codeFamily.isEmpty ? .system(size: size, design: .monospaced) : .custom(codeFamily, size: size)
     }
 

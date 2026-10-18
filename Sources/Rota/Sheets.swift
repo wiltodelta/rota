@@ -2,6 +2,7 @@ import RotaCore
 import SwiftUI
 
 struct NewRoutineSheet: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     // A routine made here runs on its schedule from the start; only imports start off.
@@ -17,9 +18,9 @@ struct NewRoutineSheet: View {
             SheetTitle(text: "New Routine")
             RoutineForm(draft: $draft, skillTaken: identifierTaken)
             SheetButtons(problem: problem) {
-                Button("Cancel", role: .cancel) { dismiss() }
+                Button(interfaceTitle: "Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button("Add") {
+                Button(interfaceTitle: "Add") {
                     if draft.name.isEmpty { draft.name = draft.id }
                     model.scheduler.save(draft)
                     model.selection = .routine(draft.id)
@@ -31,8 +32,8 @@ struct NewRoutineSheet: View {
             }
         }
         // Fits the window at its minimum height; the form scrolls inside.
-        .frame(width: 560)
-        .frame(minHeight: 360, idealHeight: 520)
+        .frame(width: metrics.sheetWidth(560))
+        .frame(minHeight: 360, idealHeight: metrics.points(520))
         .onChange(of: draft.id) { fillPrompt() }
         .onChange(of: draft.workingDirectory) { fillPrompt() }
         .onChange(of: draft.harness) {
@@ -58,18 +59,20 @@ struct NewRoutineSheet: View {
 
 /// A sheet's title above its form, as the import sheet has.
 struct SheetTitle: View {
+    @Environment(\.interfaceScale) private var metrics
     let text: String
 
     var body: some View {
         Text(text)
-            .font(.headline)
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
+            .interfaceFont(.headline)
+            .padding(.horizontal, metrics.points(20))
+            .padding(.top, metrics.points(18))
     }
 }
 
 /// A sheet's button row, with what still keeps it from saving on the left.
 struct SheetButtons<Buttons: View>: View {
+    @Environment(\.interfaceScale) private var metrics
     let problem: String?
     @ViewBuilder let buttons: Buttons
 
@@ -77,7 +80,7 @@ struct SheetButtons<Buttons: View>: View {
         HStack {
             if let problem {
                 Text(problem)
-                    .font(.callout)
+                    .interfaceFont(.callout)
                     .foregroundStyle(Color.secondaryText)
                     .lineLimit(2)
                     .accessibilityIdentifier("sheetProblem")
@@ -85,6 +88,6 @@ struct SheetButtons<Buttons: View>: View {
             Spacer(minLength: 12)
             buttons
         }
-        .padding(16)
+        .padding(metrics.points(16))
     }
 }

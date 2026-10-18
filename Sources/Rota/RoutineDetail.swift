@@ -4,6 +4,7 @@ import SwiftUI
 /// A routine: when it runs next, the switch that pauses it, Run Now, and its
 /// sessions. Its settings change rarely, so they live in a sheet.
 struct RoutineDetail: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let routine: Routine
 
@@ -15,11 +16,11 @@ struct RoutineDetail: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-                .padding(.horizontal, 20)
-                .padding(.vertical, 14)
+                .padding(.horizontal, metrics.points(20))
+                .padding(.vertical, metrics.points(14))
             HarnessWarnings(routine: routine)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 10)
+                .padding(.horizontal, metrics.points(20))
+                .padding(.bottom, metrics.points(10))
             Divider()
             List(records) { record in
                 Button {
@@ -40,6 +41,7 @@ struct RoutineDetail: View {
                             .foregroundStyle(record.outcome.isFailure && !record.isSkip
                                 ? Color.errorText : Color.secondaryText)
                     }
+                    .interfaceFont(.body)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -48,7 +50,7 @@ struct RoutineDetail: View {
                 if records.isEmpty { Text("No sessions yet").foregroundStyle(Color.secondaryText) }
             }
         }
-        .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(routine.name)
         .sheet(isPresented: Binding(
             get: { model.editingRoutineID == routine.id },
@@ -61,19 +63,38 @@ struct RoutineDetail: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(ScheduleText.describe(routine.schedule) ?? routine.schedule).font(.callout)
-                // Only the folder gives way when the line is short of room.
-                HStack(spacing: 0) {
-                    Text("\(state) \u{00B7} \(harness) \u{00B7} ").layoutPriority(1)
-                    Text(routine.workingDirectory).truncationMode(.middle)
-                }
-                .font(.caption)
-                .foregroundStyle(Color.secondaryText)
-                .lineLimit(1)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: metrics.points(12)) {
+                summary.frame(minWidth: metrics.points(120))
+                Spacer(minLength: 12)
+                actions.fixedSize()
             }
-            Spacer(minLength: 12)
+            VStack(alignment: .leading, spacing: metrics.points(8)) {
+                summary
+                HStack {
+                    Spacer(minLength: 0)
+                    actions.fixedSize()
+                }
+            }
+        }
+    }
+
+    private var summary: some View {
+        VStack(alignment: .leading, spacing: metrics.points(3)) {
+            Text(ScheduleText.describe(routine.schedule) ?? routine.schedule).interfaceFont(.callout)
+            // Only the folder gives way when the line is short of room.
+            HStack(spacing: 0) {
+                Text("\(state) \u{00B7} \(harness) \u{00B7} ").layoutPriority(1)
+                Text(routine.workingDirectory).truncationMode(.middle)
+            }
+            .interfaceFont(.caption)
+            .foregroundStyle(Color.secondaryText)
+            .lineLimit(1)
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: metrics.points(12)) {
             Toggle("On", isOn: Binding(
                 get: { routine.enabled },
                 set: { model.scheduler.setEnabled($0, for: routine.id) }
@@ -83,18 +104,20 @@ struct RoutineDetail: View {
             .help(routine.enabled ? "Runs on schedule; turn off to pause" : "Paused; turn on to run on schedule")
             .accessibilityIdentifier("routineEnabled")
             if model.scheduler.active[routine.id] != nil {
-                Button("Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }
+                Button(interfaceTitle: "Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }
                     .accessibilityIdentifier("stopRoutine")
             } else {
-                Button("Run Now", systemImage: "play.fill") {
+                Button(interfaceTitle: "Run Now", systemImage: "play.fill") {
                     model.scheduler.run(routine, trigger: .manual)
                     model.selection = model.latest(of: routine.id)
                 }
                 .accessibilityIdentifier("runNow")
             }
-            Button("Edit\u{2026}", systemImage: "slider.horizontal.3") { model.editingRoutineID = routine.id }
-                .help("Edit the routine's settings (Command-E)")
-                .accessibilityIdentifier("editRoutine")
+            Button(interfaceTitle: "Edit\u{2026}", systemImage: "slider.horizontal.3") {
+                model.editingRoutineID = routine.id
+            }
+            .help("Edit the routine's settings (Command-E)")
+            .accessibilityIdentifier("editRoutine")
         }
     }
 
@@ -113,6 +136,7 @@ struct RoutineDetail: View {
 
 /// The routine's settings, edited as a draft and saved together.
 struct EditRoutineSheet: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let routine: Routine
@@ -130,18 +154,18 @@ struct EditRoutineSheet: View {
             SheetTitle(text: "Edit Routine")
             RoutineForm(draft: $draft)
             HStack {
-                Button("Delete Routine\u{2026}", role: .destructive) { confirmingDelete = true }
+                Button(interfaceTitle: "Delete Routine\u{2026}", role: .destructive) { confirmingDelete = true }
                 Spacer(minLength: 12)
                 if let problem {
                     Text(problem)
-                        .font(.callout)
+                        .interfaceFont(.callout)
                         .foregroundStyle(Color.secondaryText)
                         .lineLimit(2)
                         .accessibilityIdentifier("sheetProblem")
                 }
-                Button("Cancel", role: .cancel) { dismiss() }
+                Button(interfaceTitle: "Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button("Save") {
+                Button(interfaceTitle: "Save") {
                     model.scheduler.save(draft)
                     dismiss()
                 }
@@ -149,11 +173,11 @@ struct EditRoutineSheet: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(draft == routine || problem != nil)
             }
-            .padding(16)
+            .padding(metrics.points(16))
         }
         // Fits the window at its minimum height; the form scrolls inside.
-        .frame(width: 600)
-        .frame(minHeight: 360, idealHeight: 500)
+        .frame(width: metrics.sheetWidth(600))
+        .frame(minHeight: 360, idealHeight: metrics.points(500))
         .confirmationDialog("Delete \(routine.name)?", isPresented: $confirmingDelete) {
             Button("Delete", role: .destructive) {
                 dismiss()

@@ -8,6 +8,7 @@ import SwiftUI
 /// the live session where the harness allows it, continues a finished session
 /// otherwise, and says where to go when neither works.
 struct ChatComposer: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
     /// Called with each message sent, so the chat can show it until the session does.
@@ -38,16 +39,16 @@ struct ChatComposer: View {
                 box
             } else if let note {
                 Text(note)
-                    .font(.callout)
+                    .interfaceFont(.callout)
                     .foregroundStyle(Color.secondaryText)
                     .frame(maxWidth: .infinity)
             }
         }
         // The chat's column, so the box lines up with the messages above it.
-        .padding(.horizontal, 24)
-        .padding(.top, 6)
-        .padding(.bottom, 16)
-        .frame(maxWidth: 760)
+        .padding(.horizontal, metrics.points(24))
+        .padding(.top, metrics.points(6))
+        .padding(.bottom, metrics.points(16))
+        .frame(maxWidth: metrics.points(760))
         .frame(maxWidth: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
         .task(id: record.id) {
@@ -77,7 +78,7 @@ struct ChatComposer: View {
     }
 
     private var box: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: metrics.points(10)) {
             if !attachments.isEmpty {
                 AttachmentChips(attachments: attachments, remove: removeAttachment)
             }
@@ -89,8 +90,8 @@ struct ChatComposer: View {
                 .onSubmit(send)
                 .help("\(effect) Return sends, Option-Return starts a new line.")
                 .accessibilityIdentifier("composer")
-            HStack(spacing: 8) {
-                HStack(spacing: 6) {
+            HStack(spacing: metrics.points(8)) {
+                HStack(spacing: metrics.points(6)) {
                     HarnessLogo(harness: record.harness)
                     Text(ModelLabel.model(record: record, models: model.settings.models,
                                           fallback: resolvedConfiguration?.model ?? legacyModel))
@@ -99,7 +100,7 @@ struct ChatComposer: View {
                     Text(resolvingConfiguration ? "Resolving…"
                          : ModelLabel.effort(record, fallback: resolvedConfiguration?.effort)).fixedSize()
                 }
-                .font(.callout)
+                .interfaceFont(.callout)
                 .foregroundStyle(Color.secondaryText)
                 .lineLimit(1)
                 .accessibilityElement(children: .combine)
@@ -107,7 +108,7 @@ struct ChatComposer: View {
                 .help("Session model and reasoning effort, as resolved by the agent.")
                 Spacer(minLength: 8)
                 if staging {
-                    ProgressView().controlSize(.small).frame(width: 28, height: 28)
+                    ProgressView().controlSize(.small).frame(width: metrics.points(28), height: metrics.points(28))
                 } else {
                     RoundButton(symbol: "paperclip", filled: false, fill: .accentColor,
                                 foreground: Color.secondaryText, action: chooseAttachments)
@@ -121,7 +122,7 @@ struct ChatComposer: View {
                 if running, let since = model.scheduler.runStartedAt(record) {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         Text(Self.clock(context.date.timeIntervalSince(since)))
-                            .font(.callout.monospacedDigit())
+                            .interfaceFont(.callout).monospacedDigit()
                             .foregroundStyle(Color.secondaryText)
                     }
                 }
@@ -141,20 +142,20 @@ struct ChatComposer: View {
                 }
             }
             if let attachmentError {
-                Text(attachmentError).font(.caption).foregroundStyle(Color.errorText)
+                Text(attachmentError).interfaceFont(.caption).foregroundStyle(Color.errorText)
                     .accessibilityIdentifier("attachmentError")
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
-        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 20))
+        .padding(.horizontal, metrics.points(16))
+        .padding(.top, metrics.points(14))
+        .padding(.bottom, metrics.points(10))
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: metrics.points(20)))
         .overlay {
-            RoundedRectangle(cornerRadius: 20)
+            RoundedRectangle(cornerRadius: metrics.points(20))
                 .strokeBorder(focused || dropTargeted ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.08),
                               lineWidth: focused || dropTargeted ? 1.5 : 1)
         }
-        .contentShape(RoundedRectangle(cornerRadius: 20))
+        .contentShape(RoundedRectangle(cornerRadius: metrics.points(20)))
         .onTapGesture { focused = true }
         .dropDestination(for: URL.self) { urls, _ in
             guard !urls.isEmpty, !staging else { return false }
@@ -258,6 +259,7 @@ struct ChatComposer: View {
 
 /// Stop while the session works: a square in a circle, an arc running round it.
 private struct StopRingButton: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let action: () -> Void
 
@@ -269,15 +271,15 @@ private struct StopRingButton: View {
                 ZStack {
                     Circle().fill(Color.primary.opacity(0.08))
                     Image(systemName: "stop.fill")
-                        .font(.system(size: 11, weight: .bold))
+                        .interfaceSystemFont(size: 11, weight: .bold)
                         .foregroundStyle(Color.errorText)
                     Circle()
                         .trim(from: 0, to: 0.28)
                         .stroke(Color.orange, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                         .rotationEffect(.degrees(turn * 360))
-                        .padding(1)
+                        .padding(metrics.points(1))
                 }
-                .frame(width: 28, height: 28)
+                .frame(width: metrics.points(28), height: metrics.points(28))
             }
         }
         .buttonStyle(.plain)
@@ -287,6 +289,7 @@ private struct StopRingButton: View {
 /// A 28 pt circular icon button, as the composer's Send and Stop: filled when
 /// it acts, an outlined circle when it waits, as super.engineering's Send does.
 private struct RoundButton: View {
+    @Environment(\.interfaceScale) private var metrics
     let symbol: String
     let filled: Bool
     let fill: Color
@@ -296,9 +299,9 @@ private struct RoundButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .bold))
+                .interfaceSystemFont(size: 13, weight: .bold)
                 .foregroundStyle(foreground)
-                .frame(width: 28, height: 28)
+                .frame(width: metrics.points(28), height: metrics.points(28))
                 .background(filled ? fill : .clear, in: Circle())
                 .overlay { if !filled { Circle().strokeBorder(Color.secondary.opacity(0.5)) } }
         }

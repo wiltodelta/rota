@@ -76,9 +76,11 @@ Desktop.
 - **An inbox.** A session that finished since you last opened it is unread:
   bold in the list with a blue dot, counted on the Dock icon and in the menu
   bar panel.
-- **Readable chat text.** Pick the chat's font, a monospaced font for commands
-  and output, and the size in Settings; View > Bigger, Smaller and Actual Size
-  (Command-Plus, Command-Minus, Command-0) change the size as you read.
+- **Interface scale.** Settings > General scales app content from 80% to 150%.
+  View > Zoom In, Zoom Out and Actual Size (Command-Plus, Command-Minus,
+  Command-0) adjust it immediately. Text and icons render at their new size.
+- **Readable chat text.** Settings > Chat independently controls the chat's
+  font, monospaced font for commands and output, and base text size.
 - **Agent Markdown as it is meant to read:** headings, lists and code blocks.
 - **Notifications** when a run fails, times out or cannot start, and when a
   missed slot is skipped; click one to open its session. Successes notify too if you ask for it. A routine
