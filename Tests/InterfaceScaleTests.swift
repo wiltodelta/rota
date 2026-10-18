@@ -98,7 +98,7 @@ final class InterfaceScaleTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(button.font).pointSize, NSFont.systemFontSize * 1.5)
     }
 
-    func testSettingsPaneReportsItsNewSizeAfterZoom() async throws {
+    func testSettingsPaneReportsItsNaturalSizeAfterZoom() async throws {
         _ = NSApplication.shared
         let name = "rota-scale-test-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
@@ -111,7 +111,7 @@ final class InterfaceScaleTests: XCTestCase {
         defer { window.close() }
         window.contentViewController = controller
         controller.view.layoutSubtreeIfNeeded()
-        XCTAssertEqual(controller.preferredContentSize.width, 520)
+        XCTAssertEqual(controller.contentSize.width, 520)
         scale.factor = 1.5
         for _ in 0..<4 {
             await withCheckedContinuation { continuation in
@@ -119,7 +119,7 @@ final class InterfaceScaleTests: XCTestCase {
             }
             controller.view.layoutSubtreeIfNeeded()
         }
-        XCTAssertEqual(controller.preferredContentSize.width, 780)
+        XCTAssertEqual(controller.contentSize.width, 780)
     }
 
     func testPickerValuesKeepTheSameGapToTheirArrows() throws {

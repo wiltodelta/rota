@@ -149,8 +149,18 @@ case "window":
     AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, AXValueCreate(.cgSize, &size)!)
 case "gate":
     var violations = 0
+    let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
+    let visibleScreens = NSScreen.screens.map { screen in
+        let visible = screen.visibleFrame
+        return CGRect(x: visible.minX, y: primaryTop - visible.maxY,
+                      width: visible.width, height: visible.height)
+    }
     for window in windows() {
         guard let windowFrame = frame(window) else { continue }
+        if !visibleScreens.contains(where: { $0.insetBy(dx: -1, dy: -1).contains(windowFrame) }) {
+            violations += 1
+            print("outside visible screen  \(label(window))  \(windowFrame)")
+        }
         // `clip` is the visible part of the nearest scroll area: content scrolled
         // out of it is not on screen, so it is neither outside the window nor clipped.
         func walk(_ element: AXUIElement, parent: CGRect, clip: CGRect) {

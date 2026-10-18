@@ -340,8 +340,15 @@ only when AppKit constructs a hosting controller freezes that window's initial
 scale. Verification must change the setting on an existing host and measure the
 resulting font or geometry, rather than merely check the selected percentage.
 Settings reports the form's actual geometry to AppKit after layout, coalescing
-updates before changing its preferred size. The hosting controller's cached
-preferred size alone does not resize an already open Settings pane after zoom.
+updates to its natural `contentSize`. A callback resizes the selected tab's window
+within the screen's visible frame. The scroll controller must not publish the
+full document height as `preferredContentSize`: AppKit turns it into a viewport
+height constraint, defeating the screen cap and leaving the bottom unreachable.
+The document keeps its natural height while the viewport scrolls independently.
+The UI layout gate checks the window frame against the screen's visible area,
+including menu bar and Dock exclusions, as well as checking the controls inside it.
+The hosting controller's cached preferred size alone does not update an already
+open Settings pane after zoom.
 `ChatOpener` writes a `.command` file, which needs no Automation permission,
 and `TerminalLauncher` opens it in the terminal picked in Settings: Terminal,
 iTerm2 or another app as a document, Ghostty as a new instance with `-e`
