@@ -36,6 +36,7 @@ struct InterfacePicker<Selection: Hashable>: View {
     let choices: [InterfaceChoice<Selection>]
     var identifier: String?
     var hidesLabel = false
+    var fitsSelectedTitle = false
 
     var body: some View {
         if hidesLabel {
@@ -46,7 +47,8 @@ struct InterfacePicker<Selection: Hashable>: View {
     }
 
     private var popup: some View {
-        InterfacePopUp(selection: $selection, choices: choices, title: title, identifier: identifier)
+        InterfacePopUp(selection: $selection, choices: choices, title: title, identifier: identifier,
+                       fitsSelectedTitle: fitsSelectedTitle)
     }
 }
 
@@ -84,6 +86,7 @@ private struct InterfacePopUp<Selection: Hashable>: NSViewRepresentable {
     let choices: [InterfaceChoice<Selection>]
     let title: String
     let identifier: String?
+    let fitsSelectedTitle: Bool
 
     func makeCoordinator() -> PopUpCoordinator { PopUpCoordinator() }
 
@@ -140,7 +143,8 @@ private struct InterfacePopUp<Selection: Hashable>: NSViewRepresentable {
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSPopUpButton, context: Context) -> CGSize? {
         let font = nsView.font ?? .systemFont(ofSize: NSFont.systemFontSize)
         let width = (nsView.title as NSString).size(withAttributes: [.font: font]).width + metrics.points(34)
-        let fittingWidth = max(width.rounded(.up), nsView.intrinsicContentSize.width)
+        let fittingWidth = fitsSelectedTitle ? width.rounded(.up)
+            : max(width.rounded(.up), nsView.intrinsicContentSize.width)
         return CGSize(width: min(fittingWidth, proposal.width ?? .infinity),
                       height: max(28, (font.ascender - font.descender + metrics.points(8)).rounded(.up)))
     }

@@ -208,6 +208,7 @@ func run(_ raw: [String]) throws {
     guard let command = arguments.positional.first, command != "help", !arguments.flags.contains("help") else {
         return print(usage)
     }
+    if command == "question-hook" { return try QuestionHook.run() }
     if command == "mcp" { return MCPServer().serve() }
     let (method, params) = try requestFor(command, arguments)
     let result = try request(method, params)

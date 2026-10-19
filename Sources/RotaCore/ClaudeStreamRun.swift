@@ -12,10 +12,12 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     private let spec: LaunchSpec
     private let journal: RunJournal
     private let queue = DispatchQueue(label: "com.wiltodelta.rota.claude")
+    private var hookSettings: URL?
     private var process: Process?
     private var input: FileHandle?
     private var buffer = Data()
     private var stopReason: RunOutcome?
+    private var questions: [String: String] = [:]
 
     private init(spec: LaunchSpec, journal: RunJournal) {
         self.spec = spec
@@ -32,7 +34,7 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     /// `chrome` passes on the user's Chrome default, which print mode would not apply.
     static func arguments(chrome: Bool, resume: String?) -> [String] {
         var arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-                         "--permission-mode", "bypassPermissions"]
+                         "--permission-mode", "bypassPermissions", "--permission-prompt-tool", "stdio"]
         if chrome { arguments.append("--chrome") }
         if let resume { arguments += ["--resume", resume] }
         return arguments
@@ -47,8 +49,11 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     }
 
     private func launch() throws {
+        let settings = try ClaudeRunSettings.hooks(in: spec.log.deletingLastPathComponent())
+        hookSettings = settings
         let process = ProcessLauncher.loginShellProcess(spec.executable,
-                                                        spec.arguments + spec.modelFlags(effortFlag: "--effort"),
+                                                        spec.arguments + ["--settings", settings.path]
+                                                            + spec.modelFlags(effortFlag: "--effort"),
                                                         in: spec.workingDirectory, environment: spec.environment)
         let stdin = Pipe()
         let stdout = Pipe()
@@ -69,7 +74,10 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
             let status = finished.terminationStatus
             self.queue.async { self.exited(status: status) }
         }
-        try process.run()
+        do { try process.run() } catch {
+            try? FileManager.default.removeItem(at: settings)
+            throw error
+        }
         self.process = process
         input = stdin.fileHandleForWriting
         try input?.write(contentsOf: ClaudeConfiguration.request("initialize", id: ClaudeConfiguration.initializeID))
@@ -117,6 +125,7 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
             return
         }
         if let configuration = ClaudeConfiguration.applied(event) { journal.configure(configuration) }
+        if handleControl(event) { return }
         switch type {
         case "system":
             if event["subtype"] as? String == "init", let session = event["session_id"] as? String {
@@ -134,6 +143,47 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         }
     }
 
+    private func handleControl(_ event: [String: Any]) -> Bool {
+        switch event["type"] as? String {
+        case "control_request": controlRequest(event)
+        case "control_cancel_request":
+            if let id = event["request_id"] as? String, let question = questions.removeValue(forKey: id) {
+                journal.resolveQuestion(question)
+            }
+        default: return false
+        }
+        return true
+    }
+
+    private func controlRequest(_ event: [String: Any]) {
+        guard let id = event["request_id"] as? String,
+              let request = event["request"] as? [String: Any] else { return }
+        let subtype = request["subtype"] as? String
+        let tool = request["tool_name"] as? String ?? "Tool"
+        let input = request["input"] as? [String: Any] ?? [:]
+        let translated = QuestionRequest.claude(["hook_event_name": "PreToolUse", "tool_name": tool,
+                                                 "tool_input": input])
+        let question = translated?.question ?? AgentQuestion(title: "Claude requests approval for " + tool,
+            detail: QuestionRequest.json(input), actions: [.init(id: "accept", label: "Allow Once")])
+        questions[id] = question.id
+        let boxed = UncheckedSendable((translated, input))
+        journal.ask(question) { answer in
+            self.queue.async {
+                guard !self.journal.isFinished, self.questions.removeValue(forKey: id) != nil else { return }
+                var response: [String: Any] = ["behavior": "deny", "message": "The user declined this request."]
+                if subtype == "can_use_tool", answer.action == "accept" {
+                    let output = boxed.value.0?.response(answer)["hookSpecificOutput"] as? [String: Any]
+                    response = ["behavior": "allow", "updatedInput": output?["updatedInput"] ?? boxed.value.1]
+                }
+                let event: [String: Any] = ["type": "control_response", "response": [
+                    "subtype": "success", "request_id": id, "response": response]]
+                if let data = try? JSONSerialization.data(withJSONObject: event) {
+                    try? self.input?.write(contentsOf: data + Data("\n".utf8))
+                }
+            }
+        }
+    }
+
     /// The turn is over: the run ends, and closing stdin lets Claude exit and save the session.
     private func turnEnded(_ event: [String: Any]) {
         let failed = event["is_error"] as? Bool == true || (event["subtype"] as? String)?.hasPrefix("error") == true
@@ -146,6 +196,7 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     }
 
     private func exited(status: Int32) {
+        if let hookSettings { try? FileManager.default.removeItem(at: hookSettings) }
         // Normally the result came first; an exit without one is a crash or a refusal to start.
         journal.finish(stopReason ?? (status == 0 ? .succeeded : .failed(exitCode: status)))
         Self.log.info("claude exited with \(status)")

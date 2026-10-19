@@ -14,6 +14,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     private var peer: JSONRPCPeer?
     private var threadID: String?
     private var turnID: String?
+    private var approvalItems: [String: [String: Any]] = [:]
     private var stopReason: RunOutcome?
 
     private init(spec: LaunchSpec, journal: RunJournal) {
@@ -69,9 +70,23 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
                                                              output: stdout.fileHandleForReading),
                                callbackQueue: queue)
         peer.onNotification = { [weak self] method, params in self?.handle(method, params) }
+        peer.onRequestAsync = { [weak self] id, method, params, reply in
+            guard let self else { return reply(nil) }
+            var details = params
+            if let itemID = params["itemId"] as? String, let item = self.approvalItems[itemID] {
+                details["fileChanges"] = item["changes"]
+            }
+            guard var request = QuestionRequest.codex(method, details) else { return reply(nil) }
+            request.question.id = id
+            let boxed = UncheckedSendable((request, reply))
+            self.journal.ask(request.question) { answer in
+                self.queue.async { boxed.value.1(boxed.value.0.response(answer)) }
+            }
+        }
         peer.onClose = { [weak self] in self?.journal.finish(.interrupted) }
         self.peer = peer
-        peer.request("initialize", ["clientInfo": ["name": "rota", "version": "1"]]) { [weak self] result in
+        peer.request("initialize", ["clientInfo": ["name": "rota", "version": "1"],
+                                    "capabilities": ["experimentalApi": true]]) { [weak self] result in
             self?.initialized(result)
         }
         if let timeout = spec.timeout {
@@ -99,9 +114,11 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     /// `shell_environment_policy.set.<NAME>` for each of the run's variables: dotted keys,
     /// so they add to the user's own `set` table rather than replace it.
     static func configOverrides(_ environment: [String: String]) -> [String: Any] {
-        Dictionary(uniqueKeysWithValues: ProcessLauncher.sessionVariables(environment).map {
+        var config: [String: Any] = Dictionary(uniqueKeysWithValues: ProcessLauncher.sessionVariables(environment).map {
             ("shell_environment_policy.set.\($0.key)", $0.value as Any)
         })
+        config["features.default_mode_request_user_input"] = true
+        return config
     }
 
     private func threadStarted(_ result: Result<Any, JSONRPCError>) {
@@ -130,13 +147,16 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     }
 
     private func handle(_ method: String, _ params: [String: Any]) {
+        if method == "serverRequest/resolved", let id = params["requestId"] {
+            let key = String(describing: id)
+            peer?.dismissRequest(key)
+            journal.resolveQuestion(key)
+        }
         switch method {
-        case "item/started":
-            if let title = Self.describe(started: params["item"] as? [String: Any]) {
-                journal.record(.tool, title)
-            }
+        case "item/started": itemStarted(params["item"] as? [String: Any])
         case "item/completed":
             let item = params["item"] as? [String: Any]
+            if let id = item?["id"] as? String { approvalItems[id] = nil }
             if item?["type"] as? String == "agentMessage", let text = item?["text"] as? String {
                 journal.record(.agent, text)
             }
@@ -150,6 +170,13 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         default:
             break
         }
+    }
+
+    private func itemStarted(_ item: [String: Any]?) {
+        if let item, item["type"] as? String == "fileChange", let id = item["id"] as? String {
+            approvalItems[id] = item
+        }
+        if let title = Self.describe(started: item) { journal.record(.tool, title) }
     }
 
     private func turnCompleted(_ turn: [String: Any]?) {

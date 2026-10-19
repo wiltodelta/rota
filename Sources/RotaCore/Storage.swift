@@ -142,6 +142,11 @@ public struct RunHistory: Sendable {
         var closed: [RunRecord] = []
         for routineID in routineIDs {
             for var record in records(for: routineID) where record.outcome == .running {
+                if record.questions?.isEmpty == false {
+                    record.questions = nil
+                    record.attention = "The session was interrupted while waiting for your answer. "
+                        + "Continue it to ask again."
+                }
                 record.outcome = .interrupted
                 record.endedAt = now
                 try? upsert(record)

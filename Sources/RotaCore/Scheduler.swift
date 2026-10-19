@@ -63,6 +63,8 @@ public final class Scheduler {
     @ObservationIgnored let store: RoutineStore
     @ObservationIgnored public let history: RunHistory
     @ObservationIgnored let launcher: RoutineLaunching
+    @ObservationIgnored var questionReplies: [UUID: [String: @Sendable (QuestionAnswer) -> Void]] = [:]
+    @ObservationIgnored var hookAnswers: [String: QuestionAnswer] = [:]
     @ObservationIgnored private var controls: [String: RunControl] = [:]
     /// When each routine's current run started, a continued session included.
     @ObservationIgnored private var runStarts: [String: Date] = [:]
@@ -241,13 +243,7 @@ public final class Scheduler {
     private func start(_ record: RunRecord, spec: LaunchSpec) -> Bool {
         var record = record
         let id = record.routineID
-        let runID = record.id
-        let events = RunEvents(
-            session: { [weak self] session in self?.attachSession(session, to: id) },
-            finished: { [weak self] outcome in self?.finish(id, outcome: outcome) },
-            configuration: { [weak self] configuration in
-                self?.updateConfiguration(configuration, routineID: id, runID: runID)
-            })
+        let events = events(for: record)
         do {
             active[id] = record
             runStarts[id] = now()
@@ -268,11 +264,12 @@ public final class Scheduler {
     }
 
     public func stop(_ id: String) {
+        if let record = active[id] { cancelQuestions(on: record) }
         controls[id]?.stop()
     }
 
     public func stopAll() {
-        controls.values.forEach { $0.stop() }
+        Array(controls.keys).forEach { stop($0) }
     }
 
     /// Sends `message` into `record`'s session: into the live session while it
@@ -281,6 +278,7 @@ public final class Scheduler {
     public func message(_ message: String, to record: RunRecord) -> Bool {
         guard var record = current(record.id, routineID: record.routineID), canMessage(record),
               isActive(record) ? controls[record.routineID] != nil : record.logPath != nil else { return false }
+        guard record.questions?.isEmpty != false else { return false }
         // Answering is what the session waited for; the continued run saves this copy, so it must not carry the mark.
         dismissAttention(record)
         record.attention = nil
@@ -317,19 +315,22 @@ public final class Scheduler {
         record.endedAt = nil
         record.reportedModel = nil
         record.reportedEffort = nil
+        record.questions = nil
         return start(record, spec: spec(for: routine, record: record, harness: record.harness, prompt: message,
                                  log: URL(fileURLWithPath: logPath), resume: session))
     }
 
-    private func attachSession(_ session: String, to routineID: String) {
+    func attachSession(_ session: String, to routineID: String) {
         guard var record = active[routineID] else { return }
         record.sessionID = session
         active[routineID] = record
         saveRecord(record)
     }
 
-    private func finish(_ routineID: String, outcome: RunOutcome) {
+    func finish(_ routineID: String, outcome: RunOutcome) {
         guard var record = active[routineID] else { return }
+        cancelQuestions(on: record)
+        record = current(record.id, routineID: routineID) ?? record
         record.outcome = outcome
         record.endedAt = now()
         active[routineID] = nil

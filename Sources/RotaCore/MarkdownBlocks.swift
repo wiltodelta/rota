@@ -1,5 +1,11 @@
 import Foundation
 
+/// The shared inline Markdown policy for chat blocks and plain session excerpts.
+public func inlineMarkdown(_ text: String) -> AttributedString {
+    let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+    return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+}
+
 /// The block structure of an agent's Markdown message: headings, list items,
 /// fenced code, tables and paragraphs. SwiftUI's `Text` renders only inline Markdown, so
 /// without this a heading reads as "## Summary" and a list as dashes.

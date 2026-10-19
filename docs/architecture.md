@@ -81,6 +81,75 @@ flowchart LR
   the click and, only when `Scheduler.canMessage` allows it, a text-input Reply
   action that answers like the composer. Shell and unavailable agent sessions
   say "Needs your attention" and have no Reply action.
+  Attention is explicit metadata, not inferred from questions in assistant text.
+  `notify_user` defaults `needsReply` to false; an ordinary notification that
+  asks for a decision therefore does not mark the session as waiting. Even
+  `needsReply: true` marks the record rather than suspending a tool call, and
+  the agent's turn can still finish with a successful process outcome.
+  Routine instructions still decide when an agent needs the operator's decision;
+  successful no-op runs should not manufacture questions. Structured requests
+  use a separate path and do not depend on `notify_user` or question detection
+  in prose.
+- `AgentQuestion` normalizes native questions, plan approvals and MCP forms/URL
+  requests. `RunEvents.question` registers the request with the scheduler,
+  persists its fields in `RunRecord.questions`, marks the session as needing
+  a reply and posts a notification. `QuestionCard` presents single/multiple
+  selections, typed/private answers and primitive MCP fields in a bounded
+  scroll view with a fixed submission footer. The scroll content reserves
+  scaled space on every edge for native field focus rings, which paint outside
+  their layout bounds. Check a
+  focused first and last input at the minimum window height. Other is a radio
+  option for a single choice and an independent checkbox for multiple choices.
+  Its input appears only when selected; a hidden draft is retained but never submitted.
+  An empty selected Other blocks submission. Only elicitation and permission
+  requests show the additional Decline action. Provider dismissal choices are
+  not duplicated among approval buttons. When action buttons cannot fit in
+  a row, a native Choose popup keeps their full labels available without
+  consuming the question viewport. It reuses InterfacePicker's explicit
+  AppKit font, fitting the selected title while retaining full menu labels.
+  Persistent policy choices name their command prefix or host. Short requests
+  fit their content. Renderer checks
+  must verify the actual window size, a nonzero question viewport and the
+  final field after native scrolling. At the 520 pt minimum height, a pending
+  form takes space from the transcript rather than clipping its inputs. MCP
+  messages belong in the scrolling detail, not the fixed header. Setting an
+  offscreen AX value alone does not establish reachability. A collapsed
+  transcript scroller can expose an oversized anonymous AX arrow rectangle;
+  compare its reported overflow with the capture before classifying it as
+  painted overlap. Include long option descriptions and
+  approval labels at the minimum width and 150% interface scale.
+  Text answers can span several lines, while secret and numeric inputs stay
+  compact. No answer is selected or sent
+  automatically. Ordinary chat messages and Dismiss cannot clear an outstanding
+  structured question. Only its explicit answer, provider withdrawal or run
+  cancellation resolves it; concurrent requests remain independently pending.
+  Private answers are redacted in Rota's journal. After an app interruption,
+  old request callbacks expire and the session must be continued to ask again.
+- Codex receives deferred JSON-RPC server requests through `onRequestAsync`;
+  the transport keeps reading while the user answers. It handles native input,
+  command/file/permission approvals, legacy approvals and standard MCP form/URL
+  elicitation. `serverRequest/resolved` invalidates late answers. The per-thread
+  `features.default_mode_request_user_input` override makes the input tool
+  available in Default mode without changing the user's configuration.
+- Grok's `_x.ai/ask_user_question`, `_x.ai/exit_plan_mode` and
+  `_x.ai/mcp/elicit` requests use the same UI and return their own wire results.
+  Ordinary execution permissions retain the runner's existing always-approve
+  policy; explicit questions and plan approvals never use that shortcut.
+- `ClaudeRunSettings` installs per-run `PreToolUse` hooks for `AskUserQuestion`
+  and `ExitPlanMode`, plus an `Elicitation` hook, in both Claude runners.
+  The bundled `rota question-hook` reads the native hook input from stdin,
+  registers the form over the private control socket, and waits for the user's
+  answer via bounded polling requests. It returns the native `updatedInput`
+  or elicitation action; losing the session cancels rather than approves.
+  `PermissionRequest` hooks collect explicit tool approvals in the same form.
+  Print mode also installs the stdio permission host and handles native
+  `can_use_tool` requests. Hook settings are ephemeral and do not change the
+  user's CLI configuration.
+  The interactive Claude runner exits after a completed turn when no user
+  messages are queued; it does not check for outstanding background tool work.
+  An agent can therefore promise a later commit after a background gate, end
+  its turn, and leave that work unfinished while Rota records success. A future
+  completion contract must distinguish process completion from task completion.
 - `ProcessLauncher` runs every CLI through `zsh -lc 'exec "$0" "$@"'` from
   `baseEnvironment` (the account's own variables only), so a routine sees what
   a new Terminal window sees, whatever started Rota: started by `rota` inside
@@ -122,7 +191,8 @@ flowchart LR
 - `ClaudeStreamRun` runs Claude the way Claude Desktop does
   (read from its live `ps` on 2026-10-09): `claude -p --input-format
   stream-json --output-format stream-json --verbose --permission-mode
-  bypassPermissions`. The prompt and each later message are user messages on
+  bypassPermissions`. Rota adds `--permission-prompt-tool stdio` and ephemeral
+  `--settings` hooks to host native questions. The prompt and later messages are on
   stdin; a message sent mid-turn joins that turn; the `result` event ends the
   run and closing stdin lets Claude exit and save the session; the `system`
   `init` event carries the session id, and `--resume <id>` continues it. `-p`
@@ -521,6 +591,16 @@ changes while `.command` files stay with Terminal, then the `.command` handler. 
 
 Layout rules learned while measuring the narrowest window (820 pt):
 
+- `SessionHistoryRow` keeps date and status above a two-line excerpt, with the
+  run's agent/model snapshot and completed duration below. Header metadata
+  stacks at narrow widths. `SessionPreview` prioritizes pending questions and
+  attention, then recorded failure reasons or the latest agent/command output.
+  User prompts and routine instructions never become previews. Markdown is
+  reduced to plain text through the block parser and the shared `inlineMarkdown`
+  policy used by chat messages. Each visible row
+  reuses `TranscriptSessionReader` off the UI actor, polling active sessions
+  every three seconds and reading finished sessions once. Previews are derived
+  from logs rather than persisted as another copy of session content.
 - Routines appear first in the sidebar, above session history grouped by day,
   so history growth does not push routine navigation below it. `SessionView`
   is the chat with its composer. A routine's view

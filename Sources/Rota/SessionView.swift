@@ -30,7 +30,7 @@ struct SessionView: View {
                 .padding(.horizontal, metrics.points(20))
                 .padding(.vertical, metrics.points(12))
             Divider()
-            if let question = current.attention {
+            if current.questions?.isEmpty != false, let question = current.attention {
                 AttentionBanner(text: question, canReply: model.scheduler.canMessage(current)) {
                     model.scheduler.dismissAttention(current)
                 }
@@ -47,8 +47,16 @@ struct SessionView: View {
                            sending: outbox.filter { !$0.delivered(in: items) }.map(\.text),
                            structured: transcript.structured, hasEarlier: transcript.hasEarlier,
                            loadingEarlier: loadingEarlier, loadEarlier: loadEarlier)
-            ChatComposer(record: current) { text in
-                outbox.append(Outgoing(text: text, seen: Outgoing.count(text, in: items)))
+            if let question = current.questions?.first, running {
+                QuestionCard(question: question) { answer in
+                    try model.scheduler.answerQuestion(question.id, on: current, answer: answer)
+                }
+                .id(question.id)
+                .layoutPriority(1)
+            } else {
+                ChatComposer(record: current) { text in
+                    outbox.append(Outgoing(text: text, seen: Outgoing.count(text, in: items)))
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

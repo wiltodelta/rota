@@ -5,7 +5,7 @@ final class HarnessTests: XCTestCase {
     func testClaudeStreamArguments() {
         let plain = Harness.claude.arguments(settings: ClaudeUserSettings())
         XCTAssertEqual(plain, ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-                               "--permission-mode", "bypassPermissions"])
+                               "--permission-mode", "bypassPermissions", "--permission-prompt-tool", "stdio"])
         XCTAssertEqual(Array(Harness.claude.arguments(settings: ClaudeUserSettings(), resume: "s1").suffix(2)),
                        ["--resume", "s1"])
     }
@@ -74,7 +74,9 @@ final class HarnessTests: XCTestCase {
         let environment = ["ROTA_SESSION": "S1", "ROTA_ROUTINE": "digest", "ROTA_CLI": "/x/rota",
                            "CLAUDE_CODE_ENABLE_CFC": "1"]
         let overrides = CodexDaemonRun.configOverrides(environment)
-        XCTAssertEqual(overrides as? [String: String], ["shell_environment_policy.set.ROTA_SESSION": "S1",
+        XCTAssertEqual(overrides["features.default_mode_request_user_input"] as? Bool, true)
+        let variables = overrides.filter { $0.key.hasPrefix("shell_environment_policy.set.") } as? [String: String]
+        XCTAssertEqual(variables, ["shell_environment_policy.set.ROTA_SESSION": "S1",
                                                         "shell_environment_policy.set.ROTA_ROUTINE": "digest",
                                                         "shell_environment_policy.set.ROTA_CLI": "/x/rota"])
         let rule = try XCTUnwrap(GrokACPRun.sessionRule(environment))

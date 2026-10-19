@@ -9,12 +9,13 @@ extension Scheduler {
     public static let controlMethods = [
         "routines.list", "routines.get", "routines.create", "routines.update", "routines.setEnabled",
         "routines.run", "routines.stop", "routines.delete", "sessions.list", "sessions.read", "sessions.message",
-        "sessions.dismiss", "notify"
+        "sessions.dismiss", "notify", "questions.create", "questions.poll"
     ]
 
     public func control(_ method: String, _ params: [String: Any]) -> Result<Any, ControlError> {
         do {
-            guard let result = try routineCommand(method, params) ?? sessionCommand(method, params) else {
+            guard let result = try routineCommand(method, params)
+                ?? sessionCommand(method, params) ?? questionCommand(method, params) else {
                 let known = Self.controlMethods.joined(separator: ", ")
                 throw ControlError("Unknown method \(method). Known: \(known).")
             }

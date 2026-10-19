@@ -63,6 +63,42 @@ final class JSONRPCPeerTests: XCTestCase {
         XCTAssertNotNil(transport.sent[1]["error"])
     }
 
+    func testDeferredQuestionDoesNotBlockNotificationsAndRepliesOnlyOnce() {
+        let transport = LoopbackTransport()
+        let peer = JSONRPCPeer(transport: transport)
+        var answer: ((Any?) -> Void)?
+        var notifications = 0
+        peer.onRequestAsync = { id, method, _, reply in
+            XCTAssertEqual(id, "q")
+            XCTAssertEqual(method, "ask")
+            answer = reply
+        }
+        peer.onNotification = { _, _ in notifications += 1 }
+        transport.deliver(#"{"jsonrpc":"2.0","id":"q","method":"ask","params":{}}"#)
+        transport.deliver(#"{"jsonrpc":"2.0","method":"progress","params":{}}"#)
+        XCTAssertEqual(notifications, 1)
+        XCTAssertTrue(transport.sent.isEmpty)
+        answer?(["answer": "Blue"])
+        answer?(["answer": "Green"])
+        XCTAssertEqual(transport.sent.count, 1)
+        XCTAssertEqual((transport.sent.first?["result"] as? [String: String])?["answer"], "Blue")
+    }
+
+    func testResolvedAndDisconnectedQuestionsCannotSendLateAnswers() {
+        let transport = LoopbackTransport()
+        let peer = JSONRPCPeer(transport: transport)
+        var answer: ((Any?) -> Void)?
+        peer.onRequestAsync = { _, _, _, reply in answer = reply }
+        transport.deliver(#"{"jsonrpc":"2.0","id":1,"method":"ask","params":{}}"#)
+        peer.dismissRequest("1")
+        answer?(["answer": "late"])
+        XCTAssertTrue(transport.sent.isEmpty)
+        transport.deliver(#"{"jsonrpc":"2.0","id":2,"method":"ask","params":{}}"#)
+        transport.close()
+        answer?(["answer": "late"])
+        XCTAssertTrue(transport.sent.isEmpty)
+    }
+
     func testCloseFailsWaitingRequests() {
         let transport = LoopbackTransport()
         let peer = JSONRPCPeer(transport: transport)

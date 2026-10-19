@@ -38,11 +38,6 @@ struct MarkdownText: View {
     }
 }
 
-func inlineMarkdown(_ text: String) -> AttributedString {
-    let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-    return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
-}
-
 /// A fenced code block as super.engineering draws one: a header with the
 /// language and a Copy button over the code, which scrolls sideways rather than wrapping.
 struct CodeBlockView: View {

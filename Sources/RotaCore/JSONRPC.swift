@@ -23,6 +23,9 @@ final class JSONRPCPeer: @unchecked Sendable {
     var onNotification: ((String, [String: Any]) -> Void)?
     /// A request from the peer; return the result to send, or nil to answer "method not found".
     var onRequest: ((String, [String: Any]) -> Any?)?
+    /// Deferred host interaction, delivered on callbackQueue without blocking transport reads.
+    var onRequestAsync: ((String, String, [String: Any], @escaping (Any?) -> Void) -> Void)?
+    private var incoming: [String: UUID] = [:]
     var onClose: (() -> Void)?
     private let callbackQueue: DispatchQueue?
 
@@ -61,7 +64,9 @@ final class JSONRPCPeer: @unchecked Sendable {
         let params = message["params"] as? [String: Any] ?? [:]
         switch (method, message["id"]) {
         case let (method?, id?):
-            if let result = onRequest?(method, params) {
+            if let onRequestAsync {
+                receiveRequest(id: id, method: method, params: params, handler: onRequestAsync)
+            } else if let result = onRequest?(method, params) {
                 write(["jsonrpc": "2.0", "id": id, "result": result])
             } else {
                 let error: [String: Any] = ["code": -32601, "message": "Rota does not handle \(method)"]
@@ -84,10 +89,41 @@ final class JSONRPCPeer: @unchecked Sendable {
         }
     }
 
+    private func receiveRequest(id: Any, method: String, params: [String: Any],
+                                handler: @escaping (String, String, [String: Any], @escaping (Any?) -> Void) -> Void) {
+        let key = String(describing: id)
+        let token = UUID()
+        lock.lock()
+        incoming[key] = token
+        lock.unlock()
+        deliver {
+            handler(key, method, params) { result in
+                self.lock.lock()
+                let current = self.incoming[key] == token
+                if current { self.incoming[key] = nil }
+                self.lock.unlock()
+                guard current else { return }
+                if let result {
+                    self.write(["jsonrpc": "2.0", "id": id, "result": result])
+                } else {
+                    self.write(["jsonrpc": "2.0", "id": id,
+                                "error": ["code": -32601, "message": "Rota does not handle \(method)"]])
+                }
+            }
+        }
+    }
+
+    func dismissRequest(_ id: String) {
+        lock.lock()
+        incoming[id] = nil
+        lock.unlock()
+    }
+
     private func closed() {
         lock.lock()
         let waiting = pending.values
         pending.removeAll()
+        incoming.removeAll()
         lock.unlock()
         deliver {
             waiting.forEach { $0(.failure(JSONRPCError(message: "connection closed"))) }

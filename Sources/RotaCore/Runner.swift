@@ -59,17 +59,25 @@ public extension RunControl {
 
 /// Callbacks of one run, all delivered on the main queue.
 public struct RunEvents {
+    public typealias QuestionReply = @Sendable (QuestionAnswer) -> Void
+    public typealias QuestionHandler = (AgentQuestion, @escaping QuestionReply) -> Void
     /// The harness session the run lives in, once known; it is what "Open chat" opens.
     public var session: (String) -> Void
     /// Fires once, when the run's work is over.
     public var finished: (RunOutcome) -> Void
     public var configuration: (SessionConfiguration) -> Void
+    public var question: (AgentQuestion, @escaping @Sendable (QuestionAnswer) -> Void) -> Void
+    public var questionResolved: (String) -> Void
 
     public init(session: @escaping (String) -> Void, finished: @escaping (RunOutcome) -> Void,
-                configuration: @escaping (SessionConfiguration) -> Void = { _ in }) {
+                configuration: @escaping (SessionConfiguration) -> Void = { _ in },
+                question: @escaping QuestionHandler = { _, reply in reply(.init(action: "cancel")) },
+                questionResolved: @escaping (String) -> Void = { _ in }) {
         self.session = session
         self.finished = finished
         self.configuration = configuration
+        self.question = question
+        self.questionResolved = questionResolved
     }
 }
 

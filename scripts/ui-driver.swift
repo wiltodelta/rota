@@ -20,7 +20,7 @@
 //   reveal <id-or-title>         scroll the nearest enclosing area to that element
 //   aligned <label> <control>    check that their vertical frame centers agree
 //   key <key>                   post Return or a zoom shortcut to Rota's process
-//   scroll-wheel <window> <delta> <pixel|line>  send real scroll input over the window's content
+//   scroll-wheel <window-or-content> <delta> <pixel|line>  send real scroll input over that viewport
 //   confirm-iterm <text>         answer iTerm2's "OK to run" for a script path containing text
 //   gate                         list elements whose frame leaves their window or their parent
 import AppKit
@@ -86,6 +86,20 @@ func dump(_ element: AXUIElement, depth: Int, max: Int) {
     let role: String = attribute(element, kAXRoleAttribute) ?? "?"
     print(String(repeating: "  ", count: depth) + role + "  " + label(element))
     children(element).forEach { dump($0, depth: depth + 1, max: max) }
+}
+
+// Target a scroll area's viewport even when its child is currently scrolled out.
+func wheelTarget(_ text: String) -> (AXUIElement, CGRect)? {
+    guard let target = windows().first(where: { matches($0, text) }) ?? find({ matches($0, text) }) else { return nil }
+    var ancestor: AXUIElement? = target
+    var viewport: CGRect?
+    while let element = ancestor {
+        let role: String = attribute(element, kAXRoleAttribute) ?? ""
+        if role == "AXScrollArea", viewport == nil { viewport = frame(element) }
+        if role == "AXWindow", let rect = viewport ?? frame(element) { return (element, rect) }
+        ancestor = attribute(element, kAXParentAttribute)
+    }
+    return nil
 }
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -232,11 +246,14 @@ case "reveal":
         // Its outer viewport may still clip a target that fits this inner area.
         if viewport.contains(targetFrame) { continue }
         let contents = children(parent)
+        // SwiftUI can expose a flattened document, with each field as a child.
+        // Its extent is their union, not the height of the largest control.
+        let document = contents.filter { (attribute($0, kAXRoleAttribute) as String?) != "AXScrollBar" }
+            .compactMap { frame($0) }.reduce(CGRect.null) { $0.union($1) }
         guard let bar = contents.first(where: {
             (attribute($0, kAXRoleAttribute) as String?) == "AXScrollBar"
                 && (frame($0).map { $0.height > $0.width } ?? false)
-        }), let document = contents.compactMap({ frame($0) }).max(by: { $0.height < $1.height }),
-        document.height > viewport.height else { fail("no vertical scroll range") }
+        }), !document.isNull, document.height > viewport.height else { fail("no vertical scroll range") }
         let offset = targetFrame.midY - document.minY - viewport.height / 2
         let fraction = min(max(offset / (document.height - viewport.height), 0), 1)
         let result = AXUIElementSetAttributeValue(bar, kAXValueAttribute as CFString, fraction as CFNumber)
@@ -293,8 +310,9 @@ case "gate":
 case "scroll-wheel":
     guard arguments.count == 4, let delta = Int32(arguments[2]), delta != 0,
           ["pixel", "line"].contains(arguments[3]),
-          let window = windows().first(where: { matches($0, arguments[1]) }),
-          let rect = frame(window) else { fail("scroll-wheel <window> <nonzero delta> <pixel|line>") }
+          let (window, rect) = wheelTarget(arguments[1]) else {
+        fail("scroll-wheel <window-or-scroll-content> <nonzero delta> <pixel|line>")
+    }
     let continuous = arguments[3] == "pixel"
     let units: CGScrollEventUnit = continuous ? .pixel : .line
     let point = CGPoint(x: rect.midX, y: rect.midY)

@@ -55,6 +55,9 @@ Desktop.
   each script until you tick "Suppress this message permanently" once. The last
   50 finished sessions of each routine are kept. Running sessions are protected;
   skipped slots have a separate history limit and never displace sessions.
+  Each routine's session list shows the last reply or command output beside
+  its date, agent, duration and status. Pending questions take precedence over
+  earlier replies, and failures show their recorded reason.
   Delete a finished session and its local logs with the trash button or
   **Delete Session…** in its context menu. Confirmation is required; the
   routine and the agent's own history stay unchanged.
@@ -65,7 +68,12 @@ Desktop.
   adds runs on its schedule and Rota notifies you. The same works from a
   terminal with the `rota` command: `rota list`, `rota add`, `rota run`,
   `rota log`, `rota help`.
-- **Routines can ask you.** A routine (or its skill) runs
+- **Answer agents in Rota.** Native questions from Claude Code, Codex and
+  Grok Build appear in the session with their options or input fields. The
+  session stays marked as needing your reply until you send an answer or
+  explicitly decline/cancel the request. Multiple selections, private input,
+  plan approvals and standard MCP forms/URL requests use the same flow.
+- **Routines can notify you.** A routine (or its skill) runs
   `"$ROTA_CLI" notify "…"`, or an agent calls the `notify_user` tool, and Rota
   shows a Mac notification from that session. With `--needs-reply` the session
   is marked "Needs your reply" until you answer in its chat, from the notification's
@@ -171,11 +179,11 @@ mv Rota.app /Applications/
 - If the icon is hidden (behind the notch, or by a menu bar manager), open
   Rota again from Finder or Spotlight to get its window.
 
-Agents run unattended with approvals bypassed (`bypassPermissions` for
-Claude Code, `--dangerously-bypass-approvals-and-sandbox` for Codex,
-`--always-approve` for Grok Build), the same mode Claude Desktop routines use: nobody
-is there to answer a prompt. Point a routine only at a project whose skill you
-trust.
+Routine tools retain their unattended execution policy (`bypassPermissions`
+for Claude Code, `approvalPolicy: never` with `danger-full-access` for the Codex
+daemon, and `--always-approve` for Grok Build). Native questions, explicit plan
+confirmations and MCP requests that reach Rota wait for your answer in the app.
+Point a routine only at a project whose skill you trust.
 
 Rota runs routines only while it is open; turn on **Launch at login** in
 Settings, so runs cut off by a shutdown continue after the Mac starts.

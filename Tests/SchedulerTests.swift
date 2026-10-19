@@ -80,6 +80,65 @@ final class SchedulerTests: XCTestCase {
         return routine
     }
 
+    func testQuestionsRequireExplicitAnswersAndSurviveOrdinaryMessagesAndDismissal() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        let record = try XCTUnwrap(scheduler.active[routine.id])
+        launcher.events[0].session("native-session")
+        let replies = AnswerRecorder()
+        let question = AgentQuestion(id: "q1", title: "Choose a color", fields: [.init(id: "color", title: "Color")])
+        launcher.events[0].question(question) { replies.append($0) }
+        XCTAssertEqual(scheduler.current(record.id)?.questions, [question])
+        XCTAssertEqual(scheduler.attentionCount, 1)
+        scheduler.dismissAttention(record)
+        XCTAssertEqual(scheduler.attentionCount, 1)
+        XCTAssertFalse(scheduler.message("unrelated", to: record))
+        XCTAssertTrue(replies.values.isEmpty)
+        XCTAssertThrowsError(try scheduler.answerQuestion("q1", on: record, answer: .init()))
+        XCTAssertEqual(scheduler.current(record.id)?.questions?.count, 1)
+        try scheduler.answerQuestion("q1", on: record, answer: .init(values: ["color": ["Blue"]]))
+        XCTAssertEqual(replies.values, [.init(values: ["color": ["Blue"]])])
+        XCTAssertEqual(scheduler.attentionCount, 0)
+        XCTAssertTrue(scheduler.current(record.id)?.questions?.isEmpty != false)
+        XCTAssertThrowsError(try scheduler.answerQuestion("q1", on: record, answer: .init(action: "cancel")))
+    }
+
+    func testMultipleQuestionsResolveIndependentlyAndFinishCancelsTheRest() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        let record = try XCTUnwrap(scheduler.active[routine.id])
+        let replies = AnswerRecorder()
+        for id in ["a", "b"] {
+            launcher.events[0].question(.init(id: id, title: id)) { replies.append($0) }
+        }
+        try scheduler.answerQuestion("a", on: record, answer: .init(action: "decline"))
+        XCTAssertEqual(scheduler.current(record.id)?.questions?.map(\.id), ["b"])
+        XCTAssertEqual(scheduler.current(record.id)?.attention, "b")
+        launcher.events[0].finished(.cancelled)
+        XCTAssertEqual(replies.values.map(\.action), ["decline", "cancel"])
+        XCTAssertTrue(scheduler.current(record.id)?.questions?.isEmpty != false)
+        XCTAssertEqual(scheduler.attentionCount, 0)
+    }
+
+    func testHookPollingReturnsTheActualAnswerOnceAndExpiresAfterStop() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        let record = try XCTUnwrap(scheduler.active[routine.id])
+        let question = AgentQuestion(id: "hook", title: "Test question")
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(question))
+        _ = try scheduler.questionCommand("questions.create", ["session": record.id.uuidString, "question": encoded])
+        let params: [String: Any] = ["session": record.id.uuidString, "question": "hook"]
+        XCTAssertEqual((try scheduler.questionCommand("questions.poll", params) as? [String: Bool])?["pending"], true)
+        try scheduler.answerQuestion("hook", on: record, answer: .init(action: "decline"))
+        let answer = try scheduler.questionCommand("questions.poll", params) as? [String: Any]
+        XCTAssertEqual(answer?["action"] as? String, "decline")
+        XCTAssertThrowsError(try scheduler.questionCommand("questions.poll", params))
+        _ = try scheduler.questionCommand("questions.create", ["session": record.id.uuidString, "question": encoded])
+        scheduler.stop(routine.id)
+        XCTAssertTrue(scheduler.current(record.id)?.questions == nil)
+        XCTAssertThrowsError(try scheduler.questionCommand("questions.poll", params))
+    }
+
     func testSavingAnEnabledRoutineSchedulesItsNextSlot() {
         _ = addDailyRoutine()
         XCTAssertEqual(scheduler.routine("report")?.nextFire, makeDate(hour: 10, minute: 0))
@@ -473,4 +532,11 @@ final class SchedulerTests: XCTestCase {
         XCTAssertNil(scheduler.routine("report"))
         XCTAssertTrue(scheduler.history.records(for: "report").isEmpty)
     }
+}
+
+private final class AnswerRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var answers: [QuestionAnswer] = []
+    var values: [QuestionAnswer] { lock.lock(); defer { lock.unlock() }; return answers }
+    func append(_ answer: QuestionAnswer) { lock.lock(); answers.append(answer); lock.unlock() }
 }

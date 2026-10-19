@@ -93,7 +93,9 @@ final class Notifier: NSObject, RunNotifying, UNUserNotificationCenterDelegate {
         content.sound = .default
         if let record {
             content.userInfo = [Self.sessionKey: record.id.uuidString]
-            if canReply(record) { content.categoryIdentifier = Self.replyCategory }
+            if canReply(record), record.questions?.isEmpty != false {
+                content.categoryIdentifier = Self.replyCategory
+            }
         }
         return content
     }

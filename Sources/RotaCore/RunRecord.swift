@@ -62,6 +62,7 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     /// What the session asked the user through `rota notify --needs-reply`, until
     /// the user answers in its chat or dismisses it.
     public var attention: String?
+    public var questions: [AgentQuestion]?
     /// How many times Rota continued this session on its own after the Mac slept
     /// or shut down in the middle of it (`Scheduler.resumeLimit` at most).
     public var resumes: Int?

@@ -23,28 +23,7 @@ struct RoutineDetail: View {
                 .padding(.bottom, metrics.points(10))
             Divider()
             List(records) { record in
-                Button {
-                    model.selection = .session(record.id)
-                } label: {
-                    HStack {
-                        Text(record.startedAt.formatted(date: .abbreviated, time: .shortened))
-                            .fontWeight(record.isUnread ? .semibold : .regular)
-                        Spacer()
-                        if record.attention != nil {
-                            Image(systemName: "exclamationmark.bubble.fill")
-                                .foregroundStyle(.orange)
-                                .help(model.scheduler.canMessage(record) ? "Needs your reply" : "Needs your attention")
-                                .accessibilityLabel(model.scheduler.canMessage(record)
-                                    ? "Needs your reply" : "Needs your attention")
-                        }
-                        Text(record.outcome.title)
-                            .foregroundStyle(record.outcome.isFailure && !record.isSkip
-                                ? Color.errorText : Color.secondaryText)
-                    }
-                    .interfaceFont(.body)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                SessionHistoryRow(record: record)
             }
             .overlay {
                 if records.isEmpty { Text("No sessions yet").foregroundStyle(Color.secondaryText) }

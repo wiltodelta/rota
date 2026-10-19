@@ -69,7 +69,16 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
                                                         output: stdout.fileHandleForReading),
                                callbackQueue: queue)
         peer.onNotification = { [weak self] method, params in self?.handle(method, params) }
-        peer.onRequest = { method, params in Self.answer(method, params) }
+        peer.onRequestAsync = { [weak self] id, method, params, reply in
+            // Retain the configured automatic tool permissions; explicit questions never auto-answer.
+            if method == "session/request_permission", let result = Self.answer(method, params) { return reply(result) }
+            guard let self, var request = QuestionRequest.grok(method, params) else { return reply(nil) }
+            request.question.id = id
+            let boxed = UncheckedSendable((request, reply))
+            self.journal.ask(request.question) { answer in
+                self.queue.async { boxed.value.1(boxed.value.0.response(answer)) }
+            }
+        }
         peer.onClose = { [weak self] in self?.journal.finish(.interrupted) }
         self.peer = peer
         let hello: [String: Any] = ["protocolVersion": 1, "clientCapabilities": [String: Any]()]

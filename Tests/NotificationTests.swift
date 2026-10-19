@@ -4,6 +4,19 @@ import XCTest
 
 @MainActor
 final class NotificationTests: XCTestCase {
+    func testStructuredQuestionOpensTheFormInsteadOfOfferingAnUnstructuredReply() {
+        let notifier = Notifier()
+        notifier.canReply = { _ in true }
+        var record = RunRecord(routineID: "sample", trigger: .manual, harness: .codex,
+                               startedAt: Date(timeIntervalSince1970: 0), outcome: .running)
+        record.questions = [.init(title: "Choose a color")]
+        let content = notifier.sessionContent(record, routine: nil, title: nil,
+                                              text: "Choose a color", needsReply: true)
+        XCTAssertTrue(content.categoryIdentifier.isEmpty)
+        XCTAssertEqual(content.subtitle, "Needs your reply")
+        XCTAssertTrue(content.userInfo.values.contains { $0 as? String == record.id.uuidString })
+    }
+
     func testReplyActionMatchesTheSchedulersCapabilities() {
         let location = StorageLocation(root: URL(fileURLWithPath: "/unused"),
                                        logs: URL(fileURLWithPath: "/unused/logs"))

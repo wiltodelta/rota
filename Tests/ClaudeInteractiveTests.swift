@@ -54,7 +54,7 @@ final class ClaudeInteractiveTests: XCTestCase {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let file = try ClaudeInteractiveRun.hookSettings(in: folder)
+        let file = try ClaudeRunSettings.hooks(in: folder)
         let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
         let notification = try XCTUnwrap((json["hooks"] as? [String: Any])?["Notification"] as? [[String: Any]])
         XCTAssertEqual(notification.first?["matcher"] as? String, "permission_prompt|elicitation_dialog")

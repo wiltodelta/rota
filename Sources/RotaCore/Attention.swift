@@ -58,7 +58,7 @@ extension Scheduler {
         return active[routineID] ?? history.records(for: routineID).first { !$0.isSkip }
     }
 
-    private func setAttention(_ text: String?, on record: RunRecord) -> RunRecord {
+    func setAttention(_ text: String?, on record: RunRecord) -> RunRecord {
         var record = record
         record.attention = text
         if active[record.routineID]?.id == record.id { active[record.routineID] = record }
@@ -67,7 +67,8 @@ extension Scheduler {
     }
 
     public func dismissAttention(_ record: RunRecord) {
-        guard let now = current(record.id, routineID: record.routineID), now.attention != nil else { return }
+        guard let now = current(record.id, routineID: record.routineID), now.attention != nil,
+              now.questions?.isEmpty != false else { return }
         _ = setAttention(nil, on: now)
     }
 
