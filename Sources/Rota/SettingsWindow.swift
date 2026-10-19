@@ -68,38 +68,30 @@ final class SettingsTabController: ScalableSettingsTabController {
     }
 }
 
-/// The form keeps its natural height inside a scroll view when the screen is shorter.
+/// The native Form owns scrolling; its ideal size determines the screen-capped window size.
 final class SettingsPaneController: NSViewController {
-    private let hosting: NSHostingController<AnyView>
+    private let hosting: SettingsHostingView
     private var pendingSize: CGSize?
     private(set) var contentSize: CGSize = .zero
     var onContentSizeChange: (() -> Void)?
 
     init(rootView: some View) {
-        hosting = NSHostingController(rootView: AnyView(EmptyView()))
-        hosting.sizingOptions = [.preferredContentSize]
+        hosting = SettingsHostingView(rootView: AnyView(rootView))
+        hosting.sizingOptions = [.intrinsicContentSize]
+        hosting.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         super.init(nibName: nil, bundle: nil)
-        hosting.rootView = AnyView(rootView.onGeometryChange(for: CGSize.self) { $0.size } action: { [weak self] size in
-            self?.scheduleSize(size)
-        })
+        hosting.onContentSizeChange = { [weak self] size in self?.scheduleSize(size) }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     override func loadView() {
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.drawsBackground = false
-        addChild(hosting)
-        scroll.documentView = hosting.view
-        view = scroll
-        updateSize(hosting.preferredContentSize)
+        view = hosting
+        updateSize(hosting.fittingSize)
     }
 
-    /// The hosting controller's preferred size can retain its first proposal.
-    /// Follow the form's measured size and coalesce updates after SwiftUI layout.
+    /// Coalesce ideal-size changes after SwiftUI layout, independently of the viewport.
     private func scheduleSize(_ size: CGSize) {
         guard size.width > 0, size.height > 0, size.width.isFinite, size.height.isFinite else { return }
         let scheduled = pendingSize != nil
@@ -114,10 +106,18 @@ final class SettingsPaneController: NSViewController {
 
     private func updateSize(_ size: CGSize) {
         guard size.height > 0, contentSize != size else { return }
-        hosting.view.setFrameSize(size)
-        // preferredContentSize adds height constraints to the viewport itself.
-        // Keep the document's natural size separate so the viewport can scroll.
+        // Publishing the ideal height as preferredContentSize would constrain the viewport.
         contentSize = size
         onContentSizeChange?()
+    }
+}
+
+/// Measure ideal content without forcing that height onto the scrollable Form's viewport.
+private final class SettingsHostingView: NSHostingView<AnyView> {
+    var onContentSizeChange: ((CGSize) -> Void)?
+
+    override func layout() {
+        super.layout()
+        onContentSizeChange?(fittingSize)
     }
 }

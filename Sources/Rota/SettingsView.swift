@@ -86,6 +86,7 @@ struct AgentSettings: View {
                 }
             } header: {
                 Text("Agent CLIs")
+                    .accessibilityIdentifier("agentCLIsHeading")
             } footer: {
                 Text("Rota lists the copies it finds on your login shell's PATH and in the usual install folders.")
                     .foregroundStyle(Color.secondaryText)
@@ -150,7 +151,7 @@ private struct PermissionRow: View {
 }
 
 extension View {
-    /// A settings tab's form: grouped, the window's width, as tall as its content.
+    /// A grouped settings Form at the scaled window width, owning its vertical scrolling.
     func settingsPane() -> some View {
         modifier(SettingsPaneModifier())
     }
@@ -163,7 +164,6 @@ private struct SettingsPaneModifier: ViewModifier {
         content.formStyle(.grouped)
             .toggleStyle(InterfaceFormToggleStyle())
             .frame(width: scale.sheetWidth(520))
-            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

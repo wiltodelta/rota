@@ -20,8 +20,9 @@ final class SettingsWindowTests: XCTestCase {
         window.setFrame(NSRect(x: 100, y: 100, width: 520, height: 600), display: true)
         window.contentView?.layoutSubtreeIfNeeded()
         XCTAssertLessThanOrEqual(window.frame.height, 600)
-        let scroll = try XCTUnwrap(pane.view as? NSScrollView)
-        let document = try XCTUnwrap(scroll.documentView)
-        XCTAssertGreaterThan(document.frame.height, scroll.contentSize.height)
+        let hosting = try XCTUnwrap(pane.view as? NSHostingView<AnyView>)
+        XCTAssertGreaterThan(hosting.fittingSize.height, hosting.frame.height)
+        XCTAssertEqual(pane.preferredContentSize, .zero,
+                       "Ideal content height must not become a viewport constraint")
     }
 }

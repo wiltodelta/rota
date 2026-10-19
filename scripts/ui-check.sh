@@ -51,6 +51,15 @@ wait_exists() {
     fail "element did not appear: $1"
 }
 
+wait_visible() {
+    local attempt
+    for ((attempt = 0; attempt < 30; attempt++)); do
+        "$DRIVER" visible "$1" >/dev/null 2>&1 && return 0
+        sleep 0.2
+    done
+    return 1
+}
+
 # Only the build under test, by its full path: never the installed app.
 quit_rota() {
     local app_pid child command
@@ -109,6 +118,21 @@ check_layout() {
     if [[ "${violations##*$'\n'}" == "0 violations" ]]; then pass "layout $1"
     else printf '%s\n' "$violations"; fail "layout $1"
     fi
+}
+
+check_agents_scrolling() {
+    local mode amount
+    wait_exists agentAccess-grok
+    # AXReveal and scrollbar values bypass the wheel delivery path that can be
+    # swallowed by a natural-height Form nested inside another scroll view.
+    for mode in pixel line; do
+        if [[ "$mode" == pixel ]]; then amount=3000; else amount=200; fi
+        "$DRIVER" scroll-wheel Agents "$amount" "$mode"
+        check wait_visible agentCLIsHeading
+        "$DRIVER" scroll-wheel Agents "-$amount" "$mode"
+        check wait_visible agentAccess-grok
+        check wait_visible agentAccessFooter
+    done
 }
 
 capture() {
@@ -420,18 +444,11 @@ PYTHON
             check "$DRIVER" aligned Size chatTextSizeValue
         fi
         if [[ "$tab" == General ]]; then
-            "$DRIVER" reveal 'Check for Updates…'
-            sleep 0.5
-            check "$DRIVER" visible 'Check for Updates…'
+            "$DRIVER" scroll-wheel General -3000 pixel
+            check wait_visible 'Check for Updates…'
         fi
         if [[ "$tab" == Agents ]]; then
-            wait_exists agentAccess-grok
-            "$DRIVER" reveal agentAccess-grok
-            sleep 0.5
-            check "$DRIVER" visible agentAccess-grok
-            "$DRIVER" reveal agentAccessFooter
-            sleep 0.5
-            check "$DRIVER" visible agentAccessFooter
+            check_agents_scrolling
         fi
         settings_id="$("$DRIVER" wid "$tab")" \
             && screencapture -x -o -l "$settings_id" "$OUT/$appearance-settings-$(echo "$tab" | tr A-Z a-z).png" \
@@ -460,13 +477,12 @@ import sys
 expected, actual = (list(map(float, value.split())) for value in sys.argv[1:])
 assert all(abs(expected[index] - actual[index]) <= 1 for index in (2, 3)), (expected, actual)
 PYTHON
-        if [[ "$tab" == General ]]; then "$DRIVER" reveal 'Check for Updates…'; fi
+        if [[ "$tab" == General ]]; then
+            "$DRIVER" scroll-wheel General -3000 pixel
+            check wait_visible 'Check for Updates…'
+        fi
         if [[ "$tab" == Agents ]]; then
-            wait_exists agentAccess-grok
-            "$DRIVER" reveal agentAccess-grok
-            check "$DRIVER" visible agentAccess-grok
-            "$DRIVER" reveal agentAccessFooter
-            check "$DRIVER" visible agentAccessFooter
+            check_agents_scrolling
         fi
         settings_id="$("$DRIVER" wid "$tab")"
         screencapture -x -o -l "$settings_id" "$OUT/$appearance-settings-$tab-zoom.png"

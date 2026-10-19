@@ -335,6 +335,24 @@ commands and Settings > General change that same value. AppKit inserts a separat
 before the native `toggleFullScreen:` action after AppKit menu changes finish,
 because SwiftUI can discard a trailing command-group divider. The check
 uses the action selector and preserves an existing separator after menu rebuilds.
+This repair is incomplete in 0.1.15. A follow-up on 2026-10-18 reproduced a
+missing visible separator in the signed development bundle on macOS 27, in
+light appearance, after Zoom In (100% to 110%), Zoom Out (100% to 90%), Actual
+Size (125% to 100%), and entering or leaving Full Screen. Independent launches
+started with a visible separator before each zoom action. After the failure,
+the separator remained in the Accessibility tree, but its frame overlapped
+the Full Screen item: the gap below Actual Size fell from 11 pt to zero.
+Screenshots confirmed that the line was absent. Reopening View sometimes
+restored it after Zoom Out, but did not reliably repair the other states.
+Hiding the sidebar after a clean launch removed the entire Full Screen item,
+including on the next menu opening. Opening Settings could restore native menu
+layout; it is not a reliable repair contract. Settings tabs and the New Routine
+and Import sheets retained the separator in the initial checks before these
+transitions. The existing `MainMenuTests` exercise structural insertion only;
+a regression check must open the actual menu after each transition and verify
+the rendered separator, item geometry and continued presence of Full Screen.
+The native menu lifecycle cause and a repair remain open. Dark appearance was
+not checked while the light-appearance reproduction remained broken.
 `InterfaceScale` in the
 SwiftUI environment scales layout dimensions; semantic font modifiers resolve
 system fonts at their final size. `InterfacePicker` uses an `NSPopUpButton` with
@@ -440,12 +458,16 @@ The root modifier reads the observable scale inside its SwiftUI body. Reading it
 only when AppKit constructs a hosting controller freezes that window's initial
 scale. Verification must change the setting on an existing host and measure the
 resulting font or geometry, rather than merely check the selected percentage.
-Settings reports the form's actual geometry to AppKit after layout, coalescing
-updates to its natural `contentSize`. A callback resizes the selected pane's window
-within the screen's visible frame. The scroll controller must not publish the
-full document height as `preferredContentSize`: AppKit turns it into a viewport
-height constraint, defeating the screen cap and leaving the bottom unreachable.
-The document keeps its natural height while the viewport scrolls independently.
+Settings uses one scroll owner: the native grouped Form. Its hosting view fills
+the screen-capped viewport; do not give the Form a fixed ideal height or wrap it
+in another NSScrollView. That former arrangement could reveal lower controls
+through Accessibility while swallowing wheel input over the Form.
+`SettingsHostingView` reports its ideal `fittingSize` after native layout and
+coalesces changes into the pane's `contentSize`. Only intrinsic sizing is enabled,
+with low vertical compression resistance, so ideal content height does not force
+the viewport to grow. A callback fits the selected pane's window within the
+screen's visible frame. Keep its `preferredContentSize` unset: publishing the
+full ideal height would reintroduce a constraint on the viewport.
 The UI check stops at the first failure and completes light appearance before
 starting dark appearance, following the shared macOS UI verification rules.
 The UI check uses the native Command-0 and Command-Plus shortcuts for zoom, so
@@ -467,9 +489,23 @@ iTerm2, but its new tab's shell startup blocked in `brew shellenv` at `access()`
 before running it, so iTerm2 attachment remained unverified in that environment.
 Review must reach the last Agents action at maximum zoom in both appearances,
 assert its full visibility after scrolling, and change zoom on an already open
-window. Merely finding an offscreen Accessibility element is not evidence that
-the control is reachable. The driver checks every enclosing scroll viewport;
-a natural-height inner Form can contain a control that its outer viewport clips.
+window. Use real wheel input in both discrete line and continuous pixel modes,
+scrolling from `agentCLIsHeading` to `agentAccessFooter` and back. AXReveal and
+setting a scrollbar value bypass the event-delivery bug and do not establish
+that a person can scroll. The driver raises the exact window, moves the pointer
+over its content and posts through the system event tap; posting a scroll event
+to the app's pid alone does not reliably route it to that window. It restores
+the pointer after delivery and waits for visible targets after elastic scrolling.
+The isolated 0.1.15 release bundle, reidentified and signed as a development app,
+failed the footer-visibility check with both input modes at 150% in light
+appearance. Merely finding an offscreen Accessibility element is not evidence
+that the control is reachable. The driver checks every enclosing scroll viewport.
+A focused check of the single-Form implementation then passed General, Chat and
+Agents at 100% and 150%, in light before dark. Both wheel modes reached the
+Agents footer and returned to its first section; the last action and footer were
+fully visible, every capture passed the screen and layout bounds gate, and the
+captures were inspected. These are Settings checks, not a repeat of the full
+session and terminal scenario.
 Control-row reviews also measure vertical centers and
 exercise optional rows, including the enabled time limit.
 The UI layout gate checks the window frame against the screen's visible area,

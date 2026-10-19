@@ -20,6 +20,7 @@
 //   reveal <id-or-title>         scroll the nearest enclosing area to that element
 //   aligned <label> <control>    check that their vertical frame centers agree
 //   key <key>                   post Return or a zoom shortcut to Rota's process
+//   scroll-wheel <window> <delta> <pixel|line>  send real scroll input over the window's content
 //   confirm-iterm <text>         answer iTerm2's "OK to run" for a script path containing text
 //   gate                         list elements whose frame leaves their window or their parent
 import AppKit
@@ -289,6 +290,53 @@ case "gate":
         walk(window, parent: windowFrame, clip: .infinite)
     }
     print("\(violations) violations")
+case "scroll-wheel":
+    guard arguments.count == 4, let delta = Int32(arguments[2]), delta != 0,
+          ["pixel", "line"].contains(arguments[3]),
+          let window = windows().first(where: { matches($0, arguments[1]) }),
+          let rect = frame(window) else { fail("scroll-wheel <window> <nonzero delta> <pixel|line>") }
+    let continuous = arguments[3] == "pixel"
+    let units: CGScrollEventUnit = continuous ? .pixel : .line
+    let point = CGPoint(x: rect.midX, y: rect.midY)
+    let step: Int32 = (continuous ? 120 : 8) * (delta > 0 ? 1 : -1)
+    var remaining = delta
+    var first = true
+    app.activate()
+    guard AXUIElementPerformAction(window, kAXRaiseAction as CFString) == .success else { fail("cannot raise window") }
+    Thread.sleep(forTimeInterval: 0.1)
+    let previous = CGEvent(source: nil)?.location
+    guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                             mouseCursorPosition: point, mouseButton: .left) else { fail("no pointer event") }
+    move.post(tap: .cghidEventTap)
+    Thread.sleep(forTimeInterval: 0.1)
+    defer {
+        if let previous, let restore = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                                               mouseCursorPosition: previous, mouseButton: .left) {
+            restore.post(tap: .cghidEventTap)
+        }
+    }
+    while remaining != 0 {
+        let amount = abs(remaining) < abs(step) ? remaining : step
+        guard let event = CGEvent(scrollWheelEvent2Source: nil, units: units, wheelCount: 1,
+                                  wheel1: amount, wheel2: 0, wheel3: 0) else { fail("no scroll event") }
+        event.location = point
+        event.setIntegerValueField(.scrollWheelEventIsContinuous, value: continuous ? 1 : 0)
+        if continuous {
+            let phase: CGScrollPhase = first ? .began : .changed
+            event.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(phase.rawValue))
+        }
+        event.post(tap: .cghidEventTap)
+        remaining -= amount
+        first = false
+        Thread.sleep(forTimeInterval: 0.03)
+    }
+    if continuous, let end = CGEvent(scrollWheelEvent2Source: nil, units: units, wheelCount: 1,
+                                   wheel1: 0, wheel2: 0, wheel3: 0) {
+        end.location = point
+        end.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        end.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(CGScrollPhase.ended.rawValue))
+        end.post(tap: .cghidEventTap)
+    }
 case "key":
     // Keystrokes posted to Rota's process reach its key window even when System
     // Events keystrokes do not. Focus the target first with `focus`.
@@ -337,7 +385,7 @@ case "wid":
     }) else { fail("no window \(arguments[1])") }
     print(entry[kCGWindowNumber as String] ?? "")
 default:
-    fail("usage: tree | menu | press | set | value | exists | visible | bounds | text-count | in-toolbar | select | choose | window | wid | gate | focus | reveal | scroll-horizontal | aligned | key | confirm-iterm")
+    fail("usage: tree | menu | press | set | value | exists | visible | bounds | text-count | in-toolbar | select | choose | window | wid | gate | focus | reveal | scroll-horizontal | scroll-wheel | aligned | key | confirm-iterm")
 }
 
 func frame(_ element: AXUIElement) -> CGRect? {
