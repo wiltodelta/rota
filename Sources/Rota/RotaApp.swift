@@ -422,13 +422,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if mainWindow == nil {
             let content = MainWindow().interfaceScale(model.interfaceScale).environment(model)
             let hosting = NSHostingController(rootView: content)
-            hosting.sceneBridgingOptions = [.toolbars, .title]
-            let window = NSWindow(contentViewController: hosting)
-            window.title = "Rota"
+            hosting.sceneBridgingOptions = []
+            let window = NSWindow(contentViewController: MainWindowContainer(body: hosting))
             // One window: no tab bar, no tab items in the View and Window menus.
             window.tabbingMode = .disallowed
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
             window.toolbarStyle = .unified
+            window.toolbar = WindowToolbarOverlay.makeToolbar()
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
             window.setContentSize(NSSize(width: 1040, height: 680))
             window.contentMinSize = NSSize(width: 820, height: 520)
             window.isReleasedWhenClosed = false

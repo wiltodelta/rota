@@ -3,16 +3,23 @@
 // but AXPress and AXValue do. Usage: swift scripts/ui-driver.swift <command> ...
 //
 //   tree [depth]                 print roles, titles and identifiers of the windows
+//   menu <title>                invoke an app menu item by its title
 //   press <id-or-title>          press the first button with that identifier or title
 //   set <id> <text>              set a text field's value
 //   value <id>                   print an element's value
+//   visible <id-or-title>       require full visibility inside the window and scroll viewport
+//   in-toolbar <id>             require an element to remain inside the title-bar toolbar
+//   text-count <value>          count static text elements with that exact value
+//   bounds <id-or-title>        print x y width height in screen points
 //   exists <id-or-title>         exit 0 if an element with that identifier or title exists
 //   select <text> [n]            select the nth row (default first) containing that text
 //   choose <popup-id> <item>     pick an item from a pop-up button's menu
 //   window <title> <w> <h>       move a window to (100, 100) and resize it
 //   wid <title>                  print the window number of the window with that title
 //   focus <id>                   activate Rota and focus that element
-//   key return|option-return     post the key to Rota's process
+//   reveal <id-or-title>         scroll the nearest enclosing area to that element
+//   aligned <label> <control>    check that their vertical frame centers agree
+//   key <key>                   post Return or a zoom shortcut to Rota's process
 //   confirm-iterm <text>         answer iTerm2's "OK to run" for a script path containing text
 //   gate                         list elements whose frame leaves their window or their parent
 import AppKit
@@ -85,6 +92,12 @@ switch arguments.first {
 case "tree":
     let max = arguments.count > 1 ? Int(arguments[1]) ?? 12 : 12
     windows().forEach { dump($0, depth: 0, max: max) }
+case "menu":
+    guard arguments.count == 2,
+          let bar: AXUIElement = attribute(root, kAXMenuBarAttribute),
+          let item = find(in: bar, first: { matches($0, arguments[1]) }) else { fail("no menu item") }
+    let result = AXUIElementPerformAction(item, kAXPressAction as CFString)
+    guard result == .success else { fail("menu action failed: \(result.rawValue)") }
 case "press":
     guard arguments.count == 2 else { fail("press <id-or-title>") }
     guard let button = find({ matches($0, arguments[1]) && (attribute($0, kAXRoleAttribute) as String?) != "AXWindow" })
@@ -105,6 +118,41 @@ case "value":
 case "exists":
     guard arguments.count == 2 else { fail("exists <id-or-title>") }
     exit(find({ matches($0, arguments[1]) }) == nil ? 1 : 0)
+case "in-toolbar":
+    guard arguments.count == 2, let element = find({ matches($0, arguments[1]) }) else { fail("no element") }
+    var parent: AXUIElement? = attribute(element, kAXParentAttribute)
+    while let current = parent {
+        if (attribute(current, kAXRoleAttribute) as String?) == "AXToolbar" { exit(0) }
+        parent = attribute(current, kAXParentAttribute)
+    }
+    fail("element is outside the title-bar toolbar")
+case "text-count":
+    guard arguments.count == 2 else { fail("text-count <value>") }
+    var count = 0
+    _ = find({ element in
+        if (attribute(element, kAXRoleAttribute) as String?) == "AXStaticText",
+           (attribute(element, kAXValueAttribute) as String?) == arguments[1] { count += 1 }
+        return false
+    })
+    print(count)
+case "bounds", "visible":
+    guard arguments.count == 2, let element = find({
+        matches($0, arguments[1]) || (attribute($0, kAXValueAttribute) as String?) == arguments[1]
+    }),
+          let rect = frame(element) else { fail("no element frame") }
+    if arguments.first == "bounds" {
+        print("\(rect.minX) \(rect.minY) \(rect.width) \(rect.height)")
+    } else {
+        var parent: AXUIElement? = attribute(element, kAXParentAttribute)
+        while let current = parent {
+            let role: String = attribute(current, kAXRoleAttribute) ?? ""
+            if role == "AXScrollArea" || role == "AXWindow", let viewport = frame(current),
+               !viewport.insetBy(dx: -0.5, dy: -0.5).contains(rect) {
+                fail("element is outside its visible viewport: \(arguments[1])")
+            }
+            parent = attribute(current, kAXParentAttribute)
+        }
+    }
 case "select":
     guard arguments.count >= 2 else { fail("select <text> [nth match, from 1]") }
     let text = arguments[1]
@@ -147,6 +195,54 @@ case "window":
     var size = CGSize(width: width, height: height)
     AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, AXValueCreate(.cgPoint, &origin)!)
     AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, AXValueCreate(.cgSize, &size)!)
+case "aligned":
+    func alignmentFrame(_ key: String, textOnly: Bool = false) -> CGRect? {
+        guard let element = find({
+            let isText = (attribute($0, kAXRoleAttribute) as String?) == "AXStaticText"
+            if textOnly && !isText { return false }
+            return matches($0, key) || (isText
+                && (attribute($0, kAXValueAttribute) as String?) == key)
+        }) else { return nil }
+        return frame(element)
+    }
+    guard arguments.count == 3, let label = alignmentFrame(arguments[1], textOnly: true),
+          let control = alignmentFrame(arguments[2]) else { fail("aligned <label> <control>") }
+    let difference = abs(label.midY - control.midY)
+    guard difference <= 0.75 else { fail("vertical centers differ by \(difference) pt") }
+case "scroll-horizontal":
+    guard arguments.count == 2, let target = find({ matches($0, arguments[1]) }),
+          let bar = children(target).first(where: {
+              (attribute($0, kAXRoleAttribute) as String?) == "AXScrollBar"
+                  && (attribute($0, kAXOrientationAttribute) as String?) == "AXHorizontalOrientation"
+          }) else { fail("no horizontal scrollbar") }
+    guard AXUIElementSetAttributeValue(bar, kAXValueAttribute as CFString, 1 as CFNumber) == .success
+        else { fail("horizontal scroll failed") }
+case "reveal":
+    guard arguments.count == 2, let target = find({ matches($0, arguments[1]) }),
+          let targetFrame = frame(target) else { fail("reveal <id-or-title>") }
+    var element = target
+    var foundScrollArea = false
+    while let parent: AXUIElement = attribute(element, kAXParentAttribute) {
+        element = parent
+        guard (attribute(parent, kAXRoleAttribute) as String?) == "AXScrollArea",
+              let viewport = frame(parent) else { continue }
+        foundScrollArea = true
+        // A Form exposes an inner scroll area as tall as its natural content.
+        // Its outer viewport may still clip a target that fits this inner area.
+        if viewport.contains(targetFrame) { continue }
+        let contents = children(parent)
+        guard let bar = contents.first(where: {
+            (attribute($0, kAXRoleAttribute) as String?) == "AXScrollBar"
+                && (frame($0).map { $0.height > $0.width } ?? false)
+        }), let document = contents.compactMap({ frame($0) }).max(by: { $0.height < $1.height }),
+        document.height > viewport.height else { fail("no vertical scroll range") }
+        let offset = targetFrame.midY - document.minY - viewport.height / 2
+        let fraction = min(max(offset / (document.height - viewport.height), 0), 1)
+        let result = AXUIElementSetAttributeValue(bar, kAXValueAttribute as CFString, fraction as CFNumber)
+        guard result == .success else { fail("scroll failed: \(result.rawValue)") }
+        exit(0)
+    }
+    guard foundScrollArea else { fail("no enclosing scroll area") }
 case "gate":
     var violations = 0
     let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
@@ -196,12 +292,17 @@ case "gate":
 case "key":
     // Keystrokes posted to Rota's process reach its key window even when System
     // Events keystrokes do not. Focus the target first with `focus`.
-    guard arguments.count == 2 else { fail("key return|option-return|shift-return|control-return") }
-    let modifiers: [String: CGEventFlags] = ["option-return": .maskAlternate, "shift-return": .maskShift,
-                                             "control-return": .maskControl]
-    let flags = modifiers[arguments[1]] ?? []
+    let keys: [String: (CGKeyCode, CGEventFlags)] = [
+        "return": (36, []), "option-return": (36, .maskAlternate),
+        "shift-return": (36, .maskShift), "control-return": (36, .maskControl),
+        "command-zero": (29, .maskCommand), "command-plus": (24, [.maskCommand, .maskShift]),
+        "command-minus": (27, .maskCommand)
+    ]
+    guard arguments.count == 2, let (code, flags) = keys[arguments[1]] else { fail("unknown key") }
+    app.activate()
+    Thread.sleep(forTimeInterval: 0.1)
     for down in [true, false] {
-        guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: down) else { fail("no event") }
+        guard let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down) else { fail("no event") }
         event.flags = flags
         event.postToPid(app.processIdentifier)
         Thread.sleep(forTimeInterval: 0.05)
@@ -229,12 +330,14 @@ case "wid":
     guard arguments.count == 2 else { fail("wid <title>") }
     let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
     guard let entry = list.first(where: {
-        ($0[kCGWindowOwnerPID as String] as? Int32) == app.processIdentifier
+        let bounds = $0[kCGWindowBounds as String] as? [String: Double]
+        return ($0[kCGWindowOwnerPID as String] as? Int32) == app.processIdentifier
             && ($0[kCGWindowName as String] as? String) == arguments[1]
+            && (bounds?["Height"] ?? 0) > 40
     }) else { fail("no window \(arguments[1])") }
     print(entry[kCGWindowNumber as String] ?? "")
 default:
-    fail("usage: tree | press | set | value | exists | select | choose | window | wid | gate | focus | key | confirm-iterm")
+    fail("usage: tree | menu | press | set | value | exists | visible | bounds | text-count | in-toolbar | select | choose | window | wid | gate | focus | reveal | scroll-horizontal | aligned | key | confirm-iterm")
 }
 
 func frame(_ element: AXUIElement) -> CGRect? {

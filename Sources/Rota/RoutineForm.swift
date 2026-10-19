@@ -32,6 +32,7 @@ struct RoutineForm: View {
                     Button(interfaceTitle: "Choose\u{2026}") { chooseFolder() }
                 }
             }
+            .labeledContentStyle(InterfaceFormRowStyle())
             if !draft.workingDirectory.isEmpty && !FileManager.default.fileExists(atPath: draft.workingDirectory) {
                 Label("No folder at this path.", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(Color.errorText)
@@ -64,6 +65,7 @@ struct RoutineForm: View {
             }
         }
         .formStyle(.grouped)
+        .toggleStyle(InterfaceFormToggleStyle())
     }
 
     private func chooseFolder() {
@@ -109,6 +111,7 @@ private struct ScheduleField: View {
                     .accessibilityIdentifier("schedulePresets")
                 }
             }
+            .labeledContentStyle(InterfaceFormRowStyle())
             Group {
                 switch Result(catching: { try CronSchedule(schedule) }) {
                 case .success(let cron):
@@ -217,9 +220,17 @@ private struct TimeLimitField: View {
         ))
         .accessibilityIdentifier("routineTimeLimit")
         if let limit = minutes {
-            Stepper(value: Binding(get: { limit }, set: { minutes = $0 }), in: 5...1440, step: 5) {
-                LabeledContent("Stop a run after", value: Self.text(limit))
+            LabeledContent("Stop a run after") {
+                HStack {
+                    Text(Self.text(limit))
+                    Stepper("Stop a run after", value: Binding(get: { limit }, set: { minutes = $0 }),
+                            in: 5...1440, step: 5)
+                        .labelsHidden()
+                        .accessibilityIdentifier("routineTimeLimitValue")
+                }
+                .fixedSize()
             }
+            .labeledContentStyle(InterfaceFormRowStyle())
         }
     }
 

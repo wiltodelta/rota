@@ -78,10 +78,12 @@ Desktop.
   bar panel.
 - **Interface scale.** Settings > General scales app content from 80% to 150%.
   View > Zoom In, Zoom Out and Actual Size (Command-Plus, Command-Minus,
-  Command-0) adjust it immediately. Text and icons render at their new size.
+  Command-0) adjust it immediately. Toolbar height, buttons, backgrounds, text
+  and Settings tabs grow together. Text and icons render at their new size.
 - **Readable chat text.** Settings > Chat independently controls the chat's
   font, monospaced font for commands and output, and base text size.
-- **Agent Markdown as it is meant to read:** headings, lists and code blocks.
+- **Agent Markdown as it is meant to read:** headings, lists, code blocks and
+  tables with wrapping, content-based column widths and horizontal scrolling.
 - **Notifications** when a run fails, times out or cannot start, and when a
   missed slot is skipped; click one to open its session. Successes notify too if you ask for it. A routine
   whose last five scheduled runs failed pauses itself and says so.

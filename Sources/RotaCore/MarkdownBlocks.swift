@@ -1,7 +1,7 @@
 import Foundation
 
 /// The block structure of an agent's Markdown message: headings, list items,
-/// fenced code and paragraphs. SwiftUI's `Text` renders only inline Markdown, so
+/// fenced code, tables and paragraphs. SwiftUI's `Text` renders only inline Markdown, so
 /// without this a heading reads as "## Summary" and a list as dashes.
 public enum MarkdownBlock: Equatable, Sendable {
     case heading(level: Int, text: String)
@@ -10,6 +10,7 @@ public enum MarkdownBlock: Equatable, Sendable {
     /// `language` is the fence's info word ("swift", "bash"), nil when it has none.
     case code(String, language: String? = nil)
     case paragraph(String)
+    case table(MarkdownTable)
 
     public static func parse(_ text: String) -> [MarkdownBlock] {
         var blocks: [MarkdownBlock] = []
@@ -22,7 +23,11 @@ public enum MarkdownBlock: Equatable, Sendable {
             paragraph = []
         }
 
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+            defer { index += 1 }
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("```") {
                 if let open = code {
@@ -38,6 +43,11 @@ public enum MarkdownBlock: Equatable, Sendable {
             }
             if code != nil {
                 code?.append(line)
+                continue
+            }
+            if let table = MarkdownTable.parse(lines, index: &index) {
+                flush()
+                blocks.append(.table(table))
                 continue
             }
             if trimmed.isEmpty {

@@ -52,7 +52,6 @@ struct SessionView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle(routine.name)
         .task(id: RefreshKey(record: record.id, running: running, version: model.scheduler.historyVersion)) {
             // Follow the log while the session works; read it once otherwise.
             repeat {

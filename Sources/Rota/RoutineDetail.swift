@@ -51,7 +51,6 @@ struct RoutineDetail: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle(routine.name)
         .sheet(isPresented: Binding(
             get: { model.editingRoutineID == routine.id },
             set: { if !$0 { model.editingRoutineID = nil } }

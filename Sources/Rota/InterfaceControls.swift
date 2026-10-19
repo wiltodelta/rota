@@ -38,11 +38,42 @@ struct InterfacePicker<Selection: Hashable>: View {
     var hidesLabel = false
 
     var body: some View {
-        if hidesLabel { popup } else { LabeledContent(title) { popup } }
+        if hidesLabel {
+            popup
+        } else {
+            LabeledContent(title) { popup }.labeledContentStyle(InterfaceFormRowStyle())
+        }
     }
 
     private var popup: some View {
         InterfacePopUp(selection: $selection, choices: choices, title: title, identifier: identifier)
+    }
+}
+
+/// The grouped form's default alignment puts labels above larger native controls.
+/// Give both views the same vertical center while keeping their label association.
+struct InterfaceFormRowStyle: LabeledContentStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .center) {
+            configuration.label
+            Spacer()
+            configuration.content
+        }
+    }
+}
+
+struct InterfaceFormToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        LabeledContent {
+            Toggle(configuration)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                // The custom row retains the checkbox role but loses the inferred press action.
+                .accessibilityAction { configuration.isOn.toggle() }
+        } label: {
+            configuration.label
+        }
+        .labeledContentStyle(InterfaceFormRowStyle())
     }
 }
 

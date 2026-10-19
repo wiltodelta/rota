@@ -55,3 +55,43 @@ final class CodeFenceLanguageTests: XCTestCase {
         XCTAssertEqual(MarkdownBlock.parse("```\nls\n```"), [.code("ls", language: nil)])
     }
 }
+
+final class MarkdownTableTests: XCTestCase {
+    func testTableBetweenParagraphsPreservesInlineMarkdownAndAlignment() {
+        let source = """
+        Before.
+        | # | Пункт | Результат |
+        | ---: | :--- | :---: |
+        | 1 | Длинное описание | **Готово**, `field_name` |
+        | 2 | Следующий пункт | Проверено |
+
+        After.
+        """
+        XCTAssertEqual(MarkdownBlock.parse(source), [
+            .paragraph("Before."),
+            .table(MarkdownTable(headers: ["#", "Пункт", "Результат"],
+                                 alignments: [.right, .left, .center],
+                                 rows: [["1", "Длинное описание", "**Готово**, `field_name`"],
+                                        ["2", "Следующий пункт", "Проверено"]])),
+            .paragraph("After.")
+        ])
+    }
+
+    func testOptionalOuterPipesEscapesAndRaggedRows() {
+        let source = "A | B\n--- | ---\nx\\|y | `a\\|b`\nshort |\n1 | 2 | ignored"
+        XCTAssertEqual(MarkdownBlock.parse(source), [
+            .table(MarkdownTable(headers: ["A", "B"], alignments: [.left, .left],
+                                 rows: [["x|y", "`a|b`"], ["short", ""], ["1", "2"]]))
+        ])
+    }
+
+    func testOnlyMatchingDelimiterRowsStartTablesAndFencesStayLiteral() {
+        for source in ["a | b\n--- | invalid", "a | b\n---", "a | b\n--- | --- | ---"] {
+            XCTAssertEqual(MarkdownBlock.parse(source), [.paragraph(source)])
+        }
+        XCTAssertEqual(MarkdownBlock.parse("```\na | b\n--- | ---\n```"), [.code("a | b\n--- | ---")])
+        XCTAssertEqual(MarkdownBlock.parse("| a | b |\n| --- | --- |"), [
+            .table(MarkdownTable(headers: ["a", "b"], alignments: [.left, .left], rows: []))
+        ])
+    }
+}

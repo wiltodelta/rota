@@ -145,6 +145,7 @@ private struct PermissionRow: View {
                 Button(interfaceTitle: "Allow\u{2026}", action: request)
             }
         }
+        .labeledContentStyle(InterfaceFormRowStyle())
     }
 }
 
@@ -160,6 +161,7 @@ private struct SettingsPaneModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content.formStyle(.grouped)
+            .toggleStyle(InterfaceFormToggleStyle())
             .frame(width: scale.sheetWidth(520))
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -231,6 +233,7 @@ private struct ExecutablePicker: View {
 /// Lets agent sessions create and manage routines: the `rota` command, and
 /// `rota mcp` added to each agent CLI as an MCP server.
 private struct AgentAccessSection: View {
+    @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     @State private var commandInstalled = AgentAccess.commandInstalled()
     @State private var added: [Harness: Bool] = [:]
@@ -246,8 +249,11 @@ private struct AgentAccessSection: View {
                     Button(interfaceTitle: "Install") { installCommand() }
                 }
             } label: {
-                Text("rota command")
-                Text(AgentAccess.commandLink().path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                VStack(alignment: .leading, spacing: metrics.points(2)) {
+                    Text("rota command")
+                    Text(AgentAccess.commandLink().path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                        .foregroundStyle(Color.secondaryText)
+                }
             }
             ForEach(Harness.agents) { harness in
                 LabeledContent(harness.title) {
@@ -270,7 +276,9 @@ private struct AgentAccessSection: View {
             Text("An agent with Rota added can create, change, run and read routines; a routine it adds runs on its "
                  + "schedule and Rota tells you. In a terminal, run rota help.")
                 .foregroundStyle(Color.secondaryText)
+                .accessibilityIdentifier("agentAccessFooter")
         }
+        .labeledContentStyle(InterfaceFormRowStyle())
         .task { await refresh() }
     }
 
@@ -390,11 +398,15 @@ private struct ChatTextSection: View {
             LabeledContent("Size") {
                 HStack {
                     Slider(value: $text.size, in: ChatTextSettings.sizes, step: 1)
+                        .accessibilityIdentifier("chatTextSize")
                     Text("\(Int(text.size)) pt")
                         .monospacedDigit()
+                        .foregroundStyle(Color.secondaryText)
                         .frame(width: metrics.points(44), alignment: .trailing)
+                        .accessibilityIdentifier("chatTextSizeValue")
                 }
             }
+            .labeledContentStyle(InterfaceFormRowStyle())
             VStack(alignment: .leading, spacing: metrics.points(6)) {
                 Text("Clicks are down 8% week over week.").font(text.body)
                 Text("$ git log --oneline -5").font(text.code).foregroundStyle(Color.secondaryText)

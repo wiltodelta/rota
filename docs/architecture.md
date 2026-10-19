@@ -192,10 +192,28 @@ flowchart LR
   `TranscriptTurn.group` preserves their existing inferred turn layout. Legacy
   continuation does not manufacture a normalized history from old log text.
 - Agent text renders through `MarkdownBlock` (headings, list items, fenced
-  code, paragraphs; inline Markdown inside each), because SwiftUI `Text` draws
+  code, pipe tables, paragraphs; inline Markdown inside each), because SwiftUI `Text` draws
   inline Markdown only. Typed messages preserve their complete text, including
   service-looking prefixes and code fences; the legacy parser keeps a fenced
-  block with blank lines in one message.
+  block with blank lines in one message. Pipe tables require a header and matching
+  delimiter row. They preserve cell alignment, escaped pipes and inline styles;
+  short rows are padded and excess cells ignored. `MarkdownTableView` shares
+  column widths across rows, wraps text and scales fonts and padding with the
+  chat preferences and interface zoom. Column widths use visible cell text,
+  excluding Markdown syntax and link destinations. Compact columns keep their
+  natural width; longer columns share the remaining space by the square root of
+  their longest cell's character count, balancing wrapping without giving long
+  descriptions and short values equal space. These proportions survive narrow
+  layouts and zoom; a six-em minimum protects readable words, and wide tables
+  scroll horizontally inside the message without widening the transcript.
+  Content-proportional widths are regression-tested and measured in the running
+  app at 100% and 150%, in both appearances at 820 by 520 pt.
+  Focused verification on 2026-10-18 used synthetic Russian cells in the signed
+  development app at 820 pt width, including the 520 pt minimum height, 80%,
+  100% and 150% zoom and a 28 pt chat font. Light was checked before dark.
+  At 80%, native `AXLink` hit bounds extend 1 pt beyond their parent `Text`,
+  both in ordinary paragraphs and in table cells. The layout gate reports that
+  native overhang; the links remain inside the padded row and render unclipped.
 - Scheduling follows Claude Desktop's policy: a missed slot runs once late, as
   `RunTrigger.catchUp`, when under `missedRunGrace` (7 days) old, otherwise a
   skip is recorded; an overlap is skipped without a notification. Skips stay
@@ -323,7 +341,21 @@ system fonts at their final size. `InterfacePicker` uses an `NSPopUpButton` with
 an explicit final font, because SwiftUI's macOS Picker retains its default title
 font even when the surrounding environment font changes. Popup values align
 right beside their arrows; the native intrinsic width includes the longest menu
-item, so default alignment leaves short values far from the arrow. Native button labels
+item, so default alignment leaves short values far from the arrow. Control rows
+in Settings and routine forms use `InterfaceFormRowStyle` to center their labels;
+pickers apply it themselves too. The default grouped form places labels above
+popup values and, at larger control sizes, above buttons and switches.
+The Chat size row uses it for the slider and its formatted value as well.
+`InterfaceFormToggleStyle` keeps the native switch in that same centered row.
+Its explicit accessibility press action forwards to the toggle binding: the
+custom row otherwise keeps the checkbox role and value but exposes no action.
+The UI check enables and disables the routine's time limit to verify that action
+and its resulting control, not just the accessibility call's return code.
+The optional time-limit row centers its label, formatted value and native stepper
+in that same layout; the UI check measures their vertical centers after revealing it.
+Multi-line labels stay in an explicit leading-aligned stack so the whole label
+block, rather than its first line, aligns with the control.
+Native button labels
 also receive an explicit scaled font. Menu items keep the system font.
 Chat fonts multiply their base size by the same
 observable scale without rewriting chat preferences. No layer, bitmap or view
@@ -333,18 +365,113 @@ views can shrink below their old 520 pt minimum, sheets cap their width at 780 p
 and the panel retains its 340 pt width while content reflows. Its footer moves
 whole actions to two rows when they no longer fit. Import caps its height at
 500 pt so its action row remains inside the minimum-height window. System-owned menus,
-window chrome, Settings toolbar tabs and file dialogs retain their native size.
+window chrome and file dialogs retain their native size. Preserve the original
+main-toolbar presentation: navigation and title start beside the actual sidebar,
+with the import/new action pair at the trailing edge. Keep native Settings tabs.
+`MainWindowToolbar` scales symbols, type, glass shapes and spacing in logical
+points. Its circular surface is 36 pt, the two-action capsule 64 x 36 pt, and the
+bar 52 pt at 100%; all grow with zoom. The bar retains a native 52 pt minimum.
+`WindowToolbarOverlay` places these controls in the existing title-bar region,
+above the unchanged full-size split view. The hosting controller and overlay
+share the AppKit root of `MainWindowContainer`; never add subviews inside the
+hosting controller's managed view. Both pinned hosting views disable automatic
+sizing constraints; the main window owns its explicit minimum size, and long
+content must reflow or truncate instead of expanding the window. A native title-bar accessory reserves
+additional height. Do not insert a separate row above the sidebar or move the
+controls to the window's leading edge. Both glass surfaces use real interactive
+Liquid Glass on macOS 26+, with a material fallback on older systems.
+An empty native toolbar preserves window chrome; it must use `iconOnly`, because
+its default display mode adds 14 pt even without visible items. Position the
+overlay in window coordinates: the hosting view's alignment rectangle can extend
+above the window, so its top anchor is not the visible window top. Removing the
+representable also removes its overlay and accessory. Native autoresizing keeps
+the overlay at full width and attached to the top during window resizing; do not
+rely on `NSWindow.didUpdate` or a SwiftUI rebuild to update its frame. Native traffic lights keep
+their system placement. SwiftUI toolbar/title bridging stays off; the selection
+sets the window's accessible name and the scaled visible title. The split view
+and its detail views omit `navigationTitle` preferences so this component owns
+the visible title and window name together. Window updates reconcile that name
+too: native setup can replace an initially installed title with `Untitled`
+without another SwiftUI body update.
+Long titles
+truncate before the trailing actions. Text and blank toolbar space retain window
+dragging through `WindowDragGesture`.
+The standard unified toolbar stays 52 pt high when an item requests more height.
+Transforming its bounds is not a supported zoom solution: sidebar tracking uses
+window coordinates and system glass keeps its own sizing. Never ship such a
+transform, a fixed cap on enlarged glass, or a replacement layout that changes
+the original visible grouping and placement. Review must measure the whole bar,
+both glass surfaces, common vertical centers and equal vertical margins during
+live zoom changes, sidebar toggles, long titles and minimum-width resizing.
+Assert the actual capture width after resizing. Reopening the sidebar at minimum
+width can enlarge the window by the sidebar and divider width; restore 820 pt
+before judging a long title at minimum width, rather than attributing that earlier
+resize to the title.
+Focused toolbar verification on 2026-10-18 used the signed development bundle
+and disabled synthetic routines. All six live zoom levels, 80-150%, passed in
+light appearance before the same checks ran in dark appearance. Captures covered
+820 pt width, 520 pt height, sidebar visibility, long names, renaming and the
+new/import sheets. Ten consecutive native resize states passed; window captures
+and ScreenCaptureKit composites were inspected. The native-window regression
+fixtures detected deliberate display-mode, autoresizing and position mutations.
+Settings keeps the native General, Chat and Agents toolbar tabs in their original
+order and placement. `ScalableSettingsTabController` supplies a plain view around
+each native button, with proportional symbols and captions on a common baseline.
+Putting an `NSControl` directly in the toolbar lets AppKit normalize its font.
+The tab controller also caches the first item height, so live zoom replaces the
+native toolbar with the same identifiers, delegate and selection to remeasure it.
+Set its display mode to `iconOnly` after attaching it to the window too: attachment
+can restore `iconAndLabel` and duplicate the custom caption. The selected tab and
+native selection background survive zoom and pane changes. Unit fixtures measure
+all six scales; the UI check measures live growth, allowing for fixed native AX
+hit insets and system-font optical sizing. The selected caption uses the system
+link text color in light appearance and a lighter blue in dark appearance. Accent
+fill blue is too faint in light appearance; native link blue is too dark on the
+dark selection background. Each tab exposes one accessible
+button; its decorative image and caption are excluded from the wrapper's children.
+Final caption verification on 2026-10-18 measured 4.62:1 in light and 5.25:1 in
+dark at 100%, using the capture's embedded profile and calibrated gray swatches.
+After the dark caption color changed, all three Settings panes were rendered and
+measured again at 100% and 150%, in light before dark, including the last Agents
+action and footer after scrolling.
+
 New views must use the shared scaled fonts and point dimensions for app content.
 The root modifier reads the observable scale inside its SwiftUI body. Reading it
 only when AppKit constructs a hosting controller freezes that window's initial
 scale. Verification must change the setting on an existing host and measure the
 resulting font or geometry, rather than merely check the selected percentage.
 Settings reports the form's actual geometry to AppKit after layout, coalescing
-updates to its natural `contentSize`. A callback resizes the selected tab's window
+updates to its natural `contentSize`. A callback resizes the selected pane's window
 within the screen's visible frame. The scroll controller must not publish the
 full document height as `preferredContentSize`: AppKit turns it into a viewport
 height constraint, defeating the screen cap and leaving the bottom unreachable.
 The document keeps its natural height while the viewport scrolls independently.
+The UI check stops at the first failure and completes light appearance before
+starting dark appearance, following the shared macOS UI verification rules.
+The UI check uses the native Command-0 and Command-Plus shortcuts for zoom, so
+menu validation runs. A closed SwiftUI menu can retain a stale disabled state
+after zoom resets; direct AXPress may report success while dropping the first
+Zoom In action. Other menu actions remain available through the AX driver.
+It restores development defaults and any existing terminal command files after
+the run, and stops development-owned MCP inspection children before quitting
+their parent. The default terminal coverage includes iTerm2 when installed;
+`ROTA_UI_TERMINAL=terminal` explicitly uses Terminal for both appearances when
+another terminal's shell startup is blocked. This override is printed and does
+not verify iTerm2. A synthetic historical message exercises the shipping Markdown table
+inside the chat at normal and maximum zoom, including horizontal scrolling.
+Agent access checks wait for asynchronous CLI discovery before requiring its
+Add or Remove buttons; a busy indicator is not the final action to measure.
+Release verification on 2026-10-18 completed the full UI scenario in light before
+dark, using Terminal for both. Rota's live log confirmed opening the command in
+iTerm2, but its new tab's shell startup blocked in `brew shellenv` at `access()`
+before running it, so iTerm2 attachment remained unverified in that environment.
+Review must reach the last Agents action at maximum zoom in both appearances,
+assert its full visibility after scrolling, and change zoom on an already open
+window. Merely finding an offscreen Accessibility element is not evidence that
+the control is reachable. The driver checks every enclosing scroll viewport;
+a natural-height inner Form can contain a control that its outer viewport clips.
+Control-row reviews also measure vertical centers and
+exercise optional rows, including the enabled time limit.
 The UI layout gate checks the window frame against the screen's visible area,
 including menu bar and Dock exclusions, as well as checking the controls inside it.
 The hosting controller's cached preferred size alone does not update an already
@@ -362,8 +489,9 @@ Layout rules learned while measuring the narrowest window (820 pt):
   so history growth does not push routine navigation below it. `SessionView`
   is the chat with its composer. A routine's view
   is its header and sessions; the settings form, used rarely, is a sheet
-  (`EditRoutineSheet`). A `Form` is never inside a `ScrollView`: it scrolls
-  itself and, nested, lays out at its ideal width and overflows. Inside the old
+  (`EditRoutineSheet`). Do not nest a `Form` in a SwiftUI `ScrollView`: it scrolls
+  itself and, nested, lays out at its ideal width and overflows. The native
+  Settings adapter above sets its document dimensions explicitly. Inside the old
   `VSplitView` it also left a 41 pt empty strip at the window's right edge.
 - Never put a log or chat in an `HSplitView`: the split view sizes panes by
   their ideal width, and a log's ideal is its longest line, which overflowed

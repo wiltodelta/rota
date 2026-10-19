@@ -14,31 +14,33 @@ struct MarkdownText: View {
             ForEach(Array(MarkdownBlock.parse(source).enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .heading(let level, let content):
-                    Text(inline(content))
+                    Text(inlineMarkdown(content))
                         .font(text.heading(level: level))
                         .padding(.top, metrics.points(4))
                 case .listItem(let marker, let content, let indent):
                     HStack(alignment: .firstTextBaseline, spacing: metrics.points(6)) {
                         Text(marker).foregroundStyle(Color.secondaryText)
-                        Text(inline(content))
+                        Text(inlineMarkdown(content))
                     }
                     .font(text.body)
                     .padding(.leading, CGFloat(indent) * 16)
                 case .code(let content, let language):
                     CodeBlockView(code: content, language: language)
+                case .table(let table):
+                    MarkdownTableView(table: table, text: text)
                 case .paragraph(let content):
-                    Text(inline(content)).font(text.body)
+                    Text(inlineMarkdown(content)).font(text.body)
                 }
             }
         }
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
 
-    private func inline(_ text: String) -> AttributedString {
-        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
-    }
+func inlineMarkdown(_ text: String) -> AttributedString {
+    let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+    return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
 }
 
 /// A fenced code block as super.engineering draws one: a header with the

@@ -3,12 +3,11 @@ import SwiftUI
 
 /// Settings in toolbar tabs, as macOS apps lay them out: General, Chat and
 /// Agents. The window takes each tab's height and remembers the last tab.
-final class SettingsTabController: NSTabViewController {
+final class SettingsTabController: ScalableSettingsTabController {
     private static let lastTab = "settingsTab"
 
     init(model: AppModel) {
-        super.init(nibName: nil, bundle: nil)
-        tabStyle = .toolbar
+        super.init(scale: model.interfaceScale)
         add(GeneralSettings(), label: "General", symbol: "gearshape", model: model)
         add(ChatSettings(), label: "Chat", symbol: "textformat.size", model: model)
         add(AgentSettings(), label: "Agents", symbol: "terminal", model: model)
@@ -23,6 +22,7 @@ final class SettingsTabController: NSTabViewController {
         // The tab controller copies the selected child's title to the window.
         hosting.title = label
         let item = NSTabViewItem(viewController: hosting)
+        item.identifier = label
         item.label = label
         item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
         hosting.onContentSizeChange = { [weak self, weak hosting] in

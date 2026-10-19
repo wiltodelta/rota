@@ -13,14 +13,26 @@ struct MainWindow: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
 
+    @State private var sidebarWidth: CGFloat = 280
+
     private var records: [RunRecord] {
         _ = model.scheduler.historyVersion
         return model.scheduler.allRecords()
     }
 
+    private func title(_ records: [RunRecord]) -> String {
+        switch model.selection {
+        case .routine(let id): model.scheduler.routine(id)?.name ?? "Rota"
+        case .session(let id):
+            records.first(where: { $0.id == id }).flatMap { model.scheduler.routine($0.routineID)?.name } ?? "Rota"
+        case nil: "Rota"
+        }
+    }
+
     var body: some View {
         @Bindable var model = model
         let records = records
+        let title = title(records)
         // Dragging the divider shut hides the list too, and the binding keeps that.
         NavigationSplitView(columnVisibility: Binding(
             get: { model.sidebarVisible ? .all : .detailOnly },
@@ -49,6 +61,8 @@ struct MainWindow: View {
                     }
                 }
             }
+            .accessibilityIdentifier("routineSidebar")
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { sidebarWidth = $0 }
             .navigationSplitViewColumnWidth(min: min(metrics.points(240), 280),
                                             ideal: min(metrics.points(280), 360),
                                             max: metrics.points(360))
@@ -67,28 +81,14 @@ struct MainWindow: View {
         } detail: {
             detail(records)
         }
-        .navigationTitle("Rota")
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button { model.sidebarVisible.toggle() } label: {
-                    Label(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.left")
-                }
-                .help("\(model.sidebarVisible ? "Hide" : "Show") the sidebar (Control-Command-S)")
-                .accessibilityIdentifier("toggleSidebar")
-            }
-            ToolbarItemGroup {
-                Button { model.presentingImport = true } label: {
-                    Label("Import Routines", systemImage: "square.and.arrow.down")
-                }
-                .help("Import routines from Claude Desktop or Codex")
-                .accessibilityIdentifier("import")
-                Button { model.presentingNew = true } label: {
-                    Label("New Routine", systemImage: "plus")
-                }
-                .help("New Routine")
-                .accessibilityIdentifier("newRoutine")
-            }
-        }
+        .background(WindowToolbarOverlay(
+            content: AnyView(MainWindowToolbar(title: title, sidebarWidth: model.sidebarVisible ? sidebarWidth : 0,
+                                              toggleSidebar: { model.sidebarVisible.toggle() },
+                                              importRoutines: { model.presentingImport = true },
+                                              newRoutine: { model.presentingNew = true })
+                .interfaceScale(model.interfaceScale)),
+            height: max(52, metrics.points(52)), title: title
+        ).frame(width: 0, height: 0))
         .sheet(isPresented: $model.presentingImport) { ImportSheet() }
         .sheet(isPresented: $model.presentingNew) { NewRoutineSheet() }
         .confirmationDialog("Delete Session?", isPresented: Binding(
@@ -161,7 +161,6 @@ struct MainWindow: View {
                 Text("Select a session").foregroundStyle(Color.secondaryText)
             }
         }
-        .navigationTitle("Rota")
     }
 }
 
