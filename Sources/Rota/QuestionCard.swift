@@ -2,43 +2,42 @@ import AppKit
 import RotaCore
 import SwiftUI
 
-/// A bounded, scrollable form. Only the footer submits, and no option is preselected.
+/// Question controls inside the transcript scroll view. No option is preselected.
 struct QuestionCard: View {
     @Environment(\.interfaceScale) private var metrics
-    let question: AgentQuestion
+    @Bindable var draft: QuestionDraft
+    private var question: AgentQuestion { draft.question }
     let submit: (QuestionAnswer) throws -> Void
-    @State private var values: [String: [String]] = [:]
-    @State private var other: [String: String] = [:]
-    @State private var customFields: Set<String> = []
     @FocusState private var focusedField: String?
-    @State private var failure: String?
-    @State private var contentHeight: CGFloat?
-
-    private enum Selection: Hashable { case option(String), other }
 
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.points(10)) {
-            Label(question.title, systemImage: "exclamationmark.bubble.fill")
-                .interfaceFont(.headline)
-                .accessibilityIdentifier("questionTitle")
-            ScrollView {
-                VStack(alignment: .leading, spacing: metrics.points(16)) {
-                    if !question.detail.isEmpty {
-                        Text(question.detail).interfaceFont(.body).textSelection(.enabled)
-                    }
-                    if let text = question.url, let url = URL(string: text), ["https", "http"].contains(url.scheme) {
-                        Link(destination: url) { Text("Open in Browser").interfaceFont(.body) }
-                    }
-                    ForEach(question.fields) { field in fieldView(field) }
+            HStack {
+                Text(question.title).interfaceFont(question.fields.isEmpty ? .headline : .callout)
+                    .foregroundStyle(question.fields.isEmpty ? Color.primary : Color.secondaryText)
+                    .accessibilityIdentifier("questionTitle")
+                Spacer(minLength: metrics.points(8))
+                if question.fields.count > 1 {
+                    Text("\(draft.fieldIndex + 1) of \(question.fields.count)")
+                        .interfaceFont(.callout).foregroundStyle(Color.secondaryText)
+                        .accessibilityIdentifier("questionProgress")
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.trailing, metrics.points(8))
-                // Native focus rings extend beyond the field's layout bounds.
-                .padding(metrics.points(4))
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
             }
-            .frame(minHeight: 0, maxHeight: min(contentHeight ?? .infinity, metrics.points(260)))
-            if let failure {
+            VStack(alignment: .leading, spacing: metrics.points(16)) {
+                if !question.detail.isEmpty {
+                    Text(question.detail).interfaceFont(.body).textSelection(.enabled)
+                }
+                if let text = question.url, let url = URL(string: text), ["https", "http"].contains(url.scheme) {
+                    Link(destination: url) { Text("Open in Browser").interfaceFont(.body) }
+                }
+                if let field = draft.currentField { fieldView(field) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, metrics.points(8))
+            // Native focus rings extend beyond the field's layout bounds.
+            .padding(metrics.points(4))
+
+            if let failure = draft.failure {
                 Text(failure).interfaceFont(.callout).foregroundStyle(Color.errorText)
                     .accessibilityIdentifier("questionError")
             }
@@ -46,44 +45,49 @@ struct QuestionCard: View {
                 HStack {
                     dismissButtons
                     Spacer(minLength: metrics.points(12))
-                    answerButtons
+                    forwardButtons
                 }
                 HStack {
                     dismissButtons
                     Spacer(minLength: metrics.points(12))
-                    compactAnswerButtons
+                    compactForwardButtons
                 }
                 VStack(alignment: .leading, spacing: metrics.points(8)) {
                     HStack { dismissButtons; Spacer(minLength: 0) }
-                    HStack { Spacer(minLength: 0); compactAnswerButtons }
+                    HStack { Spacer(minLength: 0); compactForwardButtons }
                 }
             }
         }
         .padding(metrics.points(16))
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: metrics.points(12)))
-        .padding(.horizontal, metrics.points(24))
-        .padding(.vertical, metrics.points(12))
+        .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: metrics.points(12)))
+        .overlay {
+            RoundedRectangle(cornerRadius: metrics.points(12)).strokeBorder(Color.primary.opacity(0.08))
+        }
         .frame(maxWidth: metrics.points(760))
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("questionCard")
     }
 
-    private var answer: QuestionAnswer {
-        var combined = values
-        for (id, text) in other where !text.isEmpty {
-            guard let field = question.fields.first(where: { $0.id == id }),
-                field.options.isEmpty || customFields.contains(id) else { continue }
-            if field.kind == .multiple {
-                combined[id, default: []].append(text)
-            } else {
-                combined[id] = [text]
-            }
-        }
-        return QuestionAnswer(values: combined)
+    @ViewBuilder private var forwardButtons: some View {
+        if draft.isLastField { answerButtons } else if draft.composerField == nil { nextButton }
+    }
+
+    @ViewBuilder private var compactForwardButtons: some View {
+        if draft.isLastField { compactAnswerButtons } else if draft.composerField == nil { nextButton }
+    }
+
+    private var nextButton: some View {
+        Button(interfaceTitle: "Next") { draft.moveForward() }
+            .disabled(!draft.canAdvance)
+            .accessibilityIdentifier("nextQuestion")
     }
 
     @ViewBuilder private var dismissButtons: some View {
+        if draft.fieldIndex > 0 {
+            Button(interfaceTitle: "Back") { draft.moveBack() }
+                .accessibilityIdentifier("previousQuestion")
+        }
         Button(interfaceTitle: "Cancel") { send("cancel") }
             .accessibilityIdentifier("cancelQuestion")
         if question.allowsDecline == true {
@@ -93,7 +97,7 @@ struct QuestionCard: View {
     }
 
     @ViewBuilder private var answerButtons: some View {
-        ForEach(question.actions) { action in
+        ForEach(composerSends ? [] : question.actions) { action in
             if question.actions.count == 1 {
                 actionButton(action).buttonStyle(.borderedProminent)
             } else {
@@ -112,9 +116,7 @@ struct QuestionCard: View {
                 choices: [.item("Choose…", nil)] + question.actions.map { .item($0.label, Optional($0.id)) },
                 identifier: "questionActions", hidesLabel: true, fitsSelectedTitle: true)
                 .disabled(
-                    hasEmptyCustomAnswer
-                        || question.validationMessage(
-                            QuestionAnswer(action: question.actions[0].id, values: answer.values)) != nil)
+                    !draft.canSubmit(question.actions[0].id))
         } else {
             answerButtons
         }
@@ -128,48 +130,43 @@ struct QuestionCard: View {
         }
         .help(action.detail)
         .disabled(
-            hasEmptyCustomAnswer
-                || question.validationMessage(QuestionAnswer(action: action.id, values: answer.values)) != nil)
+            !draft.canSubmit(action.id))
         .accessibilityIdentifier("answerQuestion-" + action.id)
     }
 
-    private var hasEmptyCustomAnswer: Bool {
-        customFields.contains { (other[$0] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    }
+    private var composerSends: Bool { draft.isLastField && draft.composerField != nil && question.actions.count == 1 }
 
-    private func send(_ action: String) {
-        do { try submit(QuestionAnswer(action: action, values: answer.values)) } catch {
-            failure = error.localizedDescription
-        }
-    }
+    private func send(_ action: String) { draft.send(action, submit: submit) }
 
     @ViewBuilder
     private func fieldView(_ field: QuestionField) -> some View {
         VStack(alignment: .leading, spacing: metrics.points(6)) {
             Text(field.title + (field.required ? "" : " (optional)"))
-                .interfaceFont(.body).fontWeight(.semibold)
+                .interfaceFont(.headline)
             if !field.detail.isEmpty {
                 Text(field.detail).interfaceFont(.callout).foregroundStyle(Color.secondaryText)
             }
             if field.kind == .boolean {
-                singleChoice([.init(id: "true", label: "Yes"), .init(id: "false", label: "No")], field: field)
+                choiceRows([.init(id: "true", label: "Yes"), .init(id: "false", label: "No")], field: field)
             } else {
-                if field.kind == .multiple {
-                    ForEach(field.options) { option($0, field: field) }
-                } else if !field.options.isEmpty {
-                    singleChoice(field.options, field: field)
+                choiceRows(field.options, field: field)
+                if !field.options.isEmpty, field.allowsOther {
+                    choiceRow(number: field.options.count + 1,
+                              option: .init(id: "other", label: "Something else…",
+                                            detail: draft.customFields.contains(field.id)
+                                                ? draft.other[field.id] ?? "" : ""),
+                              selected: draft.customFields.contains(field.id), multiple: field.kind == .multiple) {
+                        selectOther(field.kind != .multiple || !draft.customFields.contains(field.id), field: field)
+                    }
+                    .accessibilityIdentifier("questionOther-" + field.id)
                 }
-                if field.kind == .multiple, !field.options.isEmpty, field.allowsOther {
-                    Toggle("Other", isOn: Binding(
-                        get: { customFields.contains(field.id) },
-                        set: { selectOther($0, field: field) }))
-                        .toggleStyle(.checkbox)
-                        .interfaceFont(.body)
-                        .accessibilityIdentifier("questionOther-" + field.id)
-                }
-                if field.options.isEmpty || customFields.contains(field.id) {
-                    answerField(field)
-                        .padding(.leading, field.options.isEmpty ? 0 : metrics.points(20))
+                if field.options.isEmpty || draft.customFields.contains(field.id) {
+                    if draft.usesComposer(field) {
+                        Text("Type your answer below.")
+                            .interfaceFont(.callout).foregroundStyle(Color.secondaryText)
+                    } else {
+                        answerField(field)
+                    }
                 }
             }
         }
@@ -178,12 +175,9 @@ struct QuestionCard: View {
     @ViewBuilder private func answerField(_ field: QuestionField) -> some View {
         Group {
             if field.kind == .secret {
-                SecureField("Your answer", text: text(field))
-            } else if field.kind == .number || field.kind == .integer {
-                TextField("Your answer", text: text(field))
+                SecureField("Your answer", text: draft.text(for: field))
             } else {
-                TextField("Your answer", text: text(field), axis: .vertical)
-                    .lineLimit(2...4)
+                TextField("Your answer", text: draft.text(for: field))
             }
         }
         .interfaceFont(.body)
@@ -193,77 +187,61 @@ struct QuestionCard: View {
         .accessibilityIdentifier("questionField-" + field.id)
     }
 
-    private func text(_ field: QuestionField) -> Binding<String> {
-        Binding(get: { other[field.id] ?? "" }, set: { other[field.id] = $0 })
-    }
-
     private func selectOther(_ selected: Bool, field: QuestionField) {
-        if selected {
-            customFields.insert(field.id)
-            focusedField = field.id
-        } else {
-            customFields.remove(field.id)
-        }
+        draft.selectOther(selected, field: field)
+        if selected, !draft.usesComposer(field) { focusedField = field.id }
     }
 
-    private func singleChoice(_ options: [QuestionOption], field: QuestionField) -> some View {
-        Picker(field.title, selection: Binding<Selection?>(get: {
-            customFields.contains(field.id) ? .other : values[field.id]?.first.map { .option($0) }
-        }, set: { selection in
-            if selection == .other {
-                values[field.id] = nil
-                selectOther(true, field: field)
-            } else {
-                values[field.id] = selection.flatMap {
-                    if case let .option(id) = $0 { return [id] }
-                    return nil
+    private func choiceRows(_ options: [QuestionOption], field: QuestionField) -> some View {
+        ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
+            choiceRow(number: index + 1, option: option,
+                      selected: draft.values[field.id]?.contains(option.id) == true,
+                      multiple: field.kind == .multiple) {
+                if field.kind == .multiple {
+                    var choices = draft.values[field.id] ?? []
+                    if choices.contains(option.id) { choices.removeAll { $0 == option.id } } else {
+                        choices.append(option.id)
+                    }
+                    draft.values[field.id] = choices
+                } else {
+                    selectOther(false, field: field)
+                    draft.values[field.id] = [option.id]
                 }
-                selectOther(false, field: field)
             }
-        })) {
-            ForEach(options) { option in
-                QuestionOptionLabel(option: option)
-                    .tag(Optional(Selection.option(option.id)))
-                    .accessibilityIdentifier("questionOption-" + field.id + "-" + option.id)
-            }
-            if !field.options.isEmpty, field.allowsOther {
-                Text("Other").interfaceFont(.body)
-                    .tag(Optional(Selection.other))
-                    .accessibilityIdentifier("questionOther-" + field.id)
-            }
+            .accessibilityIdentifier("questionOption-" + field.id + "-" + option.id)
         }
-        .pickerStyle(.radioGroup)
-        .labelsHidden()
     }
 
-    private func option(_ option: QuestionOption, field: QuestionField) -> some View {
-        Toggle(
-            isOn: Binding(
-                get: { values[field.id]?.contains(option.id) == true },
-                set: { selected in
-                    var choices = values[field.id] ?? []
-                    choices.removeAll { $0 == option.id }
-                    if selected { choices.append(option.id) }
-                    values[field.id] = choices
-                })
-        ) {
-            QuestionOptionLabel(option: option)
-        }
-        .toggleStyle(.checkbox)
-        .accessibilityIdentifier("questionOption-" + field.id + "-" + option.id)
-    }
-}
-
-private struct QuestionOptionLabel: View {
-    @Environment(\.interfaceScale) private var metrics
-    let option: QuestionOption
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: metrics.points(2)) {
-            Text(option.label).interfaceFont(.body)
-            if !option.detail.isEmpty {
-                Text(option.detail).interfaceFont(.callout).foregroundStyle(Color.secondaryText)
+    private func choiceRow(number: Int, option: QuestionOption, selected: Bool,
+                           multiple: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(alignment: .firstTextBaseline, spacing: metrics.points(12)) {
+                Text(String(number)).monospacedDigit()
+                    .frame(minWidth: metrics.points(18), alignment: .center)
+                VStack(alignment: .leading, spacing: metrics.points(3)) {
+                    Text(option.label)
+                    if !option.detail.isEmpty {
+                        Text(option.detail).interfaceFont(.callout).foregroundStyle(Color.secondaryText)
+                    }
+                }
+                Spacer(minLength: metrics.points(6))
+                if selected || multiple {
+                    Image(systemName: selected ? "checkmark" : "square")
+                        .accessibilityHidden(true)
+                }
             }
+            .interfaceFont(.body)
+            .foregroundStyle(Color.primary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(metrics.points(10))
+            .background(selected ? Color.primary.opacity(0.08) : .clear,
+                        in: RoundedRectangle(cornerRadius: metrics.points(8)))
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(option.label)
+        .accessibilityHint(option.detail)
+        .accessibilityValue(selected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

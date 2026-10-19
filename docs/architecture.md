@@ -93,14 +93,39 @@ flowchart LR
 - `AgentQuestion` normalizes native questions, plan approvals and MCP forms/URL
   requests. `RunEvents.question` registers the request with the scheduler,
   persists its fields in `RunRecord.questions`, marks the session as needing
-  a reply and posts a notification. `QuestionCard` presents single/multiple
-  selections, typed/private answers and primitive MCP fields in a bounded
-  scroll view with a fixed submission footer. The scroll content reserves
+  a reply and posts a notification. `SessionView` owns a `QuestionDraft` shared
+  by `QuestionCard` and `ChatComposer`. The card presents single/multiple
+  numbered option rows and specialized private/numeric fields inside the transcript's
+  scroll view, while the composer stays pinned below it. The form never squeezes
+  the transcript into a near-zero nested scroll viewport.
+  The card registers its own transcript viewport marker and participates in
+  the same zoom-anchor handling as message rows.
+  Its end anchor sits outside the spaced lazy rows, with a compact form tail;
+  scrolling to the absolute bottom must leave the final actions visible even
+  at minimum height and 150% zoom.
+  While a form is pending, the floating latest-message button is hidden so
+  it cannot cover question fields in that small viewport.
+  Free-text fields, including a selected Other answer, use the existing session
+  composer with an explicit field label. Each field keeps its own text draft;
+  Multiple fields appear one at a time, with a progress count and Back/Next.
+  Next validates only the current field and never sends a partial form; the final
+  action validates all fields. Going back preserves selections and text.
+  Selecting Something else focuses the shared editor directly, with no
+  intermediate edit link. Option rows highlight selection and expose it through
+  Accessibility; no option is preselected. Text bindings
+  capture their field ID, so late editing events cannot overwrite another field
+  or fall through into the ordinary message draft. Ordinary
+  message drafts and attachments remain in AppModel and are not sent with a
+  question answer. For a single action, the composer's Send and Return submit
+  the complete validated form on the final field; before that they advance to
+  the next field. Multiple-action forms retain explicit action
+  buttons in the card; typing cannot implicitly pick one of those actions.
+  Cancel and Decline stay with the question card's actions. The scroll content reserves
   scaled space on every edge for native field focus rings, which paint outside
   their layout bounds. Check a
-  focused first and last input at the minimum window height. Other is a radio
-  option for a single choice and an independent checkbox for multiple choices.
-  Its input appears only when selected; a hidden draft is retained but never submitted.
+  focused first and last input at the minimum window height. Something else is a
+  numbered row for a single choice and an independent selectable row for multiple choices.
+  Its shared editor appears only when selected; a hidden draft is retained but never submitted.
   An empty selected Other blocks submission. Only elicitation and permission
   requests show the additional Decline action. Provider dismissal choices are
   not duplicated among approval buttons. When action buttons cannot fit in
@@ -108,15 +133,12 @@ flowchart LR
   consuming the question viewport. It reuses InterfacePicker's explicit
   AppKit font, fitting the selected title while retaining full menu labels.
   Persistent policy choices name their command prefix or host. Short requests
-  fit their content. Renderer checks
-  must verify the actual window size, a nonzero question viewport and the
-  final field after native scrolling. At the 520 pt minimum height, a pending
-  form takes space from the transcript rather than clipping its inputs. MCP
-  messages belong in the scrolling detail, not the fixed header. Setting an
-  offscreen AX value alone does not establish reachability. A collapsed
-  transcript scroller can expose an oversized anonymous AX arrow rectangle;
-  compare its reported overflow with the capture before classifying it as
-  painted overlap. Include long option descriptions and
+  fit their content. Renderer checks must verify the actual window size, a
+  nonzero transcript/form viewport and the final field after native scrolling.
+  At the 520 pt minimum height, fields and actions stay reachable in the same
+  transcript scroller above the pinned input. MCP messages belong in the
+  scrolling detail, not the fixed session header. Setting an offscreen AX value
+  alone does not establish reachability. Include long option descriptions and
   approval labels at the minimum width and 150% interface scale.
   Text answers can span several lines, while secret and numeric inputs stay
   compact. No answer is selected or sent
@@ -125,6 +147,16 @@ flowchart LR
   cancellation resolves it; concurrent requests remain independently pending.
   Private answers are redacted in Rota's journal. After an app interruption,
   old request callbacks expire and the session must be continued to ask again.
+  Shared-composer verification uses a local stream stub and the actual
+  `questions.create`/`questions.poll` socket path. Both appearances were checked
+  at 820 x 520 pt with 100%/150% zoom, plus a larger 1100 x 720 pt window.
+  Native Return, Option-Return, field switching, multi-select answers, Cancel,
+  explicit multi-action forms and ordinary-draft restoration were exercised.
+  A selected custom answer stays separate from ordinary message text. The
+  numbered option rows use primary text and a neutral selected background.
+  `QuestionDraftTests` reject mutations that drop Other selection, replace
+  selected multiple choices with custom text, or route secret fields into the
+  plain composer.
 - Codex receives deferred JSON-RPC server requests through `onRequestAsync`;
   the transport keeps reading while the user answers. It handles native input,
   command/file/permission approvals, legacy approvals and standard MCP form/URL

@@ -15,6 +15,7 @@ struct SessionView: View {
     @State private var pageRequest = 0
     /// Messages sent from this view that the session has not shown yet.
     @State private var outbox: [Outgoing] = []
+    @State private var questionDraft: QuestionDraft?
 
     private var running: Bool { model.scheduler.isActive(record) }
 
@@ -43,16 +44,18 @@ struct SessionView: View {
                     .accessibilityIdentifier("transcriptProblem")
             }
             let items = transcript.items
+            let questionID = questionDraft?.question.id
             ChatTranscript(items: items, running: running, record: current,
                            sending: outbox.filter { !$0.delivered(in: items) }.map(\.text),
                            structured: transcript.structured, hasEarlier: transcript.hasEarlier,
-                           loadingEarlier: loadingEarlier, loadEarlier: loadEarlier)
-            if let question = current.questions?.first, running {
-                QuestionCard(question: question) { answer in
-                    try model.scheduler.answerQuestion(question.id, on: current, answer: answer)
+                           loadingEarlier: loadingEarlier, loadEarlier: loadEarlier,
+                           questionDraft: questionDraft,
+                           submitAnswer: { try submitAnswer($0, questionID: questionID) })
+            if let questionDraft {
+                if questionDraft.composerField != nil {
+                    ChatComposer(record: current, questionDraft: questionDraft,
+                                 submitAnswer: { try submitAnswer($0, questionID: questionID) }, sent: { _ in })
                 }
-                .id(question.id)
-                .layoutPriority(1)
             } else {
                 ChatComposer(record: current) { text in
                     outbox.append(Outgoing(text: text, seen: Outgoing.count(text, in: items)))
@@ -60,6 +63,11 @@ struct SessionView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: running ? current.questions?.first?.id : nil, initial: true) { _, id in
+            questionDraft = id.flatMap { id in
+                current.questions?.first(where: { $0.id == id }).map { QuestionDraft(question: $0) }
+            }
+        }
         .task(id: RefreshKey(record: record.id, running: running, version: model.scheduler.historyVersion)) {
             // Follow the log while the session works; read it once otherwise.
             repeat {
@@ -75,6 +83,11 @@ struct SessionView: View {
             // Open and finished: read. A session finishing while open is read too.
             model.scheduler.markRead(record)
         }
+    }
+
+    private func submitAnswer(_ answer: QuestionAnswer, questionID: String?) throws {
+        guard let questionID else { throw ControlError("The question is no longer waiting for an answer.") }
+        try model.scheduler.answerQuestion(questionID, on: current, answer: answer)
     }
 
     private func loadEarlier() {

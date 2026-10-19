@@ -80,6 +80,10 @@ Desktop.
   session stays marked as needing your reply until you send an answer or
   explicitly decline/cancel the request. Multiple selections, private input,
   plan approvals and standard MCP forms/URL requests use the same flow.
+  Free-text answers use the session composer, labeled with the current question.
+  Numbered options highlight your selection; Something else moves focus to the composer.
+  Multiple questions appear one at a time, with Back/Next and preserved drafts.
+  Ordinary message drafts and attachments are kept separately.
 - **Routines can notify you.** A routine (or its skill) runs
   `"$ROTA_CLI" notify "…"`, or an agent calls the `notify_user` tool, and Rota
   shows a Mac notification from that session. With `--needs-reply` the session

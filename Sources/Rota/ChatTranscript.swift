@@ -16,6 +16,8 @@ struct ChatTranscript: View {
     var hasEarlier = false
     var loadingEarlier = false
     var loadEarlier: () -> Void = {}
+    var questionDraft: QuestionDraft?
+    var submitAnswer: ((QuestionAnswer) throws -> Void)?
     @State private var expandedTools: Set<Int> = []
     @State private var following = true
     @State private var visibleItem: Int?
@@ -35,68 +37,78 @@ struct ChatTranscript: View {
         let rows = structured ? WorkRow.group(items) : []
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: metrics.points(22)) {
-                    if hasEarlier {
-                        Button(interfaceTitle: loadingEarlier ? "Loading…" : "Load Earlier Messages") {
-                            following = false
-                            pageAnchor = viewport.capture()
-                            loadEarlier()
-                        }
-                        .disabled(loadingEarlier)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityIdentifier("loadEarlierMessages")
-                    }
-                    if structured {
-                        // The last status belongs to the footer, not a second transcript row.
-                        ForEach(rows.dropLast(closingNote == nil ? 0 : 1)) { row in
-                            VStack(alignment: .leading, spacing: 0) {
-                                switch row {
-                                case .note(let item):
-                                    TranscriptRow(item: item, record: record)
-                                        .accessibilityIdentifier("transcriptItem-\(item.id)")
-                                case .tools(let calls):
-                                    ToolCallsView(calls: calls, expanded: Binding(
-                                        get: { calls.contains { expandedTools.contains($0.id) } },
-                                        set: { expanded in
-                                            following = false
-                                            viewport.cancel()
-                                            let anchor = viewport.capture(id: row.id)
-                                            if expanded { expandedTools.insert(row.id) } else {
-                                                expandedTools.subtract(calls.map(\.id))
-                                            }
-                                            if let anchor { viewport.restoreAfterLayout(anchor) }
-                                        }))
-                                }
+                VStack(spacing: 0) {
+                    LazyVStack(alignment: .leading, spacing: metrics.points(22)) {
+                        if hasEarlier {
+                            Button(interfaceTitle: loadingEarlier ? "Loading…" : "Load Earlier Messages") {
+                                following = false
+                                pageAnchor = viewport.capture()
+                                loadEarlier()
                             }
-                            .id(row.id)
-                            .background(TranscriptMarker(id: row.id, viewport: viewport))
+                            .disabled(loadingEarlier)
+                            .frame(maxWidth: .infinity)
+                            .accessibilityIdentifier("loadEarlierMessages")
                         }
-                        if working {
+                        if structured {
+                            // The last status belongs to the footer, not a second transcript row.
+                            ForEach(rows.dropLast(closingNote == nil ? 0 : 1)) { row in
+                                VStack(alignment: .leading, spacing: 0) {
+                                    switch row {
+                                    case .note(let item):
+                                        TranscriptRow(item: item, record: record)
+                                            .accessibilityIdentifier("transcriptItem-\(item.id)")
+                                    case .tools(let calls):
+                                        ToolCallsView(calls: calls, expanded: Binding(
+                                            get: { calls.contains { expandedTools.contains($0.id) } },
+                                            set: { expanded in
+                                                following = false
+                                                viewport.cancel()
+                                                let anchor = viewport.capture(id: row.id)
+                                                if expanded { expandedTools.insert(row.id) } else {
+                                                    expandedTools.subtract(calls.map(\.id))
+                                                }
+                                                if let anchor { viewport.restoreAfterLayout(anchor) }
+                                            }))
+                                    }
+                                }
+                                .id(row.id)
+                                .background(TranscriptMarker(id: row.id, viewport: viewport))
+                            }
+                            if working {
+                                WorkingLabel(since: model.scheduler.runStartedAt(record))
+                            } else if record.endedAt != nil {
+                                TurnFooter(record: record, status: closingNote?.text)
+                            }
+                        } else {
+                            ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
+                                TurnView(turn: turn, isLast: index == turns.count - 1, running: working,
+                                         only: turns.count == 1, record: record)
+                            }
+                        }
+                        if !structured && turns.isEmpty && working {
                             WorkingLabel(since: model.scheduler.runStartedAt(record))
-                        } else if record.endedAt != nil {
-                            TurnFooter(record: record, status: closingNote?.text)
                         }
-                    } else {
-                        ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
-                            TurnView(turn: turn, isLast: index == turns.count - 1, running: working,
-                                     only: turns.count == 1, record: record)
+                        ForEach(Array(sending.enumerated()), id: \.offset) { _, text in
+                            VStack(alignment: .trailing, spacing: metrics.points(4)) {
+                                UserBubble(text: text).opacity(0.6)
+                                Text("Sending\u{2026}").font(model.chatText.small).foregroundStyle(Color.secondaryText)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                        if let questionDraft, let submitAnswer {
+                            QuestionCard(draft: questionDraft, submit: submitAnswer)
+                                .id(Int.min + 1)
+                                .background(TranscriptMarker(id: Int.min + 1, viewport: viewport))
                         }
                     }
-                    if !structured && turns.isEmpty && working {
-                        WorkingLabel(since: model.scheduler.runStartedAt(record))
-                    }
-                    ForEach(Array(sending.enumerated()), id: \.offset) { _, text in
-                        VStack(alignment: .trailing, spacing: metrics.points(4)) {
-                            UserBubble(text: text).opacity(0.6)
-                            Text("Sending\u{2026}").font(model.chatText.small).foregroundStyle(Color.secondaryText)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
-                    Color.clear.frame(height: metrics.points(1)).id(Int.min)
+                    .scrollTargetLayout()
+                    Color.clear.frame(height: metrics.points(1))
+                        .padding(.top, questionDraft == nil ? metrics.points(22) : 0)
+                        .id(Int.min)
                 }
-                .scrollTargetLayout()
                 .padding(.horizontal, metrics.points(24))
-                .padding(.vertical, metrics.points(20))
+                .padding(.top, metrics.points(20))
+                .padding(.bottom, metrics.points(questionDraft == nil ? 20 : 6))
                 .frame(maxWidth: metrics.points(760))
                 .frame(maxWidth: .infinity)
             }
@@ -127,6 +139,13 @@ struct ChatTranscript: View {
                     if !following { viewport.remember() }
                 }
             }
+            .onChange(of: questionDraft.map { "\($0.question.id):\($0.fieldIndex)" }) { _, step in
+                if step != nil {
+                    following = true
+                    viewport.cancel()
+                    proxy.scrollTo(Int.min + 1, anchor: .top)
+                }
+            }
             .onChange(of: items) {
                 guard !following else { return }
                 if let anchor = pageAnchor {
@@ -152,7 +171,9 @@ struct ChatTranscript: View {
             .onChange(of: items.count + sending.count) { if following { proxy.scrollTo(Int.min, anchor: .bottom) } }
             .onAppear { proxy.scrollTo(Int.min, anchor: .bottom) }
             .overlay(alignment: .bottom) {
-                if !following {
+                // A pending form occupies this viewport; the floating jump button
+                // would cover its fields at the minimum window height.
+                if !following, questionDraft == nil {
                     Button {
                         following = true
                         viewport.cancel()

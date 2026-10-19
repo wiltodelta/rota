@@ -266,3 +266,21 @@ session-owned copies, filename chips, and a text manifest of local paths across
 harnesses. See [Architecture](architecture.md#session-configuration-and-attachments)
 for the implemented contract. Binary extracts and private screenshots remain
 outside this repository.
+
+## Question layout follow-up, October 19
+
+A live pending single-choice request was inspected through the installed app's
+window capture. It presents a question above numbered, full-width option rows,
+with a neutral highlight on the selected row and Something else as the last
+option. A Skip action sits below the choices; the ordinary session composer
+remains directly underneath. The chat controls were still absent from the
+Accessibility tree. Selecting the custom option was not successfully exercised
+in this reference, so its focus behavior is not claimed here.
+
+Rota adopts the numbered rows, explicit selected state and direct shared input
+for a custom answer, using its existing native shell and adaptive colors.
+The operator requested one field at a time with Back/Next and preserved drafts.
+Next advances locally; only the final action submits the complete form. Rota
+keeps explicit Cancel/Decline semantics and never treats a highlighted default
+as consent. The implemented contract lives in [Architecture](architecture.md).
+No reference screenshot or conversation content is included in this repository.
