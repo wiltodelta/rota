@@ -85,6 +85,14 @@ final class RunJournal: @unchecked Sendable {
         }
     }
 
+    func terminalInput() {
+        DispatchQueue.main.async { self.events.terminalInput() }
+    }
+
+    func terminalState(_ state: TerminalState) {
+        DispatchQueue.main.async { self.events.terminalState(state) }
+    }
+
     func session(_ id: String) {
         DispatchQueue.main.async { self.events.session(id) }
     }

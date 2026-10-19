@@ -80,6 +80,65 @@ final class SchedulerTests: XCTestCase {
         return routine
     }
 
+    func testRunningShellKeepsItsTerminalFallback() throws {
+        var routine = addDailyRoutine()
+        routine.harness = .shell
+        scheduler.save(routine)
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("shell-screen")
+        let record = try XCTUnwrap(scheduler.active[routine.id])
+        let command = try XCTUnwrap(scheduler.terminalCommand(for: record))
+        XCTAssertEqual(command.executable, "/usr/bin/screen")
+        XCTAssertEqual(command.arguments, ["-r", "shell-screen"])
+        launcher.completions[0](.succeeded)
+        XCTAssertNil(scheduler.terminalCommand(for: record))
+    }
+
+    func testTerminalContinuationKeepsSessionAndDisablesSecondWriter() async throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("native-session")
+        launcher.completions[0](.succeeded)
+        var record = try XCTUnwrap(scheduler.allRecords().first)
+        record = scheduler.setAttention("Waiting for your reply", on: record)
+        let source = directory.appendingPathComponent("native.jsonl")
+        try Data().write(to: source)
+        let owner = try XCTUnwrap(scheduler)
+        let awaitingRecord = record
+        scheduler.terminalTranscript = { [weak owner] _, _ in
+            if let owner { DispatchQueue.main.sync { MainActor.assumeIsolated { owner.markRead(awaitingRecord) } } }
+            return source
+        }
+        let started = await scheduler.continueInTerminal(record)
+        XCTAssertTrue(started)
+        guard started else { return }
+        XCTAssertEqual(scheduler.current(record.id)?.readAt, clock)
+        XCTAssertEqual(launcher.specs.last?.mode, .terminal(.codex))
+        XCTAssertEqual(launcher.specs.last?.arguments, ["resume", "native-session"])
+        let active = try XCTUnwrap(scheduler.current(record.id))
+        XCTAssertEqual(active.terminalState, .waiting)
+        XCTAssertEqual(active.attention, "Waiting for your reply")
+        XCTAssertFalse(scheduler.canMessage(record))
+        var interrupted = active
+        interrupted.outcome = .interrupted
+        XCTAssertFalse(scheduler.resumable(interrupted), "Native prompts must not resume unattended")
+        XCTAssertFalse(scheduler.message("second writer", to: record))
+        let duplicate = await scheduler.continueInTerminal(record)
+        XCTAssertFalse(duplicate)
+        launcher.events[1].terminalInput()
+        XCTAssertNil(scheduler.current(record.id)?.attention)
+        clock = clock.addingTimeInterval(120)
+        launcher.events[1].terminalState(.working)
+        XCTAssertEqual(scheduler.runStartedAt(active), clock, "Idle terminal time is not agent working time")
+        XCTAssertEqual(scheduler.current(record.id)?.statusTitle, "Working in Terminal")
+        launcher.events[1].terminalState(.waiting)
+        XCTAssertEqual(scheduler.current(record.id)?.statusTitle, "Waiting in Terminal")
+        launcher.completions[1](.succeeded)
+        XCTAssertTrue(scheduler.canMessage(record))
+        XCTAssertEqual(scheduler.current(record.id)?.outcome, .succeeded)
+        XCTAssertEqual(scheduler.history.records(for: routine.id).count, 1)
+    }
+
     func testQuestionsRequireExplicitAnswersAndSurviveOrdinaryMessagesAndDismissal() throws {
         let routine = addDailyRoutine()
         scheduler.run(routine, trigger: .manual)

@@ -81,13 +81,13 @@ struct SessionHistoryRow: View {
         }
         if case .launchFailed = record.outcome { return "Couldn't start" }
         if case .skipped = record.outcome { return "Skipped" }
-        return record.outcome.title
+        return record.statusTitle
     }
 
     private var statusSymbol: String {
         if needsAttention { return "exclamationmark.bubble.fill" }
         switch record.outcome {
-        case .running: return "circle.dotted"
+        case .running: return record.terminalState == .waiting ? "terminal" : "circle.dotted"
         case .succeeded: return "checkmark.circle"
         case .cancelled: return "stop.circle"
         case .skipped: return "clock"

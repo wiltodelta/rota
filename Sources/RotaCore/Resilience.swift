@@ -28,7 +28,8 @@ extension Scheduler {
     }
 
     func resumable(_ record: RunRecord) -> Bool {
-        guard record.harness.isAgent, record.sessionID != nil, (record.resumes ?? 0) < Self.resumeLimit else {
+        guard record.terminalState == nil, record.harness.isAgent, record.sessionID != nil,
+              (record.resumes ?? 0) < Self.resumeLimit else {
             return false
         }
         switch record.outcome {
@@ -39,6 +40,7 @@ extension Scheduler {
 
     /// A run that just ended: continued or run again if the Mac or its network cut it off.
     func recover(_ record: RunRecord, sleptThrough: Bool) {
+        guard record.terminalState == nil else { return }
         if record.sessionID != nil { reruns[record.routineID] = nil }
         let failed: Bool
         switch record.outcome {

@@ -229,6 +229,9 @@ struct ChatComposer: View {
 
     /// Why there is no field.
     private var note: String? {
+        if running, model.scheduler.current(record.id)?.terminalState != nil {
+            return "Reply and approve actions in Terminal. Messages sync here automatically."
+        }
         switch record.harness {
         case .shell:
             return running ? "Open in Terminal to type into the command." : nil

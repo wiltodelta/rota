@@ -48,7 +48,14 @@ Desktop.
   - Shell commands run in a detached `screen` session; **Open in Terminal**
     attaches with `screen -r`, where you can type into the command or stop it.
   A continued session runs again and appends to the same chat. Finished agent
-  sessions also open in their own CLI with **Continue in Terminal**. Sessions
+  sessions also open in their own CLI with **Continue in Terminal**. Rota follows
+  that continuation: new messages and tool calls appear in the same chat and
+  session preview, with **Working in Terminal** or **Waiting in Terminal** as
+  the turn progresses. Type replies and approve actions in Terminal; Rota's
+  composer returns after the CLI exits. Closing the terminal window detaches;
+  **Open in Terminal** reconnects, and **Stop** ends the owned session. Terminal
+  continuations have no routine time limit and are not automatically resumed
+  after an interruption. Rota must stay open for synchronization. Sessions
   open in the terminal app picked in Settings (Terminal, iTerm2, Ghostty or
   any other), or in the macOS default terminal, the one that opens executables
   (iTerm2 after "Make iTerm2 Default Term"). iTerm2 asks "OK to run" before

@@ -67,7 +67,7 @@ public final class Scheduler {
     @ObservationIgnored var hookAnswers: [String: QuestionAnswer] = [:]
     @ObservationIgnored private var controls: [String: RunControl] = [:]
     /// When each routine's current run started, a continued session included.
-    @ObservationIgnored private var runStarts: [String: Date] = [:]
+    @ObservationIgnored var runStarts: [String: Date] = [:]
     @ObservationIgnored private var timer: Timer?
 
     public init(location: StorageLocation, launcher: RoutineLaunching) {
@@ -214,8 +214,8 @@ public final class Scheduler {
     }
 
     /// How `routine` runs `prompt` on `harness`: a new session, or `resume`'s.
-    private func spec(for routine: Routine, record: RunRecord, harness: Harness, prompt: String, log: URL,
-                      resume: String? = nil) -> LaunchSpec {
+    func spec(for routine: Routine, record: RunRecord, harness: Harness, prompt: String, log: URL,
+              resume: String? = nil) -> LaunchSpec {
         // Historical sessions keep their original options; never borrow a later routine edit.
         // Only Claude reads ~/.claude.json, a file of hundreds of KB on a busy Mac.
         let settings = harness == .claude ? claudeSettings() : ClaudeUserSettings()
@@ -240,7 +240,7 @@ public final class Scheduler {
 
     /// Launches `spec` as `record`, which becomes the routine's active run.
     @discardableResult
-    private func start(_ record: RunRecord, spec: LaunchSpec) -> Bool {
+    func start(_ record: RunRecord, spec: LaunchSpec) -> Bool {
         var record = record
         let id = record.routineID
         let events = events(for: record)
@@ -290,34 +290,25 @@ public final class Scheduler {
         return true
     }
 
-    /// When `record`'s run started, while it runs: a continued session's run, not the session's first.
+    /// The current run start, or current native terminal turn start, while it works.
     public func runStartedAt(_ record: RunRecord) -> Date? {
         isActive(record) ? runStarts[record.routineID] : nil
     }
+
+    /// Transcript lookup is off the main actor; tests supply an isolated producer file.
+    public var terminalTranscript: @Sendable (Harness, String) -> URL? = NativeTranscript.locate
+    var openingTerminals: Set<UUID> = []
 
     /// The terminal command for `record`'s session, with the harness's executable filled in.
     public func terminalCommand(for record: RunRecord) -> (executable: String, arguments: [String])? {
         if isActive(record), let command = controls[record.routineID]?.attachCommand, let program = command.first {
             return (program, Array(command.dropFirst()))
         }
-        guard let session = record.sessionID,
+        guard isActive(record) || active[record.routineID] == nil,
+              let session = record.sessionID,
               let (program, arguments) = record.harness.terminal(session: session, running: isActive(record))
         else { return nil }
         return (program ?? executable(record.harness), arguments)
-    }
-
-    @discardableResult
-    func continueSession(_ record: RunRecord, with message: String) -> Bool {
-        guard let routine = routine(record.routineID), let session = record.sessionID,
-              let logPath = record.logPath else { return false }
-        var record = record
-        record.outcome = .running
-        record.endedAt = nil
-        record.reportedModel = nil
-        record.reportedEffort = nil
-        record.questions = nil
-        return start(record, spec: spec(for: routine, record: record, harness: record.harness, prompt: message,
-                                 log: URL(fileURLWithPath: logPath), resume: session))
     }
 
     func attachSession(_ session: String, to routineID: String) {
@@ -349,7 +340,8 @@ public final class Scheduler {
         guard let routine = routine(routineID), routine.enabled else { return }
         // Skips are not failures of the routine: an overlap only means a long run.
         let scheduled = history.records(for: routineID).filter { record in
-            guard record.trigger != .manual, record.outcome != .running else { return false }
+            guard record.trigger != .manual, record.terminalState == nil,
+                  record.outcome != .running else { return false }
             if case .skipped = record.outcome { return false }
             return true
         }

@@ -123,7 +123,7 @@ struct SessionView: View {
             Text(record.startedAt.formatted(date: .abbreviated, time: .shortened))
                 .interfaceFont(.callout)
             Text([record.harness.title, record.trigger == .catchUp ? "missed slot, run late" : nil,
-                  record.outcome.title].compactMap { $0 }.joined(separator: " \u{00B7} "))
+                  current.statusTitle].compactMap { $0 }.joined(separator: " \u{00B7} "))
                 .interfaceFont(.caption)
                 .foregroundStyle(record.outcome.isFailure ? Color.errorText : Color.secondaryText)
         }

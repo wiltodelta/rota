@@ -22,6 +22,8 @@ struct ChatTranscript: View {
     @State private var viewport = TranscriptViewport()
     @State private var pageAnchor: TranscriptViewport.Anchor?
 
+    private var working: Bool { running && record.terminalState != .waiting }
+
     private var closingNote: TranscriptItem? {
         guard !running, record.endedAt != nil, let last = items.last, last.kind == .status,
               last.text.hasPrefix(record.outcome.title + " after ") else { return nil }
@@ -69,18 +71,18 @@ struct ChatTranscript: View {
                             .id(row.id)
                             .background(TranscriptMarker(id: row.id, viewport: viewport))
                         }
-                        if running {
+                        if working {
                             WorkingLabel(since: model.scheduler.runStartedAt(record))
                         } else if record.endedAt != nil {
                             TurnFooter(record: record, status: closingNote?.text)
                         }
                     } else {
                         ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
-                            TurnView(turn: turn, isLast: index == turns.count - 1, running: running,
+                            TurnView(turn: turn, isLast: index == turns.count - 1, running: working,
                                      only: turns.count == 1, record: record)
                         }
                     }
-                    if !structured && turns.isEmpty && running {
+                    if !structured && turns.isEmpty && working {
                         WorkingLabel(since: model.scheduler.runStartedAt(record))
                     }
                     ForEach(Array(sending.enumerated()), id: \.offset) { _, text in
@@ -368,6 +370,7 @@ private struct NoteView: View {
                     .foregroundStyle(Color.secondaryText)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
                 Hairline()
             }
         }

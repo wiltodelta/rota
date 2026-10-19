@@ -40,6 +40,11 @@ public enum RunOutcome: Codable, Equatable, Sendable {
     }
 }
 
+public enum TerminalState: String, Codable, Sendable {
+    case waiting
+    case working
+}
+
 public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     public var id: UUID
     public var routineID: String
@@ -66,6 +71,13 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     /// How many times Rota continued this session on its own after the Mac slept
     /// or shut down in the middle of it (`Scheduler.resumeLimit` at most).
     public var resumes: Int?
+    /// Present for terminal-owned continuations, including interrupted ones.
+    public var terminalState: TerminalState?
+
+    public var statusTitle: String {
+        guard outcome == .running, let terminalState else { return outcome.title }
+        return terminalState == .working ? "Working in Terminal" : "Waiting in Terminal"
+    }
 
     /// A slot that did not run: a note in the routine's history, not a session.
     public var isSkip: Bool {

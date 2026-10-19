@@ -106,7 +106,9 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
 
     private func initialized(_ result: Result<Any, JSONRPCError>) {
         guard case .success = result else { return fail(result, "initialize") }
-        var params: [String: Any] = ["cwd": spec.workingDirectory, "mcpServers": [Any]()]
+        let directory = spec.resume.flatMap { NativeTranscript.locate(.grok, session: $0) }
+            .flatMap(NativeTranscript.grokDirectory) ?? spec.workingDirectory
+        var params: [String: Any] = ["cwd": directory, "mcpServers": [Any]()]
         // Grok's commands run under its shared leader, which has no per-session
         // environment; the session learns who it is from a rule instead.
         if let rule = Self.sessionRule(spec.environment) { params["_meta"] = ["rules": rule] }
@@ -138,10 +140,7 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
 
     @discardableResult
     private func configure(_ value: Any) -> SessionConfiguration {
-        let options = (value as? [String: Any])?["configOptions"] as? [[String: Any]] ?? []
-        let model = options.first { $0["id"] as? String == "model" }?["currentValue"] as? String
-        let effort = options.first { $0["id"] as? String == "reasoning_effort" }?["currentValue"] as? String
-        let configuration = SessionConfiguration(model: model, effort: effort)
+        let configuration = SessionConfiguration.acp(value)
         journal.configure(configuration)
         return configuration
     }

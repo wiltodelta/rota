@@ -295,7 +295,7 @@ flowchart LR
   so a slot due on waking waits for the network. A run going when the Mac
   slept (`systemWillSleep`) that then fails or is interrupted, one that
   fails while offline or whose log ends on a network error (`NetworkFailure`),
-  and every agent run `closeOrphans` finds still open at launch (a shutdown, a
+  and every resumable agent run `closeOrphans` finds still open at launch (a shutdown, a
   crash), is queued in `pendingResumes`; an agent run that failed that way
   before it had a session goes to `pendingReruns` and runs again whole (twice
   at most in a row). Neither starts until `ServiceProbe` gets any HTTP answer
@@ -582,6 +582,55 @@ The UI layout gate checks the window frame against the screen's visible area,
 including menu bar and Dock exclusions, as well as checking the controls inside it.
 The hosting controller's cached preferred size alone does not update an already
 open Settings pane after zoom.
+`Scheduler.continueInTerminal` reserves the session while locating its native
+transcript off the main actor, then starts `TerminalRun` with the CLI's native
+resume arguments. The existing run ID, session ID, log and normalized journal
+are retained. `NativeTranscript` checkpoints the provider file before launch
+and reads only appended complete JSONL records: Claude's project transcript,
+Codex's rollout (user `item_completed` events and assistant `response_item`
+messages, excluding injected user-role instructions), or Grok's persisted ACP
+updates, including `_x.ai/session/update` turn boundaries. Provider stores are
+read-only. Partial UTF-8 lines are buffered; old history is not imported again.
+Grok resumes over ACP using the directory encoded in that archive's group
+(or its `.cwd` file for long paths). The routine's spelling can name the same
+folder through a symlink yet point Grok's loader at a different store group.
+The detached screen is owned by Rota; `screen -x` reconnects without starting a
+second CLI. Closing a terminal window detaches, CLI exit reports its exit code,
+and Stop first interrupts the native turn, then terminates the owned CLI and
+screen. A wrapper records the native child PID and parent; Rota captures its
+kernel birth time and checks it again before TERM or the KILL fallback. A TUI
+that ignores HUP must not survive screen shutdown, and a reused PID must never
+receive the old run's signal. Native continuation takes no routine timeout.
+It remains active between turns and blocks overlapping scheduled runs of the
+same routine until the CLI exits.
+`RunRecord.terminalState` distinguishes a turn in progress from waiting between
+turns while the CLI itself remains running. Native approval dialogs and replies
+stay in Terminal; the app composer is unavailable until the terminal run ends.
+Opening Terminal preserves a needs-reply mark. Only a native user message (or
+an explicit dismissal) clears it; changing a read timestamp during transcript
+lookup must not cancel the open or overwrite that timestamp.
+A read failure visibly pauses synchronization without terminating the CLI.
+Missing native history blocks launch. If the terminal app fails to open, the
+session remains tracked and can be reopened or stopped from Rota; a delayed
+window-opening error must not stop work that has since continued elsewhere.
+Terminal-owned runs are excluded from
+automatic network/crash recovery, so an interactive prompt is never turned into
+an unattended continuation. Synchronization requires Rota to remain open.
+`LiveTerminalTests` accepts an explicitly supplied disposable native session via
+`ROTA_TERMINAL_LIVE=1`, `ROTA_TERMINAL_HARNESS`, `ROTA_TERMINAL_SESSION` and
+`ROTA_TERMINAL_DIRECTORY` (optionally `ROTA_TERMINAL_CWD`). It attaches through a
+real PTY, sends a harmless prompt, checks the normalized user/agent messages and
+turn state, then stops the owned screen. Native test sessions require the same
+cleanup as `LiveHarnessTests`. `ROTA_TERMINAL_APP_ONLY=1` isolates the return
+into the app against existing native history, without submitting another
+native-terminal prompt.
+The terminal states were rendered in light before dark at 820 × 520 pt and
+100%/150% zoom. Bounds checks passed for the waiting, working, updated history
+preview and restored composer states. Waiting must not show a working clock;
+a new native turn resets that clock rather than including terminal idle time.
+Centered status notes keep text ahead of their decorative hairlines in layout
+priority, so zoom does not squeeze a short note into a narrow vertical column.
+
 `ChatOpener` writes a `.command` file, which needs no Automation permission,
 and `TerminalLauncher` opens it in the terminal picked in Settings: Terminal,
 iTerm2 or another app as a document, Ghostty as a new instance with `-e`

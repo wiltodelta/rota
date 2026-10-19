@@ -199,7 +199,7 @@ private struct SessionRow: View {
     var body: some View {
         HStack(spacing: metrics.points(8)) {
             Group {
-                if record.outcome == .running {
+                if record.outcome == .running, record.terminalState != .waiting {
                     // A working session spins, as in super.engineering's list.
                     ProgressView().controlSize(.mini).frame(width: metrics.points(8), height: metrics.points(8))
                 } else {
@@ -207,7 +207,7 @@ private struct SessionRow: View {
                 }
             }
             .accessibilityElement()
-            .accessibilityLabel(record.outcome.title)
+            .accessibilityLabel(record.statusTitle)
             VStack(alignment: .leading, spacing: metrics.points(1)) {
                 Text(model.scheduler.routine(record.routineID)?.name ?? record.routineID)
                     .fontWeight(record.isUnread ? .semibold : .regular)
@@ -245,7 +245,7 @@ private struct SessionRow: View {
 
     private var details: String {
         var parts = [record.startedAt.formatted(date: .omitted, time: .shortened), record.harness.title,
-                     record.outcome.title]
+                     record.statusTitle]
         if record.trigger == .catchUp { parts.insert("catch-up", at: 1) }
         return parts.joined(separator: " \u{00B7} ")
     }

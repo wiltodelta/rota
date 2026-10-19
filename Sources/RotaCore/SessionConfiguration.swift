@@ -10,6 +10,14 @@ public struct SessionConfiguration: Equatable, Sendable {
         self.effort = Self.value(effort)
     }
 
+    /// Shared ACP configuration shape from live replies and archived updates.
+    static func acp(_ value: Any) -> SessionConfiguration {
+        let options = (value as? [String: Any])?["configOptions"] as? [[String: Any]] ?? []
+        let model = options.first { $0["id"] as? String == "model" }?["currentValue"] as? String
+        let effort = options.first { $0["id"] as? String == "reasoning_effort" }?["currentValue"] as? String
+        return SessionConfiguration(model: model, effort: effort)
+    }
+
     private static func value(_ text: String?) -> String? {
         text.flatMap {
             let value = $0.trimmingCharacters(in: .whitespacesAndNewlines)

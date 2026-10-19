@@ -15,6 +15,17 @@ extension Scheduler {
             },
             questionResolved: { [weak self] questionID in
                 self?.resolveQuestion(questionID, runID: runID)
+            },
+            terminalState: { [weak self] state in
+                guard let self, var current = self.active[id], current.id == runID,
+                      current.terminalState != state else { return }
+                if state == .working { self.runStarts[id] = self.now() }
+                current.terminalState = state
+                self.active[id] = current
+                self.saveRecord(current)
+            }, terminalInput: { [weak self] in
+                guard let self, let current = self.active[id], current.id == runID else { return }
+                self.dismissAttention(current)
             })
     }
 

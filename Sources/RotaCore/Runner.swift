@@ -21,6 +21,7 @@ public struct LaunchSpec: Equatable, Sendable {
     public var effort: String?
     /// A note the log opens with, such as why a Claude run is not interactive.
     public var notice: String?
+    public var terminalTranscript: URL?
 
     public init(executable: String, prompt: String, arguments: [String], workingDirectory: String,
                 environment: [String: String], mode: LaunchMode, timeout: TimeInterval?, log: URL,
@@ -68,16 +69,22 @@ public struct RunEvents {
     public var configuration: (SessionConfiguration) -> Void
     public var question: (AgentQuestion, @escaping @Sendable (QuestionAnswer) -> Void) -> Void
     public var questionResolved: (String) -> Void
+    public var terminalState: (TerminalState) -> Void
+    public var terminalInput: () -> Void
 
     public init(session: @escaping (String) -> Void, finished: @escaping (RunOutcome) -> Void,
                 configuration: @escaping (SessionConfiguration) -> Void = { _ in },
                 question: @escaping QuestionHandler = { _, reply in reply(.init(action: "cancel")) },
-                questionResolved: @escaping (String) -> Void = { _ in }) {
+                questionResolved: @escaping (String) -> Void = { _ in },
+                terminalState: @escaping (TerminalState) -> Void = { _ in },
+                terminalInput: @escaping () -> Void = {}) {
         self.session = session
         self.finished = finished
         self.configuration = configuration
         self.question = question
         self.questionResolved = questionResolved
+        self.terminalState = terminalState
+        self.terminalInput = terminalInput
     }
 }
 
@@ -125,7 +132,7 @@ public final class ProcessLauncher: RoutineLaunching {
         output.seekToEndOfFile()
         Self.log.info("Starting \(spec.executable, privacy: .public) in \(spec.workingDirectory, privacy: .public)")
         let journal = Self.journal(for: spec, output: output, events: events)
-        journal.record(.user, spec.prompt)
+        if spec.mode.recordsInitialPrompt { journal.record(.user, spec.prompt) }
         switch spec.mode {
         case .claudeStream:
             if let notice = spec.notice { journal.line("[rota: \(notice)]") }
@@ -136,9 +143,16 @@ public final class ProcessLauncher: RoutineLaunching {
             return CodexDaemonRun.start(spec, journal: journal)
         case .grokACP:
             return GrokACPRun.start(spec, journal: journal)
-        case .screen:
-            return try ScreenRun.start(spec, journal: journal)
+        case .screen, .terminal:
+            return try launchScreen(spec, journal: journal)
         }
+    }
+
+    private func launchScreen(_ spec: LaunchSpec, journal: RunJournal) throws -> RunControl {
+        if case .terminal(let harness) = spec.mode {
+            return try TerminalRun.start(spec, harness: harness, journal: journal)
+        }
+        return try ScreenRun.start(spec, journal: journal)
     }
 
     /// Presentation storage is optional: damaged chat history must not prevent

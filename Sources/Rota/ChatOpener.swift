@@ -9,6 +9,16 @@ enum ChatOpener {
     private static let log = Logger(subsystem: "com.wiltodelta.rota", category: "chat")
 
     static func open(_ record: RunRecord, workingDirectory: String, scheduler: Scheduler, terminal: String?) {
+        Task {
+            if !scheduler.isActive(record) {
+                guard await scheduler.continueInTerminal(record) else { return }
+            }
+            openAttached(record, workingDirectory: workingDirectory, scheduler: scheduler, terminal: terminal)
+        }
+    }
+
+    private static func openAttached(_ record: RunRecord, workingDirectory: String,
+                                     scheduler: Scheduler, terminal: String?) {
         guard let (executable, arguments) = scheduler.terminalCommand(for: record) else { return }
         let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rota/chat")

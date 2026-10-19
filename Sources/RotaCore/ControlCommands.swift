@@ -231,6 +231,7 @@ extension Scheduler {
                                    "harness": record.harness.rawValue, "trigger": record.trigger.rawValue,
                                    "startedAt": Self.timestamp.string(from: record.startedAt),
                                    "outcome": record.outcome.title, "running": isActive(record)]
+        if isActive(record), let state = record.terminalState { json["terminalState"] = state.rawValue }
         if let ended = record.endedAt { json["endedAt"] = Self.timestamp.string(from: ended) }
         if let attention = record.attention { json["needsReply"] = attention }
         return json

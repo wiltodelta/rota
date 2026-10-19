@@ -33,6 +33,13 @@ public enum LaunchMode: Equatable, Sendable {
     case grokACP
     /// A detached `screen` session the user attaches to with `screen -r`.
     case screen
+    /// A native CLI continuation whose persisted transcript Rota follows.
+    case terminal(Harness)
+
+    var recordsInitialPrompt: Bool {
+        if case .terminal = self { return false }
+        return true
+    }
 }
 
 /// What a routine runs on: an agent CLI, or a plain shell command.
