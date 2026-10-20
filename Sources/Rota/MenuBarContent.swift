@@ -7,10 +7,7 @@ struct MenuBarContent: View {
     @Environment(AppModel.self) private var model
 
     private var routines: [Routine] {
-        model.scheduler.routines.sorted { lhs, rhs in
-            if lhs.enabled != rhs.enabled { return lhs.enabled }
-            return (lhs.nextFire ?? .distantFuture) < (rhs.nextFire ?? .distantFuture)
-        }
+        RoutineOrder.byNextRun(model.scheduler.routines)
     }
 
     var body: some View {

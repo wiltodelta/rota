@@ -733,7 +733,13 @@ Layout rules learned while measuring the narrowest window (820 pt):
   every three seconds and reading finished sessions once. Previews are derived
   from logs rather than persisted as another copy of session content.
 - Routines appear first in the sidebar, above session history grouped by day,
-  so history growth does not push routine navigation below it. `SessionView`
+  so history growth does not push routine navigation below it. The sidebar and
+  menu bar panel share `RoutineOrder.byNextRun`: enabled routines with a next
+  slot appear earliest first, followed by routines without a scheduled launch
+  (including paused routines). Equal slots and unscheduled routines retain
+  their stored order. Running routines use their next scheduled slot too.
+  Sorting is for display only and follows schedule and enabled-state changes.
+  `SessionView`
   is the chat with its composer. A routine's view
   is its header and sessions; the settings form, used rarely, is a sheet
   (`EditRoutineSheet`). Do not nest a `Form` in a SwiftUI `ScrollView`: it scrolls

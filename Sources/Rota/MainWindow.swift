@@ -40,7 +40,7 @@ struct MainWindow: View {
         )) {
             List(selection: $model.selection) {
                 Section {
-                    ForEach(model.scheduler.routines) { routine in
+                    ForEach(RoutineOrder.byNextRun(model.scheduler.routines)) { routine in
                         HStack(spacing: metrics.points(8)) {
                             StatusDot(routine: routine)
                             VStack(alignment: .leading, spacing: metrics.points(1)) {
