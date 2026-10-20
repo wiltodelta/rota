@@ -28,9 +28,7 @@ flowchart LR
   persists each routine's `nextFire`. A tick fires a due slot (a catch-up or a
   skip when it is late, below) and moves `nextFire` past now either way.
 - `Harness` holds everything per CLI: default path, headless arguments, launch
-  mode, chat arguments, and which capabilities (Chrome, phone push) it has.
-  `SkillRequirements` reads the routine's `.claude/skills/<id>/SKILL.md` for
-  markers of those capabilities.
+  mode and chat arguments.
 - A routine's explicit `model` and `effort` (nil leaves the CLI's default) are
   captured in `RunRecord` at session creation and passed through `LaunchSpec`;
   historical labels and continuations use that snapshot, even after editing
@@ -729,7 +727,10 @@ Layout rules learned while measuring the narrowest window (820 pt):
   Mark sources and dimensions: `docs/harness-logos.md`.
 - `SessionHistoryRow` keeps date and status above a two-line excerpt, with the
   run's agent/model snapshot and completed duration below. Header metadata
-  stacks at narrow widths. `SessionPreview` prioritizes pending questions and
+  stacks at narrow widths. Skipped slots are informational history entries,
+  not session buttons: they show their reason with a neutral clock and no
+  duration. They remain outside `Scheduler.allRecords()`, so selecting a skip
+  must never navigate to a session detail. `SessionPreview` prioritizes pending questions and
   attention, then recorded failure reasons or the latest agent/command output.
   Tool calls and agent tool output never replace the latest readable message, including while a
   session is running. User prompts and routine instructions never become previews. Markdown is

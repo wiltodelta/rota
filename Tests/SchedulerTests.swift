@@ -666,14 +666,13 @@ final class SchedulerTests: XCTestCase {
         XCTAssertNil(scheduler.active[routine.id])
     }
 
-    func testShellRoutineRunsItsCommandWithoutSkillScanning() throws {
+    func testShellRoutineRunsItsCommand() throws {
         var routine = addDailyRoutine()
         routine.harness = .shell
-        routine.prompt = "echo PushNotification"
+        routine.prompt = "echo hello"
         scheduler.save(routine)
-        XCTAssertTrue(scheduler.requirements(of: routine).isEmpty)
         scheduler.run(routine, trigger: .manual)
-        XCTAssertEqual(launcher.specs.first?.prompt, "echo PushNotification")
+        XCTAssertEqual(launcher.specs.first?.prompt, "echo hello")
         XCTAssertEqual(launcher.specs.first?.mode, .screen)
     }
 

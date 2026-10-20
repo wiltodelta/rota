@@ -196,11 +196,6 @@ public final class Scheduler {
 
     // MARK: Running
 
-    public func requirements(of routine: Routine) -> Set<Capability> {
-        guard routine.harness.isAgent else { return [] }
-        return SkillRequirements.scan(file: routine.skillFile).union(SkillRequirements.scan(routine.prompt))
-    }
-
     public func run(_ routine: Routine, trigger: RunTrigger) {
         guard active[routine.id] == nil else { return }
         var record = RunRecord(routineID: routine.id, trigger: trigger, harness: routine.harness,

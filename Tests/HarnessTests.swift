@@ -62,14 +62,6 @@ final class HarnessTests: XCTestCase {
         XCTAssertFalse(Harness.shell.takesMessages)
     }
 
-    func testScanFindsEachMarker() {
-        XCTAssertEqual(SkillRequirements.scan("call mcp__claude-in-chrome__navigate"), [.chrome])
-        XCTAssertEqual(SkillRequirements.scan("open it in Claude in Chrome"), [.chrome])
-        XCTAssertEqual(SkillRequirements.scan("the Chrome MCP tab"), [.chrome])
-        XCTAssertEqual(SkillRequirements.scan("then PushNotification"), [.push])
-        XCTAssertEqual(SkillRequirements.scan("read the repo with Playwright"), [])
-    }
-
     /// Codex's daemon and Grok's leader outlive a run, so a run's variables go over the protocol.
     func testTheRunsVariablesReachSharedHarnessesOverTheProtocol() throws {
         let environment = ["ROTA_SESSION": "S1", "ROTA_ROUTINE": "digest", "ROTA_CLI": "/x/rota",
@@ -102,26 +94,6 @@ final class HarnessTests: XCTestCase {
         let process = ProcessLauncher.loginShellProcess("/bin/echo", [], in: "/", environment: ["ROTA_SESSION": "S"])
         XCTAssertEqual(process.environment?["ROTA_SESSION"], "S")
         XCTAssertNil(process.environment?["CLAUDECODE"])
-    }
-
-    func testGapsPerHarness() {
-        let both: Set<Capability> = [.chrome, .push]
-        XCTAssertTrue(SkillRequirements.gaps(both, on: .claude).isEmpty)
-        let codex = SkillRequirements.gaps(both, on: .codex)
-        XCTAssertEqual(codex.map(\.0), [.chrome, .push])
-        if case .differentTools = codex[0].1 {} else { XCTFail("Codex has Chrome under other tool names") }
-        // Without Claude's phone push, every harness has Rota's own notification to use instead.
-        for harness in [Harness.codex, .grok, .shell] {
-            guard case .differentTools(let advice) = SkillRequirements.gaps([.push], on: harness).first?.1 else {
-                return XCTFail("\(harness) should point to rota notify")
-            }
-            XCTAssertTrue(advice.contains("notify"))
-        }
-        if case .differentTools = SkillRequirements.gaps([.chrome], on: .grok).first?.1 {} else {
-            XCTFail("Grok reaches Chrome through playwright")
-        }
-        XCTAssertEqual(SkillRequirements.gaps([.chrome], on: .shell).map(\.1), [.missing])
-        XCTAssertTrue(SkillRequirements.gaps([], on: .grok).isEmpty)
     }
 
     func testDefaultExecutablesLiveUnderHome() {

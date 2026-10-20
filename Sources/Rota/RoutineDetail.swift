@@ -18,9 +18,6 @@ struct RoutineDetail: View {
             header
                 .padding(.horizontal, metrics.points(20))
                 .padding(.vertical, metrics.points(14))
-            HarnessWarnings(routine: routine)
-                .padding(.horizontal, metrics.points(20))
-                .padding(.bottom, metrics.points(10))
             Divider()
             List(records) { record in
                 SessionHistoryRow(record: record)

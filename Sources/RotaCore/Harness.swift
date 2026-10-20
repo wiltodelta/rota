@@ -1,26 +1,5 @@
 import Foundation
 
-/// A tool a routine's skill may depend on that not every harness has.
-public enum Capability: String, CaseIterable, Codable, Sendable {
-    case chrome
-    case push
-
-    public var title: String {
-        switch self {
-        case .chrome: return "Chrome"
-        case .push: return "Phone push"
-        }
-    }
-}
-
-public enum CapabilitySupport: Equatable, Sendable {
-    case native
-    /// The harness has the capability under different tool names, so a skill
-    /// written against Claude's names needs a binding before it works there.
-    case differentTools(String)
-    case missing
-}
-
 /// How a run is started and watched. Each keeps the run open to the user while it works.
 public enum LaunchMode: Equatable, Sendable {
     /// `claude -p` with stream-json in and out; Rota writes into the session.
@@ -78,28 +57,6 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
         case .claude, .grok, .antigravity: return home.appendingPathComponent(".local/bin/\(commandName)").path
         case .codex: return "/opt/homebrew/bin/\(commandName)"
         case .shell: return "/bin/\(commandName)"
-        }
-    }
-
-    public func support(for capability: Capability) -> CapabilitySupport {
-        switch (self, capability) {
-        case (.claude, _):
-            return .native
-        case (.codex, .chrome):
-            return .differentTools("Codex drives Chrome through its own plugin, not mcp__claude-in-chrome__ tools.")
-        case (.grok, .chrome):
-            return .differentTools("Grok drives Chrome through the playwright MCP server it loads from Claude's "
-                                   + "user config, not mcp__claude-in-chrome__ tools.")
-        case (.grok, .push):
-            // Grok's commands run under its shared leader, so the session's rule names the command.
-            return .differentTools("Use the rota notify command the session's rules name (add --needs-reply "
-                                   + "to wait for an answer) instead: a Mac notification that opens this session.")
-        case (_, .push):
-            // Phone push is Claude's; Rota's own notification reaches every harness.
-            return .differentTools("Use \"$ROTA_CLI\" notify \"…\" (add --needs-reply to wait for an answer) "
-                                   + "instead: a Mac notification that opens this session.")
-        case (.grok, _), (.antigravity, .chrome), (.shell, _):
-            return .missing
         }
     }
 
