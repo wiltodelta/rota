@@ -12,7 +12,7 @@ let usage = """
       list                         routines, their schedules and state
       show <id>                    one routine
       add <id> --folder DIR --schedule "CRON" (--skill SKILL | --prompt TEXT)
-          [--harness claude|codex|grok|shell] [--name NAME] [--model M] [--effort E]
+          [--harness claude|codex|grok|antigravity|shell] [--name NAME] [--model M] [--effort E]
           [--time-limit MIN] [--off]
       update <id> [the options of add] [--no-time-limit] [--default-model]
       on <id> | off <id>           turn a routine on or off

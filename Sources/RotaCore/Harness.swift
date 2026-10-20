@@ -31,6 +31,8 @@ public enum LaunchMode: Equatable, Sendable {
     case codexDaemon
     /// A session on Grok's shared leader over ACP; Rota sends it prompts.
     case grokACP
+    /// Antigravity stream-json on stdin and stdout.
+    case antigravityStream
     /// A detached `screen` session the user attaches to with `screen -r`.
     case screen
     /// A native CLI continuation whose persisted transcript Rota follows.
@@ -47,6 +49,7 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
     case claude
     case codex
     case grok
+    case antigravity
     case shell
 
     public var id: String { rawValue }
@@ -55,13 +58,14 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
     public static let agents = allCases.filter(\.isAgent)
 
     /// The CLI's name: the agent's own, or the shell that runs a command.
-    public var commandName: String { self == .shell ? "zsh" : rawValue }
+    public var commandName: String { self == .shell ? "zsh" : (self == .antigravity ? "agy" : rawValue) }
 
     public var title: String {
         switch self {
         case .claude: return "Claude Code"
         case .codex: return "Codex"
         case .grok: return "Grok Build"
+        case .antigravity: return "Antigravity"
         case .shell: return "Shell"
         }
     }
@@ -71,7 +75,7 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
     /// Where the CLI installs itself, used until the user sets another path.
     public func defaultExecutable(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String {
         switch self {
-        case .claude, .grok: return home.appendingPathComponent(".local/bin/\(commandName)").path
+        case .claude, .grok, .antigravity: return home.appendingPathComponent(".local/bin/\(commandName)").path
         case .codex: return "/opt/homebrew/bin/\(commandName)"
         case .shell: return "/bin/\(commandName)"
         }
@@ -94,7 +98,7 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
             // Phone push is Claude's; Rota's own notification reaches every harness.
             return .differentTools("Use \"$ROTA_CLI\" notify \"…\" (add --needs-reply to wait for an answer) "
                                    + "instead: a Mac notification that opens this session.")
-        case (.grok, _), (.shell, _):
+        case (.grok, _), (.antigravity, .chrome), (.shell, _):
             return .missing
         }
     }
@@ -104,6 +108,7 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
         case .claude: return .claudeStream
         case .codex: return .codexDaemon
         case .grok: return .grokACP
+        case .antigravity: return .antigravityStream
         case .shell: return .screen
         }
     }
@@ -129,7 +134,7 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
         case (.codex, false): return (nil, ["resume", session])
         case (.grok, false): return (nil, ["--resume", session])
         case (.shell, true): return (ScreenRun.screen, ["-r", session])
-        case (.claude, true), (.codex, true), (.grok, true), (.shell, false): return nil
+        case (.claude, true), (.codex, true), (.grok, true), (.antigravity, _), (.shell, false): return nil
         }
     }
 

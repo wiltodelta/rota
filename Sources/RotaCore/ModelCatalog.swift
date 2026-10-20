@@ -33,11 +33,13 @@ public enum ModelCatalog {
 
     /// Blocks while the CLI answers: call it off the main thread.
     public static func models(for harness: Harness, executable: String) -> [ModelOption] {
+        guard FileManager.default.isExecutableFile(atPath: executable) else { return [] }
         switch harness {
         case .claude:
             return ClaudeConfiguration.read(executable: executable, directory: NSTemporaryDirectory())?.models ?? []
         case .codex: return codexModels(executable: executable)
         case .grok: return grokModels(executable: executable)
+        case .antigravity: return AntigravityCatalog.read(executable: executable)
         case .shell: return []
         }
     }

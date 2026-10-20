@@ -7,6 +7,7 @@
 //   press <id-or-title>          press the first button with that identifier or title
 //   set <id> <text>              set a text field's value
 //   value <id>                   print an element's value
+//   enabled <id>                 print whether a control is enabled
 //   visible <id-or-title>       require full visibility inside the window and scroll viewport
 //   in-toolbar <id>             require an element to remain inside the title-bar toolbar
 //   text-count <value>          count static text elements with that exact value
@@ -130,6 +131,9 @@ case "value":
     // A switch or checkbox reports a number, a field a string.
     let value: Any? = attribute(element, kAXValueAttribute)
     print((value as? String) ?? (value as? NSNumber)?.stringValue ?? "")
+case "enabled":
+    guard arguments.count == 2, let element = find({ matches($0, arguments[1]) }) else { fail("no element") }
+    print((attribute(element, kAXEnabledAttribute) as Bool?) == true ? "true" : "false")
 case "exists":
     guard arguments.count == 2 else { fail("exists <id-or-title>") }
     exit(find({ matches($0, arguments[1]) }) == nil ? 1 : 0)
@@ -187,10 +191,23 @@ case "choose":
     // SwiftUI can redraw the form while its menu is open and drop the pick, so
     // read the value back and try again.
     guard arguments.count == 3 else { fail("choose <popup-id> <item>") }
+    // A native popup's AXPress can open an inactive menu without selecting its
+    // item. Make the development app active before entering menu tracking.
+    app.activate()
+    AXUIElementSetAttributeValue(root, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+    for _ in 0..<20 {
+        if (attribute(root, kAXFrontmostAttribute) as Bool?) == true { break }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+    }
+    guard (attribute(root, kAXFrontmostAttribute) as Bool?) == true else {
+        fail("Rota did not become active")
+    }
     for _ in 0..<3 {
         guard let popup = find({ matches($0, arguments[1]) }) else { fail("no element \(arguments[1])") }
         if (attribute(popup, kAXValueAttribute) as String?) == arguments[2] { exit(0) }
-        AXUIElementPerformAction(popup, kAXPressAction as CFString)
+        AXUIElementSetAttributeValue(popup, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        let opened = AXUIElementPerformAction(popup, kAXPressAction as CFString)
+        guard opened == .success else { fail("popup press failed: \(opened.rawValue)") }
         Thread.sleep(forTimeInterval: 0.6)
         if let item = find(in: popup, first: { element in
             (attribute(element, kAXRoleAttribute) as String?) == "AXMenuItem"

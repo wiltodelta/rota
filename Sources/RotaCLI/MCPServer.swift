@@ -2,7 +2,7 @@ import Foundation
 import RotaCore
 
 /// `rota mcp`: Rota's routines as MCP tools over stdio, one JSON-RPC message
-/// per line, for Claude Code, Codex and Grok Build. Each tool is one control
+/// per line, for Claude Code, Codex, Grok Build and Antigravity. Each tool is one control
 /// method of the running app.
 struct MCPServer {
     struct Tool {
@@ -28,7 +28,8 @@ struct MCPServer {
             "workingDirectory": property("string", "The project folder the routine runs in, an absolute path."),
             "schedule": property("string",
                              "Five-field cron in the Mac's local time, such as \"0 9 * * 1-5\" for weekdays at 9:00."),
-            "harness": property("string", "Where it runs: claude (Claude Code), codex, grok (Grok Build) or shell "
+            "harness": property("string", "Where it runs: claude (Claude Code), codex, grok (Grok Build), "
+                                + "antigravity (agy) or shell "
                                     + "(a zsh command).").merging(["enum": Harness.allCases.map(\.rawValue)]) { $1 },
             "prompt": property("string", "What the agent is asked each run, or the command for shell."),
             "skill": property("string",
@@ -103,8 +104,8 @@ struct MCPServer {
                     "capabilities": ["tools": [String: Any]()],
                     "serverInfo": ["name": "rota", "version": Self.version],
                     "instructions": "Rota is a Mac app that runs routines (prompts or shell commands) on a cron "
-                        + "schedule on Claude Code, Codex, Grok Build or zsh. Use these tools to schedule, change, "
-                        + "run and read them."
+                        + "schedule on Claude Code, Codex, Grok Build, Antigravity or zsh. "
+                        + "Use these tools to schedule, change, run and read them."
                 ]]
             case "ping": answer = ["result": [String: Any]()]
             case "tools/list": answer = ["result": ["tools": Self.tools.map(Self.schema)]]

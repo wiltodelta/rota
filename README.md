@@ -3,7 +3,7 @@
 [![Build Rota App](https://github.com/wiltodelta/rota/actions/workflows/build.yml/badge.svg)](https://github.com/wiltodelta/rota/actions/workflows/build.yml)
 
 A macOS menu bar app that runs your agent routines on a schedule, on the
-harness you choose for each one: Claude Code, Codex, Grok Build, or a plain
+harness you choose for each one: Claude Code, Codex, Grok Build, Antigravity, or a plain
 shell command. A routine is a project folder, a cron schedule and a prompt,
 usually "invoke this project skill and follow it". Each run is a session you
 read as a chat and keep talking to, while it works or after, as in Claude
@@ -11,7 +11,7 @@ Desktop.
 
 ## Features
 
-- **One scheduler for every harness.** Pick Claude Code, Codex, Grok Build or
+- **One scheduler for every harness.** Pick Claude Code, Codex, Grok Build, Antigravity or
   Shell per routine and switch at any time, with the model and reasoning
   effort to run on: Rota lists the models each agent's CLI offers. Standard five-field cron
   schedules, with common ones a click away and the next three run times shown
@@ -45,9 +45,15 @@ Desktop.
     turn (`turn/steer`). Afterwards the thread continues (`thread/resume`).
   - Grok Build runs through its shared leader: a message is answered right
     after the current turn. Afterwards the session is loaded and continued.
+  - Antigravity runs through `agy` with stream-json. Messages wait for the
+    current turn to finish; finished conversations continue by ID in Rota.
+    Models are grouped by family, with a separate effort picker containing
+    only the tiers its CLI reports for that model. Fixed-effort models disable
+    the effort picker. Native question forms and
+    synchronized terminal continuation are not available for Antigravity.
   - Shell commands run in a detached `screen` session; **Open in Terminal**
     attaches with `screen -r`, where you can type into the command or stop it.
-  A continued session runs again and appends to the same chat. Finished agent
+  A continued session runs again and appends to the same chat. Finished Claude Code, Codex and Grok Build
   sessions also open in their own CLI with **Continue in Terminal**. Rota follows
   that continuation: new messages and tool calls appear in the same chat and
   session preview, with **Working in Terminal** or **Waiting in Terminal** as
@@ -68,7 +74,7 @@ Desktop.
   Delete a finished session and its local logs with the trash button or
   **Delete Session…** in its context menu. Confirmation is required; the
   routine and the agent's own history stay unchanged.
-- **Agents manage routines.** A Claude Code, Codex or Grok Build session can
+- **Agents manage routines.** A Claude Code, Codex, Grok Build or Antigravity session can
   schedule a routine ("run this every weekday at 9"), change, run, pause or
   delete one, and read or message its sessions, through Rota's MCP server.
   Turn it on per agent in Settings > Routines from agents. A routine an agent
@@ -144,7 +150,7 @@ Desktop.
 - macOS 15 (Sequoia) or later, on Apple silicon. On macOS 26 (Tahoe) the menu
   bar panel uses Liquid Glass.
 - The CLIs you want to use, installed and signed in: `claude`, `codex`,
-  `grok`. Rota finds them on your login shell's PATH and in the usual install
+  `grok`, `agy` (Antigravity CLI). Rota finds them on your login shell's PATH and in the usual install
   folders; Settings lists every copy it found with its version, and Choose
   Other picks any file.
 - For building from source: Xcode 26 or later.

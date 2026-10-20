@@ -69,7 +69,7 @@ quit_rota() {
         for child in $(pgrep -P "$app_pid" || true); do
             command="$(ps -o args= -p "$child")" || continue
             case "$command" in
-                *" mcp get rota"|*" mcp list --json") kill "$child" 2>/dev/null || true ;;
+                *" mcp get rota"|*" mcp list --json"|*" mcp list") kill "$child" 2>/dev/null || true ;;
             esac
         done
     done
@@ -122,7 +122,7 @@ check_layout() {
 
 check_agents_scrolling() {
     local mode amount
-    wait_exists agentAccess-grok
+    wait_exists agentAccess-antigravity
     # AXReveal and scrollbar values bypass the wheel delivery path that can be
     # swallowed by a natural-height Form nested inside another scroll view.
     for mode in pixel line; do
@@ -130,7 +130,7 @@ check_agents_scrolling() {
         "$DRIVER" scroll-wheel Agents "$amount" "$mode"
         check wait_visible agentCLIsHeading
         "$DRIVER" scroll-wheel Agents "-$amount" "$mode"
-        check wait_visible agentAccess-grok
+        check wait_visible agentAccess-antigravity
         check wait_visible agentAccessFooter
     done
 }
@@ -193,6 +193,9 @@ for appearance in light dark; do
     else
         defaults write "$DOMAIN" terminalApp /System/Applications/Utilities/Terminal.app; expected=Terminal
     fi
+    cp scripts/fixtures/antigravity-catalog.sh "$WORK/agy"
+    chmod 700 "$WORK/agy"
+    defaults write "$DOMAIN" executables -dict antigravity "$WORK/agy"
     launch "$appearance"
     check "$DRIVER" exists newRoutine
     check "$DRIVER" in-toolbar toggleSidebar
@@ -262,6 +265,21 @@ PYTHON
     check "$DRIVER" exists routineModel
     check "$DRIVER" exists routineEffort
     capture "Rota" "$appearance-new"
+    "$DRIVER" choose routineHarness Antigravity
+    check wait_value routineModel 'Default (Model A)'
+    "$DRIVER" choose routineModel 'Model A'
+    "$DRIVER" choose routineEffort High
+    [[ "$("$DRIVER" enabled routineEffort)" == true ]] || fail "adjustable effort is disabled"
+    capture "Rota" "$appearance-new-antigravity"
+    "$DRIVER" choose routineModel Fixed
+    check wait_value routineEffort 'Not supported'
+    [[ "$("$DRIVER" enabled routineEffort)" == false ]] || fail "fixed effort is enabled"
+    capture "Rota" "$appearance-antigravity-fixed"
+    "$DRIVER" choose routineModel 'Model A'
+    "$DRIVER" choose routineEffort Low
+    "$DRIVER" choose routineHarness Shell
+    "$DRIVER" choose routineHarness Antigravity
+    check wait_value routineModel 'Default (Model A)'
     "$DRIVER" reveal routineTimeLimit
     [[ "$("$DRIVER" value routineTimeLimit)" == 0 ]] || fail "new routine starts without a time limit"
     "$DRIVER" press routineTimeLimit

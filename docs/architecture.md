@@ -7,6 +7,8 @@ flowchart LR
     Launcher -->|Claude| ClaudeTUI[ClaudeInteractiveRun: interactive claude in screen, transcript read back]
     Launcher -->|Claude, untrusted folder| ClaudeRun[ClaudeStreamRun: claude -p, stream-json in and out]
     Launcher -->|Codex| CodexRun[CodexDaemonRun: JSON-RPC over WebSocket to the app-server daemon]
+    Launcher -->|Antigravity| AgyRun[AntigravityRun: stream-json over stdio]
+    AgyRun --> Finish
     Launcher -->|Grok| GrokRun[GrokACPRun: ACP over stdio through the shared leader]
     Launcher -->|Shell| ScreenRun[ScreenRun: detached screen, tee to the log, exit file]
     CodexRun --> Finish[RunEvents.finished]
@@ -39,8 +41,10 @@ flowchart LR
   `LaunchSpec.modelFlags`, Codex fields in `thread/start` and `turn/start`. A
   session keeps its original harness. `ModelCatalog` lists the choices without
   spending quota: Codex `model/list` with each model's efforts, `grok models`,
-  and Claude's control initialization with resolved model IDs and efforts. Each runner writes the model
-  the CLI actually picked into its log header. A Grok model passed on the
+  and Claude's control initialization with resolved model IDs and efforts.
+  Claude, Codex and Grok write the model the CLI actually picked into their
+  log headers; Antigravity retains only configuration its stream reports.
+  A Grok model passed on the
   command line in leader mode left `grok models`' default untouched (live test,
   2026-10-09); Grok's agent-mode guide says a `session/set_config_option`
   model change is synced to the leader's other clients, so Rota does not use it.
@@ -853,3 +857,112 @@ removed; the pre-existing Codex daemon and installed Rota were preserved. The
 Grok configuration and development defaults matched their pre-check state.
 Disposable mutation checks rejected losing alias resolution and prioritizing
 requested effort over applied effort.
+
+## Antigravity CLI
+
+`Harness.antigravity` discovers the `agy` executable, normally in
+`~/.local/bin`. `AntigravityRun` sends prompts only on stdin using
+`{"event":"user","message":{"content":"…"}}`. It passes `--input-format
+stream-json --output-format stream-json --dangerously-skip-permissions`, with
+optional `--model`, `--effort` and `--conversation` flags. Messages sent while
+working wait in Rota until the current result before starting another turn.
+Rota closes stdin after the last result and waits for the process to exit.
+The pipe reader uses `availableData`: a fixed-length read can hold a short
+`init` event until EOF and deadlock an interactive peer. A FIFO-coordinated
+local peer pins message queuing without timing assumptions.
+
+`AntigravityStream` normalizes `init`, `step_update` and `result` events into
+the existing transcript journal. Text deltas stream into one response; the
+result's full response is a fallback, never a second copy. Tool steps retain
+their name, parameters, output and error when supplied. Only `SUCCESS` succeeds;
+`CANCELED` and `INTERRUPTED` retain their meanings, other statuses fail, and a
+zero exit without a result is interrupted. A nonzero process exit still fails
+a run whose result said success. Every queued turn needs its own result: a
+missing follow-up result cannot reuse the first turn's success. Stop and time
+limits terminate the owned CLI
+and escalate to SIGKILL after three seconds if needed.
+
+The model picker starts with `agy models`, then validates candidate family
+aliases with the read-only `agy -p /model --model <family> --output-format json`.
+Only a native resolution to a listed variant authorizes grouping; a matching
+suffix alone is insufficient. The picker shows one family name, without its
+effort suffix, and keeps variant IDs as aliases. Each family's separate effort
+picker comes from `agy -p /effort --model <family> --output-format json`:
+`adjustable: false` disables it, and `available` supplies the exact supported
+tiers. CLI-wide `--help` choices are not a per-model capability list. Catalog reads
+skip missing executables before starting a protocol peer: probing an absent
+Codex CLI reproduced a process-wide `SIGPIPE` during UI fixture startup. These
+commands report zero turns and an empty conversation ID, use no generation
+quota, and do not change saved defaults. The current `/model` marks the
+catalog's default family. If native metadata cannot verify any family or the current default, the
+catalog remains unavailable; it never mixes verified families with unverified
+effort-specific variants. `AppSettings` publishes each agent's catalog as it
+arrives, so a slow CLI cannot delay another agent's ready models. The form
+reports loading and unavailable catalogs separately from a verified model
+whose effort is fixed. A canceled refresh cannot replace newer results.
+Resolved configuration records only values the stream actually reports.
+Explicit choices remain in the run's requested snapshot; an omitted CLI
+default stays unknown. MCP registration uses `agy mcp add rota <helper> mcp` and
+`agy mcp remove rota`; status reads enabled rows from `agy mcp list`.
+Settings changes remain explicit user actions. On a machine whose MCP file is
+generated by a configuration manager, register Rota in that manager's source
+instead, or its next sync can overwrite the CLI change.
+
+Native question forms and synchronized terminal continuation are unavailable:
+the documented stream input rejects control requests, and Rota does not read
+Antigravity's native archive. Chrome-specific Claude tools are marked missing;
+Rota notifications remain available through the run's `ROTA_*` environment.
+No public inference health endpoint has been verified for Antigravity, so its
+service probe is skipped rather than probing a documentation website.
+
+Protocol reference: [Antigravity headless mode](https://www.antigravity.google/docs/cli/headless/).
+CLI flags, model listing and MCP table shape were checked against the installed
+`agy` on 2026-10-19. Parser and process tests use synthetic local peers and spend
+no quota. Live verification requires `ROTA_LIVE=1` and explicit approval.
+
+The first 2026-10-19 smoke test returned `RESOURCE_EXHAUSTED` (HTTP 429,
+process exit 3). A later default-model run generated its first answer but hit
+that limit on continuation. Selecting another verified model completed both
+turns and recalled the phrase from the first turn. A separate live check read
+the staged attachment after the original file had changed, using an explicit
+model and effort. The default model's refusal did not prevent those later successful runs; this
+does not establish quota availability for every model.
+
+`LiveHarnessTests.testAntigravityMCPRegistrationIsIsolated` exercises agy's
+actual add, list, disable and remove commands with a disposable `HOME`, and
+compares the user's MCP file before and after. `ANTIGRAVITY_GEMINI_DIR` did not
+isolate the CLI's MCP configuration in the installed version; it must not be
+used as a substitute for a separate home. A separate home has no saved login,
+so registration checks do not prove model-driven tool use. The optional
+`testAntigravityCreatesRoutineOverMCP` requires `ROTA_DATA_DIR` and
+`ROTA_MCP_TEST_HELPER` pointing at a disposable development instance with a
+disabled `rota-e2e-probe` routine. It first reads that routine's unique prompt
+through MCP, checks the tool output, and only then creates a disabled synthetic
+routine. It uses an existing enabled Rota registration without rewriting it.
+
+The rendered UI check uses `scripts/fixtures/antigravity-catalog.sh`, the same
+synthetic CLI metadata producer as `AntigravityCatalogTests`, without model
+requests. It checks model/effort selection, fixed effort, and switching away
+from and back to Antigravity in both appearances. The driver activates Rota
+before opening a popup: an inactive menu could open through AX but silently
+drop the selection.
+
+The follow-up verification on 2026-10-19 also passed a live queued message and
+the model-driven MCP scenario above: the agent read the isolated probe, created
+a disabled shell routine, and the candidate helper verified and removed it.
+The user's MCP configuration and development preferences were unchanged.
+
+Final model-picker verification used the installed `agy` directly, separately
+from the synthetic regression fixture. Every family and every adjustable tier
+reported by its native metadata was selected in the running signed development
+bundle, in light and dark appearances at 820 pt, including fixed effort and
+switching to Shell and back. The captured picker text measured 14.13:1 in
+light and 11.08:1 in dark against its actual backgrounds; the capture reader
+was calibrated against known sRGB swatches. The complete UI check also passed
+both appearances, including the added agent's row in Settings at 150% scale.
+An additional check launched Antigravity from the routine's Run Now button in
+each appearance at 820 pt. Both native runs returned the expected response;
+the transcript, composer and persisted run retained the selected model and
+effort. The layout gate passed, and both finished-session captures were
+visually inspected. The disposable development app was closed and its complete
+preferences restored after the check.

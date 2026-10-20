@@ -141,7 +141,8 @@ public enum ServiceProbe {
         case .claude: return URL(string: "https://api.anthropic.com")
         case .codex: return URL(string: "https://api.openai.com")
         case .grok: return URL(string: "https://api.x.ai")
-        case .shell: return nil
+        // Antigravity has no verified public inference health endpoint.
+        case .antigravity, .shell: return nil
         }
     }
 

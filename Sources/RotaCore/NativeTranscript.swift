@@ -46,6 +46,7 @@ struct NativeTranscript {
     static func locate(_ harness: Harness, session: String) -> URL? {
         let home = FileManager.default.homeDirectoryForCurrentUser
         if harness == .claude { return ClaudeInteractiveRun.transcriptFile(session) }
+        guard harness == .codex || harness == .grok else { return nil }
         let root = home.appendingPathComponent(harness == .codex ? ".codex/sessions" : ".grok/sessions")
         guard let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil,
                                                         options: [.skipsHiddenFiles]) else { return nil }
@@ -73,7 +74,7 @@ struct NativeTranscript {
         case .claude: return claude(data, entry: entry)
         case .codex: return codex(entry)
         case .grok: return grok(entry)
-        case .shell: return []
+        case .antigravity, .shell: return []
         }
     }
 

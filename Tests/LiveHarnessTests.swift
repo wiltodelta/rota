@@ -55,7 +55,7 @@ final class LiveHarnessTests: XCTestCase {
         let snapshot = reader.read(log: log, shell: harness == .shell, finished: true)
         XCTAssertNil(snapshot.problem, snapshot.problem ?? "")
         XCTAssertEqual(snapshot.structured, harness != .shell)
-        if harness.isAgent, outcome == .succeeded {
+        if harness.isAgent, harness != .antigravity, outcome == .succeeded {
             XCTAssertNotNil(configuration.model, "The actual runner must report its session model")
             XCTAssertNotNil(configuration.effort, "Every agent must report an explicit resolved effort")
             print("Resolved configuration for \(harness.rawValue): \(configuration)")
@@ -63,6 +63,7 @@ final class LiveHarnessTests: XCTestCase {
         }
         XCTAssertTrue(snapshot.items.contains { $0.kind == .user && $0.text == prompt })
         print("---- \(harness.rawValue) log\n\(text)----")
+        if harness == .antigravity, let session { print("Antigravity test session: \(session)") }
         return (try XCTUnwrap(outcome), text, session)
     }
 
@@ -104,6 +105,157 @@ final class LiveHarnessTests: XCTestCase {
 
     func testGrokContinuesAFinishedSession() throws { try checkContinuation(.grok) }
 
+    /// Read-only native commands: no model turn, quota use or saved conversation.
+    func testAntigravityCatalogSeparatesModelsAndEfforts() throws {
+        let executable = Harness.antigravity.defaultExecutable()
+        let options = ModelCatalog.models(for: .antigravity, executable: executable)
+        XCTAssertFalse(options.isEmpty)
+        XCTAssertEqual(Set(options.map(\.id)).count, options.count)
+        for option in options {
+            let (status, output) = ProcessLauncher.capture(executable,
+                ["-p", "/effort", "--model", option.id, "--output-format", "json"],
+                in: folder.path, timeout: 20)
+            XCTAssertEqual(status, 0, output)
+            let native = try XCTUnwrap(AntigravityCatalog.payload(output, command: "effort"))
+            let expected = native["adjustable"] as? Bool == true ? native["available"] as? [String] ?? [] : []
+            XCTAssertEqual(option.efforts, expected, option.id)
+            print("Antigravity catalog: \(option.id) | \(option.title) | \(option.efforts)")
+        }
+    }
+
+    private func antigravityChoice() throws -> ModelOption {
+        let options = ModelCatalog.models(for: .antigravity, executable: Harness.antigravity.defaultExecutable())
+        return try XCTUnwrap(options.first { !$0.isDefault && !$0.efforts.isEmpty })
+    }
+
+    /// Uses agy's real config commands against a disposable home, never the user's MCP file.
+    func testAntigravityMCPRegistrationIsIsolated() throws {
+        let home = folder.appendingPathComponent("home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let executable = folder.appendingPathComponent("agy-isolated")
+        let script = """
+        #!/bin/zsh
+        export HOME="\(home.path)"
+        exec "\(Harness.antigravity.defaultExecutable())" "$@"
+        """
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let realConfig = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".gemini/config/mcp_config.json")
+        let original = try? Data(contentsOf: realConfig)
+        defer {
+            XCTAssertTrue((try? Data(contentsOf: realConfig)) == original, "The user's MCP config changed")
+        }
+        XCTAssertFalse(AgentAccess.isAdded(.antigravity, executable: executable.path))
+        let (added, output) = ProcessLauncher.capture(executable.path,
+            AgentAccess.addArguments(.antigravity, command: "/usr/bin/false"), in: folder.path, timeout: 20)
+        XCTAssertEqual(added, 0, output)
+        XCTAssertTrue(AgentAccess.isAdded(.antigravity, executable: executable.path))
+        let config = try Data(contentsOf: home.appendingPathComponent(".gemini/config/mcp_config.json"))
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: config) as? [String: Any])
+        let servers = try XCTUnwrap(root["mcpServers"] as? [String: [String: Any]])
+        XCTAssertEqual(Set(servers.keys), ["rota"])
+        XCTAssertEqual(servers["rota"]?["command"] as? String, "/usr/bin/false")
+        XCTAssertEqual(servers["rota"]?["args"] as? [String], ["mcp"])
+        XCTAssertEqual(ProcessLauncher.capture(executable.path, ["mcp", "disable", "rota"],
+                                              in: folder.path, timeout: 20).0, 0)
+        XCTAssertFalse(AgentAccess.isAdded(.antigravity, executable: executable.path))
+        XCTAssertEqual(ProcessLauncher.capture(executable.path, AgentAccess.removeArguments(.antigravity),
+                                              in: folder.path, timeout: 20).0, 0)
+        XCTAssertFalse(AgentAccess.isAdded(.antigravity, executable: executable.path))
+    }
+
+    /// Run only with a development app already serving the explicit disposable data folder.
+    /// Read a secret fixture marker through MCP before authorizing a synthetic write.
+    func testAntigravityCreatesRoutineOverMCP() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let data = environment["ROTA_DATA_DIR"], let helper = environment["ROTA_MCP_TEST_HELPER"] else {
+            throw XCTSkip("Set ROTA_DATA_DIR and ROTA_MCP_TEST_HELPER for an isolated development app")
+        }
+        let routines = try JSONDecoder().decode([Routine].self,
+            from: Data(contentsOf: URL(fileURLWithPath: data).appendingPathComponent("routines.json")))
+        let probe = try XCTUnwrap(routines.first { $0.id == "rota-e2e-probe" && !$0.enabled })
+        let config = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".gemini/config/mcp_config.json")
+        let registration = try Data(contentsOf: config)
+        let model = try antigravityChoice()
+        let (first, _, session) = try run(.antigravity,
+            prompt: "Use only the rota MCP get_routine tool to read id rota-e2e-probe. "
+                + "Do not call other tools or change anything. Reply with its prompt.",
+            message: nil, model: model.id, effort: model.efforts.first)
+        XCTAssertEqual(first, .succeeded)
+        var reader = TranscriptReader()
+        let snapshot = reader.read(log: folder.appendingPathComponent("antigravity.log"), shell: false, finished: true)
+        let tools = snapshot.items.filter { $0.kind == .tool }
+        let correctTarget = !tools.isEmpty && tools.allSatisfy { $0.text.contains("get_routine") }
+            && snapshot.items.contains { $0.kind == .output && $0.text.contains(probe.prompt) }
+        XCTAssertTrue(correctTarget, "MCP must return the disposable app's marker before any write")
+        let unchanged = try Data(contentsOf: config) == registration
+        XCTAssertTrue(unchanged, "The MCP registration changed after checking its target")
+        guard first == .succeeded, correctTarget, unchanged else { return }
+        let id = try XCTUnwrap(session)
+        let (second, log, _) = try run(.antigravity,
+            prompt: "Use only rota MCP create_routine once. Set id rota-e2e-created, "
+                + "workingDirectory \(folder.path), schedule 0 9 * * 1, harness shell, "
+                + "prompt echo synthetic, enabled false. Do not run it. Reply done.",
+            message: nil, resume: id, model: model.id, effort: model.efforts.first)
+        XCTAssertEqual(second, .succeeded, log)
+        let (status, output) = ProcessLauncher.capture(helper, ["show", "rota-e2e-created", "--json"],
+                                                       in: folder.path, timeout: 20)
+        XCTAssertEqual(status, 0, output)
+        let created = try JSONDecoder().decode(Routine.self, from: Data(output.utf8))
+        XCTAssertEqual(created.harness, .shell)
+        XCTAssertEqual(created.workingDirectory, folder.path)
+        XCTAssertFalse(created.enabled)
+        XCTAssertEqual(ProcessLauncher.capture(helper, ["remove", "rota-e2e-created"],
+                                              in: folder.path, timeout: 20).0, 0)
+    }
+
+    func testAntigravityReadsAttachmentOnChosenModel() throws {
+        let model = try antigravityChoice()
+        let contents = UUID().uuidString
+        let source = folder.appendingPathComponent("fixture.txt")
+        try contents.write(to: source, atomically: true, encoding: .utf8)
+        let attachments = try ChatAttachmentStore(log: folder.appendingPathComponent("antigravity.log")).stage([source])
+        try "The original has changed.".write(to: source, atomically: true, encoding: .utf8)
+        let prompt = try ChatMessage(text: "Read the attached file. Reply with its contents only. Do not change files.",
+                                     attachments: attachments).encoded()
+        let (outcome, log, session) = try run(.antigravity, prompt: prompt, message: nil,
+                                              model: model.id, effort: model.efforts.first)
+        XCTAssertEqual(outcome, .succeeded, log)
+        XCTAssertTrue(log.contains(contents), "The agent must read the staged file: \(log)")
+        if let session { print("Antigravity attachment test session: \(session)") }
+    }
+
+    func testAntigravityTakesAMessageIntoTheSession() throws {
+        let model = try antigravityChoice()
+        let (outcome, log, session) = try run(.antigravity, prompt: steerable,
+                                              message: "Reply with exactly: purple otter",
+                                              model: model.id, effort: model.efforts.first)
+        XCTAssertEqual(outcome, .succeeded, log)
+        XCTAssertNotNil(session)
+        XCTAssertTrue(log.contains("[you] Reply with exactly: purple otter"), log)
+        XCTAssertTrue(log.lowercased().contains("purple otter\n[rota: succeeded"), log)
+    }
+
+    func testAntigravityContinuesAFinishedSession() throws {
+        let model = try antigravityChoice()
+        let (first, _, session) = try run(.antigravity,
+            prompt: "Do not use tools or change files. "
+                + "Reply with exactly these two words, without punctuation: rota test",
+            message: nil, model: model.id, effort: model.efforts.first)
+        XCTAssertEqual(first, .succeeded)
+        guard first == .succeeded else { return }
+        let id = try XCTUnwrap(session)
+        let (second, log, again) = try run(.antigravity,
+            prompt: "What two-word phrase did I ask you to reply with? Reply with that phrase only. Do not use tools.",
+            message: nil, resume: id, model: model.id, effort: model.efforts.first)
+        XCTAssertEqual(second, .succeeded, log)
+        XCTAssertEqual(again, id)
+        XCTAssertEqual(log.components(separatedBy: "\nrota test\n").count, 3, log)
+        print("Antigravity test session: \(id)")
+    }
+
     /// Claude takes a message sent mid-turn into the same turn.
     func testClaudeTakesAMessageMidTurn() throws {
         let (outcome, log, session) = try run(.claude, prompt: steerable, message: "Reply with exactly: purple otter")
@@ -135,7 +287,7 @@ final class LiveHarnessTests: XCTestCase {
     }
 
     /// Each agent runs on the model the routine picks, and Grok's own default stays as it was.
-    func testEveryAgentRunsOnTheChosenModel() throws {
+    func testClaudeCodexAndGrokRunOnChosenModels() throws {
         let grokDefault = { ProcessLauncher.capture(Harness.grok.defaultExecutable(), ["models"],
                                                     in: NSTemporaryDirectory()).1
             .split(separator: "\n").first { $0.hasPrefix("Default model:") } }
@@ -175,7 +327,7 @@ final class LiveHarnessTests: XCTestCase {
         XCTAssertEqual(outcome, .succeeded, log)
     }
 
-    func testEveryAgentReadsAnAttachedFile() throws {
+    func testClaudeCodexAndGrokReadAnAttachedFile() throws {
         let source = folder.appendingPathComponent("fixture.txt")
         for harness in [Harness.claude, .codex, .grok] {
             let contents = UUID().uuidString
