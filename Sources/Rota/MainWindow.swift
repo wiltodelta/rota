@@ -43,7 +43,17 @@ struct MainWindow: View {
                     ForEach(model.scheduler.routines) { routine in
                         HStack(spacing: metrics.points(8)) {
                             StatusDot(routine: routine)
-                            Text(routine.name).lineLimit(1)
+                            VStack(alignment: .leading, spacing: metrics.points(1)) {
+                                Text(routine.name).lineLimit(1)
+                                TimelineView(.periodic(from: .now, by: 30)) { _ in
+                                    Text(NextRunFormat.subtitle(routine,
+                                        running: model.scheduler.active[routine.id] != nil))
+                                        .interfaceFont(.caption)
+                                        .foregroundStyle(model.selection == .routine(routine.id)
+                                            ? Color.primary : Color.secondaryText)
+                                        .lineLimit(2)
+                                }
+                            }
                         }
                         .interfaceFont(.body)
                         .tag(SidebarItem.routine(routine.id))

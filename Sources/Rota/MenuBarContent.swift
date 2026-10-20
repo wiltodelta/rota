@@ -157,7 +157,7 @@ private struct MenuRoutineRow: View {
             StatusDot(routine: routine)
             VStack(alignment: .leading, spacing: metrics.points(1)) {
                 Text(routine.name).lineLimit(1)
-                Text(subtitle(running: running))
+                Text(NextRunFormat.subtitle(routine, running: running))
                     .interfaceFont(.caption)
                     .foregroundStyle(Color.secondaryText)
                     .lineLimit(1)
@@ -190,16 +190,11 @@ private struct MenuRoutineRow: View {
 
     /// The subtitle and the dot's state, the state once when the subtitle already says it.
     private func spokenState(running: Bool) -> String {
-        let text = subtitle(running: running)
+        let text = NextRunFormat.subtitle(routine, running: running)
         let status = StatusDot.status(of: routine, in: model.scheduler)
         return text.localizedCaseInsensitiveContains(status) ? text : "\(text), \(status)"
     }
 
-    private func subtitle(running: Bool) -> String {
-        if running { return "Running on \(routine.harness.title)" }
-        guard routine.enabled, let next = routine.nextFire else { return "\(routine.harness.title), paused" }
-        return "\(routine.harness.title), next run \(NextRunFormat.string(next))"
-    }
 }
 
 /// Running, last run failed, last run fine, or off.
@@ -267,6 +262,12 @@ extension Color {
 /// When a routine runs next: relative within a day ("in 3 hours"), else a short
 /// date without the year ("Mon, Oct 12, 10:15 AM"), which fits one line.
 enum NextRunFormat {
+    static func subtitle(_ routine: Routine, running: Bool) -> String {
+        if running { return "Running on \(routine.harness.title)" }
+        guard routine.enabled, let next = routine.nextFire else { return "\(routine.harness.title), paused" }
+        return "\(routine.harness.title), next run \(string(next))"
+    }
+
     static func string(_ date: Date, now: Date = .now) -> String {
         if date.timeIntervalSince(now) < 24 * 3600 {
             return date.formatted(.relative(presentation: .numeric))
