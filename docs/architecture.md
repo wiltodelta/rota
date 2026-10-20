@@ -90,6 +90,15 @@ flowchart LR
   successful no-op runs should not manufacture questions. Structured requests
   use a separate path and do not depend on `notify_user` or question detection
   in prose.
+- `Notifier` withdraws informational notifications 8 seconds after successful
+  submission to Notification Center. Delivery, the expiry scheduler and removal
+  are injected in notification tests, which advance expiry without waiting or
+  sending real notifications. Failures (including missed slots), automatic
+  pauses, explicit `needsReply` requests and sessions with outstanding attention
+  or structured questions have no expiry. macOS owns the app-wide banner style:
+  users select Persistent for Rota in System Settings > Notifications to keep
+  these banners visible until dismissed. Withdrawal also removes informational
+  notices from Notification Center, and only runs while Rota is running.
 - `AgentQuestion` normalizes native questions, plan approvals and MCP forms/URL
   requests. `RunEvents.question` registers the request with the scheduler,
   persists its fields in `RunRecord.questions`, marks the session as needing

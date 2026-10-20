@@ -18,6 +18,37 @@ final class Notifier: NSObject, RunNotifying, UNUserNotificationCenterDelegate {
     private static let replyCategory = "rota.reply"
     private static let replyAction = "reply"
 
+    // Keep delivery, expiry and removal injectable: tests must never post real notifications.
+    typealias DeliveryCompletion = @MainActor @Sendable (Error?) -> Void
+    var deliver: (UNNotificationRequest, @escaping DeliveryCompletion) -> Void = { request, completion in
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        UNUserNotificationCenter.current().add(request) { error in
+            Task { @MainActor in completion(error) }
+        }
+    }
+    var scheduleExpiry: (TimeInterval, @escaping @MainActor @Sendable () -> Void) -> Void = { delay, action in
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: action)
+    }
+    var removeDelivered: ([String]) -> Void = { identifiers in
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: identifiers)
+    }
+
+    private func post(_ content: UNNotificationContent, id: String, temporary: Bool) {
+        // A later failure may reuse the run id. An old success timer must not remove it.
+        let identifier = temporary ? "\(id)-\(UUID().uuidString)" : id
+        deliver(UNNotificationRequest(identifier: identifier, content: content, trigger: nil)) { [weak self] error in
+            if let error {
+                Self.log.error("Notification delivery failed: \(error.localizedDescription, privacy: .public)")
+                return
+            }
+            guard let self, temporary else { return }
+            // macOS owns the app-wide banner style. With Persistent selected,
+            // withdraw only informational notifications after their brief display.
+            scheduleExpiry(8) { [weak self] in self?.removeDelivered([identifier]) }
+        }
+    }
+
     /// The notification center needs a bundle; the bare debug binary has none.
     private var center: UNUserNotificationCenter? {
         Bundle.main.bundleIdentifier == nil ? nil : UNUserNotificationCenter.current()
@@ -41,7 +72,7 @@ final class Notifier: NSObject, RunNotifying, UNUserNotificationCenterDelegate {
     }
 
     func runEnded(_ record: RunRecord, routine: Routine) {
-        guard let center, record.outcome.isFailure || (record.outcome == .succeeded && notifyOnSuccess())
+        guard record.outcome.isFailure || (record.outcome == .succeeded && notifyOnSuccess())
         else { return }
         let content = UNMutableNotificationContent()
         content.title = routine.name
@@ -49,35 +80,36 @@ final class Notifier: NSObject, RunNotifying, UNUserNotificationCenterDelegate {
         if record.outcome.isFailure { content.sound = .default }
         // A skipped slot has no session to open; its routine shows it.
         content.userInfo = record.isSkip ? [Self.routineKey: routine.id] : [Self.sessionKey: record.id.uuidString]
-        center.add(UNNotificationRequest(identifier: record.id.uuidString, content: content, trigger: nil))
+        post(content, id: record.id.uuidString, temporary: !requiresAttention(record))
     }
 
     func routinePaused(_ routine: Routine, failures: Int) {
-        guard let center else { return }
         let content = UNMutableNotificationContent()
         content.title = routine.name
         content.body = "Paused after \(failures) failed runs in a row. Turn it on again once it is fixed."
         content.sound = .default
         content.userInfo = [Self.routineKey: routine.id]
-        center.add(UNNotificationRequest(identifier: "paused-\(routine.id)", content: content, trigger: nil))
+        post(content, id: "paused-\(routine.id)", temporary: false)
     }
 
     func routineAdded(_ routine: Routine) {
-        guard let center else { return }
         let content = UNMutableNotificationContent()
         content.title = routine.name
         let state = routine.enabled ? (ScheduleText.describe(routine.schedule) ?? routine.schedule) : "turned off"
         content.body = "Added by an agent: \(routine.harness.title), \(state)."
         content.userInfo = [Self.routineKey: routine.id]
-        center.add(UNNotificationRequest(identifier: "added-\(routine.id)", content: content, trigger: nil))
+        post(content, id: "added-\(routine.id)", temporary: true)
     }
 
     func sessionNotified(_ record: RunRecord?, routine: Routine?, title: String?, text: String, needsReply: Bool) {
-        guard let center else { return }
         let content = sessionContent(record, routine: routine, title: title, text: text, needsReply: needsReply)
         let id = "notify-\(record?.id.uuidString ?? "rota")-\(UUID().uuidString)"
-        center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+        post(content, id: id, temporary: !(needsReply || requiresAttention(record)))
         Self.log.info("Notified from \(record?.routineID ?? "outside a routine", privacy: .public)")
+    }
+
+    private func requiresAttention(_ record: RunRecord?) -> Bool {
+        record?.attention != nil || record?.questions?.isEmpty == false || record?.outcome.isFailure == true
     }
 
     /// Build the same content used for delivery without requesting notification permission.

@@ -106,6 +106,15 @@ Desktop.
 - **Notifications** when a run fails, times out or cannot start, and when a
   missed slot is skipped; click one to open its session. Successes notify too if you ask for it. A routine
   whose last five scheduled runs failed pauses itself and says so.
+  In System Settings > Notifications > Rota, select the **Persistent** alert
+  style so questions and problems stay visible until dismissed. macOS applies
+  this setting to the whole app. Rota removes informational notifications
+  (successes, routine additions and ordinary agent notices) after 8 seconds,
+  including from Notification Center, while Rota is running. Notices requiring
+  a reply, sessions with outstanding questions, failures and automatic pauses
+  do not expire.
+  Agents must use `--needs-reply` or `needsReply: true` for requests requiring
+  action; Rota does not infer urgency from notification text.
 - **Harness warnings.** Rota reads the routine's project skill and warns when
   it uses a tool the chosen harness lacks: Claude in Chrome on Grok Build, for
   example, or phone push anywhere but Claude Code.
