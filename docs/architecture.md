@@ -59,11 +59,18 @@ flowchart LR
   at `Application Support/Rota/rota.sock` (0600, one JSON request and reply
   per line), whose methods are `Scheduler.control` in `ControlCommands.swift`:
   routines list/get/create/update/setEnabled/run/stop/delete and sessions
-  list/read/message, all through the scheduler, the routines file's only
-  writer. The `RotaCLI` target, bundled as `Contents/Helpers/rota`, is the
-  `rota` command and, as `rota mcp`, an MCP stdio server whose tools map one
-  to one onto those methods; it starts Rota in the background when the socket
-  does not answer. `AgentAccess` links it into `~/.local/bin` and runs each
+  list/get/read/message/delete/dismiss/markRead/questions/answer, all through
+  the scheduler, the routines file's only writer. `ControlMethod` declares the
+  socket operations; `ControlInterface` supplies the public CLI command and MCP
+  schema for each. Tests require every public method and editable routine field
+  to be covered by both interfaces, and exercise each declared method's handler.
+  Only `questions.create` and `questions.poll` are private hook transport.
+  The `RotaCLI` target, bundled as `Contents/Helpers/rota`, is the `rota`
+  command and, as `rota mcp`, an MCP stdio server. `rota tools` reports the
+  current catalog without contacting the app; both interfaces update with the
+  bundled helper. An already-running MCP process keeps its loaded catalog until
+  the client reconnects; CLI invocations load the updated helper immediately.
+  It starts Rota in the background when the socket does not answer. `AgentAccess` links it into `~/.local/bin` and runs each
   agent CLI's own `mcp add`/`mcp remove` (Claude Code and Grok Build at user
   scope) when the user asks in Settings. A routine created over the socket is
   on, like one made in the window, and `RunNotifying.routineAdded` says so.
@@ -71,6 +78,22 @@ flowchart LR
   control methods refuse with its sentence, and the New and Edit sheets keep
   Add and Save off with it beside the buttons. An update skips the id check,
   so a routine keeps the id it was imported with.
+- Session control replies include the run's model and effort snapshot, unread
+  state, available message/delete actions and pending structured questions.
+  `session` gets metadata; `questions` reads question field, option and action
+  ids. `answer` requires an explicit question and action, validates the same
+  `QuestionAnswer` as the app, and must only carry the user's actual decision.
+  A plain `send` or `dismiss` cannot resolve a pending question. `mark-read`
+  changes only the read mark. `delete-session` requires an explicit session id
+  and uses `Scheduler.deleteSession`, keeping running sessions and the provider's
+  native history intact. Reads never mark a session read implicitly.
+  `send --attach FILE` (repeat the option for multiple files) and MCP
+  `message_session.attachments` accept absolute regular-file paths. The socket's
+  async `Scheduler.controlRequest` uses the history-owned attachment store to
+  copy files off the main actor, then rechecks the pinned session before sending
+  the same `ChatMessage` manifest the composer uses. Rejected sends discard their
+  staged copies. `ControlInterface.sessionArguments` binds in-run requests to
+  their own session for both clients; deletion always needs an explicit target.
 - Each run gets `ROTA_SESSION` (its `RunRecord` id), `ROTA_ROUTINE` and
   `ROTA_CLI` (the bundled `rota`) in its environment, so `rota notify` and the
   `notify_user` MCP tool know their session without arguments. The `notify`

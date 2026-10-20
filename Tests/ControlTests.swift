@@ -215,6 +215,119 @@ final class ControlCommandTests: XCTestCase {
         XCTAssertEqual(call("notify", ["message": " "]).failure?.message, "The notification needs a message.")
     }
 
+    func testSessionStateAndReadMarkUseTheRunSnapshot() throws {
+        _ = try create(["model": "chosen-model", "effort": "high"]).get()
+        _ = try call("routines.run", ["id": "digest"]).get()
+        launcher.events[0].session("native-thread")
+        launcher.events[0].configuration(SessionConfiguration(model: "reported-model", effort: "low"))
+        launcher.events[0].finished(.succeeded)
+        _ = try call("routines.update", ["id": "digest", "model": "new-model"]).get()
+        let state = try XCTUnwrap(try call("sessions.get", ["id": "digest"]).get() as? [String: Any])
+        XCTAssertEqual(state["model"] as? String, "reported-model")
+        XCTAssertEqual(state["effort"] as? String, "low")
+        XCTAssertEqual(state["unread"] as? Bool, true)
+        XCTAssertEqual(state["canDelete"] as? Bool, true)
+        let read = try XCTUnwrap(try call("sessions.markRead", ["id": "digest"]).get() as? [String: Any])
+        XCTAssertEqual(read["unread"] as? Bool, false)
+        XCTAssertEqual(scheduler.unreadCount, 0)
+    }
+
+    func testDeletionRequiresAnExplicitFinishedSessionAndRemovesItsFiles() throws {
+        _ = try create().get()
+        _ = try call("routines.run", ["id": "digest"]).get()
+        let record = try XCTUnwrap(scheduler.active["digest"])
+        let params: [String: Any] = ["id": "digest", "session": record.id.uuidString]
+        XCTAssertNotNil(call("sessions.delete", ["id": "digest"]).failure)
+        XCTAssertNotNil(call("sessions.delete", params).failure)
+        XCTAssertNotNil(scheduler.current(record.id))
+        let log = try XCTUnwrap(launcher.specs.first?.log)
+        try FileManager.default.createDirectory(at: log.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "Synthetic log".write(to: log, atomically: true, encoding: .utf8)
+        launcher.events[0].finished(.succeeded)
+        _ = try call("sessions.delete", params).get()
+        XCTAssertNil(scheduler.current(record.id))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: log.path))
+        XCTAssertNotNil(scheduler.routine("digest"))
+    }
+
+    func testQuestionsRequireExplicitValidatedAnswersAndCannotBeDismissed() throws {
+        _ = try create().get()
+        _ = try call("routines.run", ["id": "digest"]).get()
+        launcher.events[0].session("native-thread")
+        let question = AgentQuestion(id: "decision", title: "Choose a target", fields: [
+            QuestionField(id: "target", title: "Target", kind: .choice,
+                          options: [.init(id: "staging", label: "Staging")], allowsOther: false)
+        ])
+        nonisolated(unsafe) var answers: [QuestionAnswer] = []
+        launcher.events[0].question(question) { answers.append($0) }
+        let pending = try XCTUnwrap(try call("sessions.questions", ["id": "digest"]).get() as? [[String: Any]])
+        XCTAssertEqual(pending.first?["id"] as? String, "decision")
+        XCTAssertEqual(pending.count, 1)
+        XCTAssertNotNil(call("sessions.dismiss", ["id": "digest"]).failure)
+        XCTAssertNotNil(call("sessions.message", ["id": "digest", "text": "yes"]).failure)
+        var params: [String: Any] = ["id": "digest", "question": "decision"]
+        XCTAssertNotNil(call("sessions.answer", params).failure)
+        params["action"] = "accept"
+        params["values"] = ["target": ["production"]]
+        XCTAssertNotNil(call("sessions.answer", params).failure)
+        XCTAssertTrue(answers.isEmpty)
+        XCTAssertEqual(scheduler.active["digest"]?.questions?.count, 1)
+        params["values"] = ["target": ["staging"]]
+        _ = try call("sessions.answer", params).get()
+        XCTAssertEqual(answers, [.init(values: ["target": ["staging"]])])
+        XCTAssertEqual(scheduler.active["digest"]?.questions?.count, 0)
+        XCTAssertNil(scheduler.active["digest"]?.attention)
+        XCTAssertNotNil(call("sessions.answer", params).failure)
+    }
+
+    func testAttachmentsAreCopiedAndSentThroughTheRealMessageSeam() async throws {
+        _ = try create().get()
+        _ = try call("routines.run", ["id": "digest"]).get()
+        launcher.events[0].session("native-thread")
+        let source = directory.appendingPathComponent("synthetic.txt")
+        try "Synthetic attachment".write(to: source, atomically: true, encoding: .utf8)
+        let result = await scheduler.controlRequest("sessions.message",
+                                                    ["id": "digest", "text": "", "attachments": [source.path]])
+        _ = try result.get()
+        let message = ChatMessage.decode(try XCTUnwrap(launcher.controls[0].messages.first))
+        XCTAssertEqual(message.attachments.count, 1)
+        let copy = try XCTUnwrap(message.attachments.first)
+        XCTAssertNotEqual(copy.path, source.path)
+        XCTAssertEqual(try String(contentsOf: copy.url, encoding: .utf8), "Synthetic attachment")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+        XCTAssertNotNil(call("sessions.message", ["id": "digest", "text": "", "attachments": ["relative.txt"]]).failure)
+        XCTAssertNotNil(call("sessions.message", ["id": "digest", "text": "", "attachments": 1]).failure)
+        XCTAssertEqual(launcher.controls[0].messages.count, 1)
+    }
+
+    func testRejectedContinuationDiscardsStagedCopiesAndReportsFailure() async throws {
+        _ = try create().get()
+        _ = try call("routines.run", ["id": "digest"]).get()
+        launcher.events[0].session("native-thread")
+        launcher.events[0].finished(.succeeded)
+        let record = try XCTUnwrap(scheduler.history.records(for: "digest").first)
+        let store = try scheduler.history.attachments(for: record)
+        let source = directory.appendingPathComponent("synthetic.txt")
+        try "Synthetic attachment".write(to: source, atomically: true, encoding: .utf8)
+        launcher.failLaunch = true
+        let result = await scheduler.controlRequest("sessions.message", [
+            "id": "digest", "session": record.id.uuidString, "text": "", "attachments": [source.path]
+        ])
+        XCTAssertNotNil(result.failure)
+        XCTAssertEqual(launcher.specs.count, 2, "the continuation reached the actual launcher")
+        let staged = try FileManager.default.contentsOfDirectory(at: store.folder, includingPropertiesForKeys: nil)
+        XCTAssertTrue(staged.isEmpty)
+        XCTAssertEqual(try String(contentsOf: source, encoding: .utf8), "Synthetic attachment")
+    }
+
+    func testEveryDeclaredOperationReachesAHandler() {
+        for method in ControlMethod.allCases {
+            let error = call(method.rawValue).failure?.message ?? ""
+            XCTAssertFalse(error.contains("Unknown method"), method.rawValue)
+            XCTAssertFalse(error.contains("Unknown question method"), method.rawValue)
+        }
+    }
+
     func testUnknownMethodNamesTheKnownOnes() {
         XCTAssertEqual(call("routines.explode").failure?.message.contains("routines.list"), true)
     }
@@ -264,15 +377,19 @@ final class ControlSocketTests: XCTestCase {
 
 private final class ControlFakeControl: RunControl {
     var stopped = false
+    var messages: [String] = []
+    func send(_ message: String) { messages.append(message) }
     func stop() { stopped = true }
 }
 
 private final class ControlFakeLauncher: RoutineLaunching {
     var specs: [LaunchSpec] = []
+    var failLaunch = false
     var events: [RunEvents] = []
     var controls: [ControlFakeControl] = []
     func launch(_ spec: LaunchSpec, events: RunEvents) throws -> RunControl {
         specs.append(spec)
+        if failLaunch { throw ControlError("Synthetic launch failure.") }
         self.events.append(events)
         let control = ControlFakeControl()
         controls.append(control)

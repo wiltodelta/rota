@@ -15,7 +15,7 @@ public struct ControlError: Error, Equatable, LocalizedError {
 /// `{"id", "error": {"message"}}` out. The socket is the user's alone (0600):
 /// whoever can write to it can run routines.
 public final class ControlServer: @unchecked Sendable {
-    public typealias Handler = @MainActor (String, [String: Any]) -> Result<Any, ControlError>
+    public typealias Handler = @MainActor (String, [String: Any]) async -> Result<Any, ControlError>
 
     private static let log = Logger(subsystem: "com.wiltodelta.rota", category: "control")
     public static var standardSocket: URL { StorageLocation.standard.root.appendingPathComponent("rota.sock") }
@@ -115,9 +115,9 @@ public final class ControlServer: @unchecked Sendable {
             return reply(["error": ["message": "Not a JSON request with a method."]], to: client)
         }
         let boxed = UncheckedSendable(request)
-        DispatchQueue.main.async { [handler] in
+        Task { @MainActor [handler] in
             let id = boxed.value["id"] ?? NSNull()
-            let result = handler(method, boxed.value["params"] as? [String: Any] ?? [:])
+            let result = await handler(method, boxed.value["params"] as? [String: Any] ?? [:])
             let response: [String: Any]
             switch result {
             case .success(let value): response = ["id": id, "result": value]

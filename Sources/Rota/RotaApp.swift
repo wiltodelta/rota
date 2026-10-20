@@ -268,7 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Lets the `rota` command and agents' MCP sessions reach the scheduler.
     private func startControlServer() {
         let scheduler = model.scheduler
-        let server = ControlServer { method, params in scheduler.control(method, params) }
+        let server = ControlServer { method, params in await scheduler.controlRequest(method, params) }
         do {
             try server.start()
             controlServer = server

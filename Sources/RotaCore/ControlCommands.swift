@@ -6,16 +6,14 @@ import Foundation
 extension Scheduler {
     private static let timestamp = ISO8601DateFormatter()
 
-    public static let controlMethods = [
-        "routines.list", "routines.get", "routines.create", "routines.update", "routines.setEnabled",
-        "routines.run", "routines.stop", "routines.delete", "sessions.list", "sessions.read", "sessions.message",
-        "sessions.dismiss", "notify", "questions.create", "questions.poll"
-    ]
+    public static var controlMethods: [String] { ControlMethod.allCases.map(\.rawValue) }
 
     public func control(_ method: String, _ params: [String: Any]) -> Result<Any, ControlError> {
         do {
-            guard let result = try routineCommand(method, params)
-                ?? sessionCommand(method, params) ?? questionCommand(method, params) else {
+            guard let operation = ControlMethod(rawValue: method),
+                  let result = try routineCommand(operation, params)
+                ?? sessionCommand(operation, params) ?? sessionStateCommand(operation, params)
+                ?? questionCommand(method, params) else {
                 let known = Self.controlMethods.joined(separator: ", ")
                 throw ControlError("Unknown method \(method). Known: \(known).")
             }
@@ -27,36 +25,64 @@ extension Scheduler {
         }
     }
 
-    private func routineCommand(_ method: String, _ params: [String: Any]) throws -> Any? {
+    private func routineCommand(_ method: ControlMethod, _ params: [String: Any]) throws -> Any? {
         switch method {
-        case "routines.list": return routines.map(describe)
-        case "routines.get": return describe(try existing(params))
-        case "routines.create": return describe(try create(params))
-        case "routines.update": return describe(try update(params))
-        case "routines.setEnabled": return describe(try enable(params))
-        case "routines.run": return try runNow(params)
-        case "routines.stop": return try stopNow(params)
-        case "routines.delete": return try remove(params)
+        case .routinesList: return routines.map(describe)
+        case .routinesGet: return describe(try existing(params))
+        case .routinesCreate: return describe(try create(params))
+        case .routinesUpdate: return describe(try update(params))
+        case .routinesSetEnabled: return describe(try enable(params))
+        case .routinesRun: return try runNow(params)
+        case .routinesStop: return try stopNow(params)
+        case .routinesDelete: return try remove(params)
         default: return nil
         }
     }
 
-    private func sessionCommand(_ method: String, _ params: [String: Any]) throws -> Any? {
+    private func sessionCommand(_ method: ControlMethod, _ params: [String: Any]) throws -> Any? {
         switch method {
-        case "sessions.list": return try sessions(params)
-        case "sessions.read": return try read(params)
-        case "sessions.message": return try send(params)
-        case "sessions.dismiss":
-            let record = try session(params)
-            dismissAttention(record)
-            return describe(current(record.id, routineID: record.routineID) ?? record)
-        case "notify":
+        case .sessionsList: return try sessions(params)
+        case .sessionsRead: return try read(params)
+        case .sessionsMessage: return try send(params)
+        case .notify:
             let record = try notify(try value(params, "message", as: String.self),
                                     title: try optional(params, "title", as: String.self),
                                     session: try optional(params, "session", as: String.self),
                                     routineID: try optional(params, "routine", as: String.self),
                                     needsReply: try optional(params, "needsReply", as: Bool.self) ?? false)
             return record.map(describe) ?? ["notified": true]
+        default: return nil
+        }
+    }
+
+    private func sessionStateCommand(_ method: ControlMethod, _ params: [String: Any]) throws -> Any? {
+        switch method {
+        case .sessionsGet: return describe(try session(params))
+        case .sessionsDelete:
+            _ = try value(params, "session", as: String.self)
+            let record = try session(params)
+            guard deleteSession(record) else { throw ControlError(lastError ?? "Could not delete the session.") }
+            return ["deleted": record.id.uuidString]
+        case .sessionsMarkRead:
+            let record = try session(params)
+            markRead(record)
+            return describe(current(record.id, routineID: record.routineID) ?? record)
+        case .sessionsQuestions:
+            return try questionList(session(params))
+        case .sessionsAnswer:
+            let record = try session(params)
+            let id = try value(params, "question", as: String.self)
+            let action = try value(params, "action", as: String.self)
+            let values = try optional(params, "values", as: [String: [String]].self) ?? [:]
+            try answerQuestion(id, on: record, answer: QuestionAnswer(action: action, values: values))
+            return describe(current(record.id, routineID: record.routineID) ?? record)
+        case .sessionsDismiss:
+            let record = try session(params)
+            guard record.questions?.isEmpty != false else {
+                throw ControlError("Answer or cancel the pending questions before dismissing attention.")
+            }
+            dismissAttention(record)
+            return describe(current(record.id, routineID: record.routineID) ?? record)
         default: return nil
         }
     }
@@ -177,7 +203,7 @@ extension Scheduler {
         return history.records(for: routine.id).filter { !$0.isSkip }.prefix(max(limit, 1)).map(describe)
     }
 
-    private func session(_ params: [String: Any]) throws -> RunRecord {
+    func session(_ params: [String: Any]) throws -> RunRecord {
         let routine = try existing(params)
         if let id = try optional(params, "session", as: String.self) {
             guard let record = current(id, routineID: routine.id) else {
@@ -203,6 +229,10 @@ extension Scheduler {
         return json
     }
 
+    private func questionList(_ record: RunRecord) throws -> Any {
+        try JSONSerialization.jsonObject(with: JSONEncoder().encode(record.questions ?? []))
+    }
+
     private func send(_ params: [String: Any]) throws -> [String: Any] {
         let record = try session(params)
         let text = try value(params, "text", as: String.self)
@@ -210,7 +240,17 @@ extension Scheduler {
             throw ControlError(record.harness.isAgent ? "That session cannot take a message now."
                                : "A shell session takes no messages.")
         }
-        message(text, to: record)
+        let paths = try optional(params, "attachments", as: [String].self) ?? []
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !paths.isEmpty else {
+            throw ControlError("Give a message or attach a file.")
+        }
+        guard record.questions?.isEmpty != false else {
+            throw ControlError("Answer the pending question before sending a message.")
+        }
+        guard paths.isEmpty else { throw ControlError("Attachments require the asynchronous control request handler.") }
+        guard message(text, to: record) else {
+            throw ControlError(lastError ?? "The session did not accept the message.")
+        }
         return describe(active[record.routineID] ?? record)
     }
 
@@ -233,18 +273,24 @@ extension Scheduler {
                                    "outcome": record.outcome.title, "running": isActive(record)]
         if isActive(record), let state = record.terminalState { json["terminalState"] = state.rawValue }
         if let ended = record.endedAt { json["endedAt"] = Self.timestamp.string(from: ended) }
+        json["model"] = record.reportedModel ?? record.model
+        json["effort"] = record.reportedEffort ?? record.effort
+        json["unread"] = record.isUnread
+        json["canMessage"] = canMessage(record) && record.questions?.isEmpty != false
+        json["canDelete"] = canDelete(record)
+        json["questions"] = try? questionList(record)
         if let attention = record.attention { json["needsReply"] = attention }
         return json
     }
 
     // MARK: Parameters
 
-    private func value<T>(_ params: [String: Any], _ key: String, as type: T.Type) throws -> T {
+    func value<T>(_ params: [String: Any], _ key: String, as type: T.Type) throws -> T {
         guard let value = try optional(params, key, as: type) else { throw ControlError("Missing \(key).") }
         return value
     }
 
-    private func optional<T>(_ params: [String: Any], _ key: String, as type: T.Type) throws -> T? {
+    func optional<T>(_ params: [String: Any], _ key: String, as type: T.Type) throws -> T? {
         guard let raw = params[key], !(raw is NSNull) else { return nil }
         if T.self == Bool.self, let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
             return number.boolValue as? T
@@ -252,7 +298,7 @@ extension Scheduler {
         if T.self == Int.self, let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() {
             return number.intValue as? T
         }
-        if T.self == String.self, let text = raw as? String { return text as? T }
+        if let typed = raw as? T, T.self != Int.self, T.self != Bool.self { return typed }
         let expected = T.self == Int.self ? "a number" : T.self == Bool.self ? "true or false" : "text"
         throw ControlError("\(key) should be \(expected).")
     }

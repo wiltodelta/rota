@@ -74,7 +74,12 @@ Desktop.
   Turn it on per agent in Settings > Routines from agents. A routine an agent
   adds runs on its schedule and Rota notifies you. The same works from a
   terminal with the `rota` command: `rota list`, `rota add`, `rota run`,
-  `rota log`, `rota help`.
+  `rota log`, `rota help`. Both interfaces also expose session state and pending
+  questions, explicit answers, attention dismissal, read marks, finished-session
+  deletion and file attachments. `rota tools` lists the commands and MCP schemas
+  shipped with the installed app; the shared catalog and coverage tests keep
+  the two interfaces aligned as the control API grows. MCP is optional when an
+  agent can use the CLI.
 - **Answer agents in Rota.** Native questions from Claude Code, Codex and
   Grok Build appear in the session with their options or input fields. The
   session stays marked as needing your reply until you send an answer or
@@ -202,7 +207,8 @@ mv Rota.app /Applications/
 Routine tools retain their unattended execution policy (`bypassPermissions`
 for Claude Code, `approvalPolicy: never` with `danger-full-access` for the Codex
 daemon, and `--always-approve` for Grok Build). Native questions, explicit plan
-confirmations and MCP requests that reach Rota wait for your answer in the app.
+confirmations and MCP requests that reach Rota wait for your explicit answer,
+in the app or through its CLI/MCP question tools.
 Point a routine only at a project whose skill you trust.
 
 Rota runs routines only while it is open; turn on **Launch at login** in

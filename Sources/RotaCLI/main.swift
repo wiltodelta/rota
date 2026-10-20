@@ -20,7 +20,15 @@ let usage = """
       remove <id>                  delete a routine and its sessions
       sessions <id> [--limit N]    recent sessions
       log <id> [--session ID] [--limit CHARS]
-      send <id> TEXT [--session ID]   message a session (the latest by default)
+      send <id> [TEXT] [--session ID] [--attach FILE]...   message a session (the latest by default)
+      session <id> [--session ID]  state, model, available actions and questions
+      questions <id> [--session ID]   pending structured questions
+      answer <id> --question ID --action ACTION [--values JSON] [--session ID]
+                                   submit the user's explicit answer; values maps field ids to string arrays
+      dismiss <id> [--session ID]  dismiss attention without answering questions
+      mark-read <id> [--session ID]   mark a session as read
+      delete-session <id> --session ID   delete a finished session and its local files; ask the user first
+      tools                        discover commands and MCP schemas as JSON
       notify TEXT [--title T] [--needs-reply]
                                    a notification from Rota; inside a routine it opens that
                                    session, and --needs-reply marks it until you answer
@@ -29,33 +37,6 @@ let usage = """
     Add --json for the raw answer. Schedules are five-field cron in local time;
     a routine added here runs on its schedule unless --off is given.
     """
-
-struct Arguments {
-    var positional: [String] = []
-    var options: [String: String] = [:]
-    var flags: Set<String> = []
-    static let flagNames: Set<String> = ["json", "off", "no-time-limit", "default-model", "help", "needs-reply"]
-
-    init(_ raw: [String]) throws {
-        var index = 0
-        while index < raw.count {
-            let word = raw[index]
-            if word.hasPrefix("--") {
-                let name = String(word.dropFirst(2))
-                if Self.flagNames.contains(name) {
-                    flags.insert(name)
-                } else {
-                    index += 1
-                    guard index < raw.count else { throw ControlError("--\(name) needs a value.") }
-                    options[name] = raw[index]
-                }
-            } else {
-                positional.append(word)
-            }
-            index += 1
-        }
-    }
-}
 
 /// Starts Rota in the background when its socket does not answer, then waits for it.
 func request(_ method: String, _ params: [String: Any] = [:]) throws -> Any {
@@ -90,22 +71,6 @@ func launchRota() throws {
     _ = opened.wait(timeout: .now() + 20)
 }
 
-/// The routine fields `add` and `update` take, as the control API names them.
-func routineFields(_ arguments: Arguments) -> [String: Any] {
-    var fields: [String: Any] = [:]
-    let names = ["name": "name", "folder": "workingDirectory", "schedule": "schedule", "harness": "harness",
-                 "prompt": "prompt", "skill": "skill", "model": "model", "effort": "effort"]
-    for (option, field) in names { if let value = arguments.options[option] { fields[field] = value } }
-    if let limit = arguments.options["time-limit"] { fields["timeLimitMinutes"] = Int(limit) ?? limit }
-    if arguments.flags.contains("no-time-limit") { fields["timeLimitMinutes"] = NSNull() }
-    if arguments.flags.contains("default-model") {
-        fields["model"] = NSNull()
-        fields["effort"] = NSNull()
-    }
-    if arguments.flags.contains("off") { fields["enabled"] = false }
-    return fields
-}
-
 func line(_ routine: [String: Any]) -> String {
     let state = (routine["running"] as? Bool == true) ? "running" : (routine["enabled"] as? Bool == true ? "on" : "off")
     let parts = [routine["id"] as? String ?? "?", state, routine["harness"] as? String ?? "",
@@ -132,68 +97,19 @@ func printJSON(_ value: Any) {
     print(lossyUTF8(data))
 }
 
-/// The control method and parameters a command asks for.
-func requestFor(_ command: String, _ arguments: Arguments) throws -> (String, [String: Any]) {
-    switch command {
-    case "list": return ("routines.list", [:])
-    case "notify": return ("notify", try notifyParams(arguments.positional.dropFirst(), arguments))
-    default: return try routineRequest(command, arguments)
-    }
-}
-
-/// The commands that name a routine by its id.
-func routineRequest(_ command: String, _ arguments: Arguments) throws -> (String, [String: Any]) {
-    guard let id = arguments.positional.dropFirst().first else {
-        throw ControlError("\(command) needs a routine id.")
-    }
-    var params: [String: Any] = ["id": id]
-    if let session = arguments.options["session"] { params["session"] = session }
-    if let limit = arguments.options["limit"].flatMap(Int.init) { params["limit"] = limit }
-    let plain = ["show": "routines.get", "run": "routines.run", "stop": "routines.stop", "remove": "routines.delete",
-                 "sessions": "sessions.list", "log": "sessions.read"]
-    if let method = plain[command] { return (method, params) }
-    switch command {
-    case "add", "update":
-        let method = command == "add" ? "routines.create" : "routines.update"
-        return (method, routineFields(arguments).merging(params) { $1 })
-    case "on", "off": return ("routines.setEnabled", params.merging(["enabled": command == "on"]) { $1 })
-    case "send":
-        guard arguments.positional.count >= 3 else { throw ControlError("send needs a routine id and the text.") }
-        let text = arguments.positional.dropFirst(2).joined(separator: " ")
-        return ("sessions.message", params.merging(["text": text]) { $1 })
-    default: throw ControlError("Unknown command \(command).\n\n\(usage)")
-    }
-}
-
-/// A notification's text and where it comes from: the session Rota started this
-/// process in (ROTA_SESSION), unless --session or --routine names another.
-func notifyParams(_ words: ArraySlice<String>, _ arguments: Arguments) throws -> [String: Any] {
-    let text = words.joined(separator: " ")
-    guard !text.isEmpty else { throw ControlError("notify needs the message.") }
-    let environment = ProcessInfo.processInfo.environment
-    var params: [String: Any] = ["message": text, "needsReply": arguments.flags.contains("needs-reply")]
-    params["title"] = arguments.options["title"]
-    if let routine = arguments.options["routine"] {
-        params["routine"] = routine
-    } else if let session = arguments.options["session"] ?? environment["ROTA_SESSION"] {
-        params["session"] = session
-    }
-    return params
-}
-
 /// A reply for people: a line per routine or session, the log as text, JSON otherwise.
 func show(_ result: Any, for command: String) {
     switch result {
     case let routines as [[String: Any]] where command == "list":
         print(routines.isEmpty ? "No routines." : routines.map(line).joined(separator: "\n"))
-    case let sessions as [[String: Any]]:
+    case let sessions as [[String: Any]] where command == "sessions":
         print(sessions.map { "\($0["session"] ?? "")  \(localTime($0["startedAt"]))  \($0["outcome"] ?? "")" }
             .joined(separator: "\n"))
     case let session as [String: Any] where command == "log":
         print(session["log"] as? String ?? "")
     case let routine as [String: Any] where routine["schedule"] != nil:
         print(line(routine))
-    case let session as [String: Any] where session["session"] != nil && command != "notify":
+    case let session as [String: Any] where session["session"] != nil && !["notify", "session"].contains(command):
         print(sessionLine(session))
     case let answer as [String: String] where answer.count == 1:
         // {"stopping": id} and {"deleted": id}.
@@ -204,13 +120,18 @@ func show(_ result: Any, for command: String) {
 }
 
 func run(_ raw: [String]) throws {
-    let arguments = try Arguments(raw)
+    let arguments = try ControlCLI.Arguments(raw)
     guard let command = arguments.positional.first, command != "help", !arguments.flags.contains("help") else {
         return print(usage)
     }
     if command == "question-hook" { return try QuestionHook.run() }
     if command == "mcp" { return MCPServer().serve() }
-    let (method, params) = try requestFor(command, arguments)
+    if command == "tools" {
+        return printJSON(ControlInterface.tools.map { tool in
+            MCPServer.schema(tool).merging(["command": tool.command, "method": tool.method.rawValue]) { $1 }
+        })
+    }
+    let (method, params) = try ControlCLI.request(command, arguments, environment: ProcessInfo.processInfo.environment)
     let result = try request(method, params)
     if arguments.flags.contains("json") { printJSON(result) } else { show(result, for: command) }
 }
