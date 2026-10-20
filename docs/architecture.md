@@ -721,6 +721,12 @@ changes while `.command` files stay with Terminal, then the `.command` handler. 
 Layout rules learned while measuring the narrowest window (820 pt):
 
 - Sidebar routine rows share the menu panel's `NextRunFormat.subtitle`: agent and next run, running, or paused. The caption wraps to two lines in the narrow column and refreshes every 30 seconds.
+- Sidebar and menu panel rows lead with `HarnessStatusIcon`, a 20 pt harness
+  mark in a 24 pt slot with the existing status in its bottom trailing corner.
+  Captions retain the harness name. Routine history uses the compact
+  `HarnessMetadata` mark beside its metadata. Sessions use their recorded
+  harness and routines use their current configuration.
+  Mark sources and dimensions: `docs/harness-logos.md`.
 - `SessionHistoryRow` keeps date and status above a two-line excerpt, with the
   run's agent/model snapshot and completed duration below. Header metadata
   stacks at narrow widths. `SessionPreview` prioritizes pending questions and

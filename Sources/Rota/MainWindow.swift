@@ -42,7 +42,9 @@ struct MainWindow: View {
                 Section {
                     ForEach(RoutineOrder.byNextRun(model.scheduler.routines)) { routine in
                         HStack(spacing: metrics.points(8)) {
-                            StatusDot(routine: routine)
+                            HarnessStatusIcon(harness: routine.harness) {
+                                StatusDot(routine: routine)
+                            }
                             VStack(alignment: .leading, spacing: metrics.points(1)) {
                                 Text(routine.name).lineLimit(1)
                                 TimelineView(.periodic(from: .now, by: 30)) { _ in
@@ -52,6 +54,7 @@ struct MainWindow: View {
                                         .foregroundStyle(model.selection == .routine(routine.id)
                                             ? Color.primary : Color.secondaryText)
                                         .lineLimit(2)
+                                        .accessibilityIdentifier("routineHarness-" + routine.id)
                                 }
                             }
                         }
@@ -208,24 +211,29 @@ private struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: metrics.points(8)) {
-            Group {
-                if record.outcome == .running, record.terminalState != .waiting {
-                    // A working session spins, as in super.engineering's list.
-                    ProgressView().controlSize(.mini).frame(width: metrics.points(8), height: metrics.points(8))
-                } else {
-                    dot(color, size: 8)
+            HarnessStatusIcon(harness: record.harness) {
+                Group {
+                    if record.outcome == .running, record.terminalState != .waiting {
+                        RunActivityIndicator()
+                    } else {
+                        Circle()
+                            .fill(color)
+                            .frame(width: metrics.points(8), height: metrics.points(8))
+                    }
                 }
+                .accessibilityElement()
+                .accessibilityLabel(record.statusTitle)
             }
-            .accessibilityElement()
-            .accessibilityLabel(record.statusTitle)
             VStack(alignment: .leading, spacing: metrics.points(1)) {
                 Text(model.scheduler.routine(record.routineID)?.name ?? record.routineID)
                     .fontWeight(record.isUnread ? .semibold : .regular)
                     .lineLimit(1)
                 Text(details)
                     .interfaceFont(.caption)
-                    .foregroundStyle(Color.secondaryText)
+                    .foregroundStyle(model.selection == .session(record.id)
+                        ? Color.primary : Color.secondaryText)
                     .lineLimit(1)
+                    .accessibilityIdentifier("sessionHarness-" + record.id.uuidString)
             }
             Spacer(minLength: 0)
             if record.attention != nil {
@@ -254,7 +262,7 @@ private struct SessionRow: View {
     }
 
     private var details: String {
-        var parts = [record.startedAt.formatted(date: .omitted, time: .shortened), record.harness.title,
+        var parts = [record.harness.title, record.startedAt.formatted(date: .omitted, time: .shortened),
                      record.statusTitle]
         if record.trigger == .catchUp { parts.insert("catch-up", at: 1) }
         return parts.joined(separator: " \u{00B7} ")

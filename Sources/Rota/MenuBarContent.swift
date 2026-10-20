@@ -151,7 +151,9 @@ private struct MenuRoutineRow: View {
             }
         }
         HStack(spacing: metrics.points(8)) {
-            StatusDot(routine: routine)
+            HarnessStatusIcon(harness: routine.harness) {
+                StatusDot(routine: routine)
+            }
             VStack(alignment: .leading, spacing: metrics.points(1)) {
                 Text(routine.name).lineLimit(1)
                 Text(NextRunFormat.subtitle(routine, running: running))

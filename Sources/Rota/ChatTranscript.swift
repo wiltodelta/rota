@@ -460,32 +460,6 @@ struct Hairline: View {
     }
 }
 
-/// A harness's own mark (`HarnessLogos.xcassets`, sources in `docs/harness-logos.md`):
-/// Claude in its orange, the others in the text color; a shell gets the terminal glyph.
-struct HarnessLogo: View {
-    @Environment(\.interfaceScale) private var metrics
-    let harness: Harness
-
-    var body: some View {
-        Group {
-            if harness == .shell {
-                Image(systemName: "apple.terminal")
-            } else if harness == .antigravity {
-                Image(systemName: "sparkles")
-            } else {
-                Image("harness-" + harness.rawValue)
-                    .resizable()
-                    .renderingMode(.template)
-                    .scaledToFit()
-            }
-        }
-        .foregroundStyle(harness == .claude ? Color(red: 0xD9 / 255, green: 0x77 / 255, blue: 0x57 / 255)
-                         : Color.primary)
-        .frame(width: metrics.points(14), height: metrics.points(14))
-        .accessibilityHidden(true)
-    }
-}
-
 /// Where the chat is scrolled, to tell the reader scrolling from the session writing.
 private struct ScrollSpot: Equatable {
     let offset: CGFloat

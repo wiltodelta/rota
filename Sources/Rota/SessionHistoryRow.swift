@@ -26,7 +26,7 @@ struct SessionHistoryRow: View {
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("sessionPreview-" + record.id.uuidString)
-                Text(metadata)
+                HarnessMetadata(harness: record.harness, text: metadata)
                     .interfaceFont(.caption)
                     .foregroundStyle(Color.secondaryText)
                     .lineLimit(1)
