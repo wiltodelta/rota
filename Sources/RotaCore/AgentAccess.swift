@@ -39,6 +39,7 @@ public enum AgentAccess {
         case .claude: return ["mcp", "add", "-s", "user", serverName, "--", command, "mcp"]
         case .codex: return ["mcp", "add", serverName, "--", command, "mcp"]
         case .grok: return ["mcp", "add", "-s", "user", serverName, command, "--", "mcp"]
+        case .antigravity: return ["mcp", "add", serverName, command, "mcp"]
         case .shell: return []
         }
     }
@@ -48,6 +49,7 @@ public enum AgentAccess {
         case .claude: return ["mcp", "remove", "-s", "user", serverName]
         case .codex: return ["mcp", "remove", serverName]
         case .grok: return ["mcp", "remove", "-s", "user", serverName]
+        case .antigravity: return ["mcp", "remove", serverName]
         case .shell: return []
         }
     }
@@ -62,8 +64,20 @@ public enum AgentAccess {
             let (status, output) = ProcessLauncher.capture(executable, ["mcp", "list", "--json"],
                                                            in: NSTemporaryDirectory(), timeout: 20, errors: false)
             return status == 0 && lists(serverName, in: output)
+        case .antigravity:
+            let (status, output) = ProcessLauncher.capture(executable, ["mcp", "list"],
+                                                           in: NSTemporaryDirectory(), timeout: 20, errors: false)
+            return status == 0 && antigravityLists(serverName, in: output)
         case .shell:
             return false
+        }
+    }
+
+    /// `agy mcp list`: NAME TYPE STATUS COMMAND/URL. A disabled entry is not available.
+    static func antigravityLists(_ name: String, in text: String) -> Bool {
+        text.split(separator: "\n").contains { line in
+            let fields = line.split(whereSeparator: \.isWhitespace)
+            return fields.count >= 3 && fields[0] == name && fields[2] == "enabled"
         }
     }
 

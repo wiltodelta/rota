@@ -73,7 +73,7 @@ public enum ControlInterface {
                 "Five-field cron in the Mac's local time, such as \"0 9 * * 1-5\" for weekdays at 9:00."),
             "harness": property(
                 "string",
-                "Where it runs: claude (Claude Code), codex, grok (Grok Build) or shell "
+                "Where it runs: claude (Claude Code), codex, grok (Grok Build), antigravity (agy) or shell "
                     + "(a zsh command)."
             ).merging(["enum": Harness.allCases.map(\.rawValue)]) { $1 },
             "prompt": property("string", "What the agent is asked each run, or the command for shell."),

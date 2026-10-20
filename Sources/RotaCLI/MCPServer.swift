@@ -2,7 +2,7 @@ import Foundation
 import RotaCore
 
 /// `rota mcp`: Rota's routines as MCP tools over stdio, one JSON-RPC message
-/// per line, for Claude Code, Codex and Grok Build. Each tool is one control
+/// per line, for Claude Code, Codex, Grok Build and Antigravity. Each tool is one control
 /// method of the running app.
 struct MCPServer {
     func serve() {
@@ -20,8 +20,8 @@ struct MCPServer {
                     "capabilities": ["tools": [String: Any]()],
                     "serverInfo": ["name": "rota", "version": Self.version],
                     "instructions": "Rota is a Mac app that runs routines (prompts or shell commands) on a cron "
-                        + "schedule on Claude Code, Codex, Grok Build or zsh. Use these tools to schedule, change, "
-                        + "run and read them."
+                        + "schedule on Claude Code, Codex, Grok Build, Antigravity or zsh. "
+                        + "Use these tools to schedule, change, run and read them."
                 ]]
             case "ping": answer = ["result": [String: Any]()]
             case "tools/list": answer = ["result": ["tools": ControlInterface.tools.map(Self.schema)]]

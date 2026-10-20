@@ -8,3 +8,6 @@ marks are the owners' trademarks; they identify the service they belong to.
   publishes no separate mark outside its app.
 - `harness-grok`: the Grok mark, cut from the two glyph paths of
   `https://grok.com/images/favicon.svg` (the app-icon background left out).
+
+Antigravity currently uses the system `sparkles` symbol as a neutral fallback;
+it is not presented as the vendor's trademark. Shell uses `apple.terminal`.

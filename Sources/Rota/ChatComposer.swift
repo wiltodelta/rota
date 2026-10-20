@@ -136,7 +136,7 @@ struct ChatComposer: View {
                 .lineLimit(1)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("composerModel")
-                .help("Session model and reasoning effort, as resolved by the agent.")
+                .help("The model and reasoning effort for this session.")
                 Spacer(minLength: 8)
                 if questionDraft != nil {
                     EmptyView()
@@ -268,7 +268,8 @@ struct ChatComposer: View {
     private var effect: String {
         if questionDraft != nil { return "Sends the question form to the agent." }
         guard running else { return "Sends a new turn in this session." }
-        return record.harness == .grok ? "Answered after the current turn." : "Joins the current turn."
+        return [.grok, .antigravity].contains(record.harness)
+            ? "Answered after the current turn." : "Joins the current turn."
     }
 
     /// Why there is no field.

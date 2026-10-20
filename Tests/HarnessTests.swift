@@ -30,7 +30,8 @@ final class HarnessTests: XCTestCase {
         for harness in [Harness.codex, .grok, .shell] {
             XCTAssertTrue(harness.arguments(settings: ClaudeUserSettings(chromeByDefault: true)).isEmpty)
         }
-        XCTAssertEqual(Harness.allCases.map(\.launchMode), [.claudeStream, .codexDaemon, .grokACP, .screen])
+        XCTAssertEqual(Harness.allCases.map(\.launchMode),
+                       [.claudeStream, .codexDaemon, .grokACP, .antigravityStream, .screen])
     }
 
     func testStreamJSONUserMessage() throws {

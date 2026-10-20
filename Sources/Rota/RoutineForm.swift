@@ -175,6 +175,7 @@ private struct ModelPickers: View {
 
     var body: some View {
         let options = model.settings.models[draft.harness] ?? []
+        let loading = model.settings.loadingModels.contains(draft.harness)
         // Legacy aliases display their current resolved version without rewriting the routine.
         let selected = options.first { $0.matches(draft.model) } ?? options.first(where: \.isDefault)
             ?? (draft.model == nil ? options.first : nil)
@@ -190,11 +191,18 @@ private struct ModelPickers: View {
         }
         let efforts = selected?.efforts ?? []
         let effortChoices: [InterfaceChoice<String?>] = [
-            .item(efforts.isEmpty ? "Not supported" : "Default", nil), .separator
+            .item(selected == nil ? (loading ? "Loading…" : "Unavailable")
+                : (efforts.isEmpty ? "Not supported" : "Default"), nil), .separator
         ] + efforts.map { .item($0.capitalized, $0) } + missingEffort(efforts)
         InterfacePicker(title: "Effort", selection: $draft.effort,
                         choices: effortChoices, identifier: "routineEffort")
         .disabled(selected?.efforts.isEmpty ?? true)
+        if options.isEmpty {
+            Text(loading ? "Loading models…" : "Couldn't load models. Check the agent in Settings.")
+                .interfaceFont(.caption)
+                .foregroundStyle(Color.secondaryText)
+                .accessibilityIdentifier("routineModelsStatus")
+        }
     }
 
     private func missingModel(options: [ModelOption]) -> [InterfaceChoice<String?>] {

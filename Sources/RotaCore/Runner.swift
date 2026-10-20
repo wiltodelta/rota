@@ -133,6 +133,10 @@ public final class ProcessLauncher: RoutineLaunching {
         Self.log.info("Starting \(spec.executable, privacy: .public) in \(spec.workingDirectory, privacy: .public)")
         let journal = Self.journal(for: spec, output: output, events: events)
         if spec.mode.recordsInitialPrompt { journal.record(.user, spec.prompt) }
+        return try start(spec, journal: journal)
+    }
+
+    private func start(_ spec: LaunchSpec, journal: RunJournal) throws -> RunControl {
         switch spec.mode {
         case .claudeStream:
             if let notice = spec.notice { journal.line("[rota: \(notice)]") }
@@ -141,6 +145,8 @@ public final class ProcessLauncher: RoutineLaunching {
             return try ClaudeInteractiveRun.start(spec, journal: journal)
         case .codexDaemon:
             return CodexDaemonRun.start(spec, journal: journal)
+        case .antigravityStream:
+            return try AntigravityRun.start(spec, journal: journal)
         case .grokACP:
             return GrokACPRun.start(spec, journal: journal)
         case .screen, .terminal:
