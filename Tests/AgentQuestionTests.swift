@@ -33,6 +33,37 @@ final class AgentQuestionTests: XCTestCase {
         XCTAssertNil(canceled["updatedInput"])
     }
 
+    func testCodexAsyncMessagePreservesEveryQuestionAndAllowsTypedAnswers() throws {
+        let item: [String: Any] = [
+            "type": "agentMessage", "id": "call-fixture", "delivery": "async",
+            "text": "Which color?\n- Blue\n- Green\n\nAny notes?",
+            "questions": [
+                ["title": "Which color?", "options": ["Blue", "Green"]],
+                ["title": "Any notes?"],
+            ],
+        ]
+        let question = try XCTUnwrap(QuestionRequest.codexMessage(item))
+        XCTAssertEqual(question.id, "call-fixture")
+        XCTAssertEqual(question.fields.map(\.title), ["Which color?", "Any notes?"])
+        XCTAssertEqual(question.fields.first?.options.map(\.label), ["Blue", "Green"])
+        XCTAssertEqual(question.fields.map(\.kind), [.choice, .text])
+        XCTAssertEqual(question.replyViaMessage, true)
+        try question.validate(.init(values: ["0": ["Purple"], "1": ["Привет"]]))
+        XCTAssertNil(QuestionRequest.codexMessage(["type": "agentMessage", "text": "A plain question?"]))
+        XCTAssertNil(QuestionRequest.codexMessage(["type": "agentMessage", "questions": []]))
+    }
+
+    func testOpenAIFormElicitationUsesTheSameTypedFields() throws {
+        let request = try XCTUnwrap(QuestionRequest.elicitation([
+            "mode": "openai/form", "message": "Choose", "requestedSchema": [
+                "type": "object", "required": ["choice"], "properties": [
+                    "choice": ["type": "string", "enum": ["blue", "green"]]
+                ],
+            ],
+        ]))
+        XCTAssertEqual(request.question.fields.first?.options.map(\.id), ["blue", "green"])
+    }
+
     func testCodexQuestionIDsAndSecretInput() throws {
         let request = try XCTUnwrap(
             QuestionRequest.codex(

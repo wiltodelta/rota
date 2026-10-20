@@ -102,7 +102,7 @@ public struct RunHistory: Sendable {
         (try? JSONFile.read([RunRecord].self, from: file(for: routineID))) ?? []
     }
 
-    /// Keeps running sessions, plus separate limits for finished sessions and skipped slots.
+    /// Keeps running sessions and pending questions, plus limits for finished sessions and skipped slots.
     public func upsert(_ record: RunRecord) throws {
         var records = self.records(for: record.routineID)
         if let index = records.firstIndex(where: { $0.id == record.id }) {
@@ -114,7 +114,7 @@ public struct RunHistory: Sendable {
         var sessions = 0
         var skips = 0
         let retained = records.filter { item in
-            if item.outcome == .running { return true }
+            if item.outcome == .running || item.questions?.isEmpty == false { return true }
             if item.isSkip {
                 skips += 1
                 return skips <= Self.limit
@@ -143,9 +143,13 @@ public struct RunHistory: Sendable {
         for routineID in routineIDs {
             for var record in records(for: routineID) where record.outcome == .running {
                 if record.questions?.isEmpty == false {
-                    record.questions = nil
-                    record.attention = "The session was interrupted while waiting for your answer. "
-                        + "Continue it to ask again."
+                    let hadBlockingQuestion = record.questions?.contains { $0.replyViaMessage != true } == true
+                    record.questions = record.questions?.filter { $0.replyViaMessage == true }
+                    record.attention = record.nextQuestion?.title
+                    if hadBlockingQuestion, record.questions?.isEmpty != false {
+                        record.attention = "The session was interrupted while waiting for your answer. "
+                            + "Continue it to ask again."
+                    }
                 }
                 record.outcome = .interrupted
                 record.endedAt = now

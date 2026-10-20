@@ -9,6 +9,8 @@ public struct AgentQuestion: Codable, Equatable, Identifiable, Sendable {
     public var actions: [QuestionOption]
     public var url: String?
     public var allowsDecline: Bool?
+    /// Async message questions receive a user message, not a reply to a suspended RPC.
+    public var replyViaMessage: Bool?
 
     public init(
         id: String = UUID().uuidString, title: String, detail: String = "",

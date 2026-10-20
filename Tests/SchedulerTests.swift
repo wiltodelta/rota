@@ -162,6 +162,100 @@ final class SchedulerTests: XCTestCase {
         XCTAssertThrowsError(try scheduler.answerQuestion("q1", on: record, answer: .init(action: "cancel")))
     }
 
+    func testAsyncQuestionsSurviveCompletionAndAnswerContinuesTheSameSession() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("native-thread")
+        let record = try XCTUnwrap(scheduler.active[routine.id])
+        var question = AgentQuestion(id: "async-1", title: "Choose", fields: [.init(id: "0", title: "Color?")])
+        question.replyViaMessage = true
+        let replies = AnswerRecorder()
+        launcher.events[0].question(question) { replies.append($0) }
+        launcher.events[0].question(question) { replies.append($0) }
+        XCTAssertEqual(scheduler.current(record.id)?.questions?.count, 1, "replayed items are deduplicated")
+        launcher.completions[0](.succeeded)
+        XCTAssertEqual(scheduler.current(record.id)?.questions, [question])
+        XCTAssertTrue(replies.values.isEmpty, "async questions have no outstanding RPC callback")
+        XCTAssertThrowsError(try scheduler.answerQuestion(question.id, on: record, answer: .init()))
+        try scheduler.answerQuestion(question.id, on: record, answer: .init(values: ["0": ["Blue"]]))
+        XCTAssertEqual(launcher.specs.count, 2)
+        XCTAssertEqual(launcher.specs.last?.resume, "native-thread")
+        XCTAssertTrue(launcher.specs.last?.prompt.contains("Blue") == true)
+        XCTAssertTrue(launcher.specs.last?.prompt.contains("Color?") == true)
+        XCTAssertTrue(scheduler.current(record.id)?.questions?.isEmpty != false)
+        XCTAssertThrowsError(try scheduler.answerQuestion(question.id, on: record, answer: .init(action: "cancel")))
+    }
+
+    func testAsyncQuestionsSurviveRestartAndFailedContinuationWithoutLosingOtherQuestions() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("native-thread")
+        let record = try XCTUnwrap(scheduler.active[routine.id])
+        for id in ["first", "second"] {
+            var question = AgentQuestion(id: id, title: id)
+            question.replyViaMessage = true
+            launcher.events[0].question(question) { _ in XCTFail("No RPC callback for async input") }
+        }
+        let location = StorageLocation(root: directory, logs: directory.appendingPathComponent("logs"))
+        scheduler.history.closeOrphans(routineIDs: [routine.id], now: clock)
+        let restored = Scheduler(location: location, launcher: launcher)
+        restored.executable = { "/bin/\($0.rawValue)" }
+        XCTAssertEqual(restored.current(record.id)?.questions?.map(\.id), ["first", "second"])
+        launcher.failure = NSError(domain: "Synthetic launch failure", code: 1)
+        XCTAssertThrowsError(try restored.answerQuestion("first", on: record, answer: .init(action: "decline")))
+        XCTAssertEqual(restored.current(record.id)?.questions?.map(\.id), ["first", "second"])
+        launcher.failure = nil
+        try restored.answerQuestion("first", on: record, answer: .init(action: "cancel"))
+        XCTAssertEqual(restored.current(record.id)?.questions?.map(\.id), ["second"])
+        XCTAssertTrue(launcher.specs.last?.prompt.contains("cancel") == true)
+        try restored.answerQuestion("second", on: record, answer: .init(action: "decline"))
+        XCTAssertTrue(launcher.controls.last?.sent.last?.contains("decline") == true)
+        XCTAssertTrue(restored.current(record.id)?.questions?.isEmpty != false)
+    }
+
+    func testAntigravityCancellationAndDeclineSendInstructionsWithoutGrantingPermissions() throws {
+        var routine = addDailyRoutine()
+        routine.harness = .antigravity
+        scheduler.save(routine)
+        for action in ["cancel", "decline"] {
+            let index = launcher.events.count
+            scheduler.run(routine, trigger: .manual)
+            launcher.events[index].session("native-conversation")
+            let record = try XCTUnwrap(scheduler.active[routine.id])
+            let question = try XCTUnwrap(QuestionRequest.antigravity("ask_permission", arguments: [:], id: action))
+            launcher.events[index].question(question) { _ in XCTFail("No suspended native RPC exists") }
+            launcher.events[index].finished(.succeeded)
+            try scheduler.answerQuestion(question.id, on: record, answer: .init(action: action))
+            let spec = try XCTUnwrap(launcher.specs.last)
+            XCTAssertEqual(spec.resume, "native-conversation")
+            let body = spec.prompt.split(separator: "\n", maxSplits: 1).last.map(String.init) ?? ""
+            let message = try JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any]
+            XCTAssertEqual(message?["action"] as? String, action)
+            XCTAssertEqual(scheduler.current(record.id)?.questions?.count, 0)
+            launcher.events[index + 1].finished(.succeeded)
+        }
+    }
+
+    func testBlockingQuestionsTakePriorityOverEarlierAsyncQuestions() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("native-thread")
+        let record = try XCTUnwrap(scheduler.active[routine.id])
+        var async = AgentQuestion(id: "async", title: "Async choice")
+        async.replyViaMessage = true
+        launcher.events[0].question(async) { _ in XCTFail("No RPC for async input") }
+        let replies = AnswerRecorder()
+        launcher.events[0].question(.init(id: "blocking", title: "Blocking choice")) { replies.append($0) }
+        XCTAssertEqual(scheduler.current(record.id)?.nextQuestion?.id, "blocking")
+        XCTAssertThrowsError(try scheduler.answerQuestion("async", on: record, answer: .init()))
+        XCTAssertTrue(launcher.controls[0].sent.isEmpty)
+        try scheduler.answerQuestion("blocking", on: record, answer: .init(action: "cancel"))
+        XCTAssertEqual(replies.values.map(\.action), ["cancel"])
+        XCTAssertEqual(scheduler.current(record.id)?.nextQuestion?.id, "async")
+        try scheduler.answerQuestion("async", on: record, answer: .init(action: "decline"))
+        XCTAssertTrue(launcher.controls[0].sent.last?.contains("decline") == true)
+    }
+
     func testMultipleQuestionsResolveIndependentlyAndFinishCancelsTheRest() throws {
         let routine = addDailyRoutine()
         scheduler.run(routine, trigger: .manual)

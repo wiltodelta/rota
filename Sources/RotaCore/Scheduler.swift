@@ -276,18 +276,24 @@ public final class Scheduler {
     /// runs, or by continuing the finished session as a run of its own.
     @discardableResult
     public func message(_ message: String, to record: RunRecord) -> Bool {
-        guard var record = current(record.id, routineID: record.routineID), canMessage(record),
-              isActive(record) ? controls[record.routineID] != nil : record.logPath != nil else { return false }
+        guard var record = current(record.id, routineID: record.routineID) else { return false }
         guard record.questions?.isEmpty != false else { return false }
-        // Answering is what the session waited for; the continued run saves this copy, so it must not carry the mark.
-        dismissAttention(record)
+        // The delivery path saves this copy, including the cleared attention mark.
         record.attention = nil
+        return deliverMessage(message, to: record)
+    }
+
+    /// Shared delivery for ordinary messages and explicit answers to async questions.
+    func deliverMessage(_ message: String, to record: RunRecord) -> Bool {
+        guard canMessage(record) else { return false }
         if isActive(record) {
-            controls[record.routineID]?.send(message)
-        } else {
-            return continueSession(record, with: message)
+            guard let control = controls[record.routineID] else { return false }
+            control.send(message)
+            active[record.routineID] = record
+            saveRecord(record)
+            return true
         }
-        return true
+        return continueSession(record, with: message)
     }
 
     /// The current run start, or current native terminal turn start, while it works.

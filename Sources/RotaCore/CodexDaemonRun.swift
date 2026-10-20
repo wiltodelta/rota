@@ -17,7 +17,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     private var approvalItems: [String: [String: Any]] = [:]
     private var stopReason: RunOutcome?
 
-    private init(spec: LaunchSpec, journal: RunJournal) {
+    init(spec: LaunchSpec, journal: RunJournal) {
         self.spec = spec
         self.journal = journal
     }
@@ -146,7 +146,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         }
     }
 
-    private func handle(_ method: String, _ params: [String: Any]) {
+    func handle(_ method: String, _ params: [String: Any]) {
         if method == "serverRequest/resolved", let id = params["requestId"] {
             let key = String(describing: id)
             peer?.dismissRequest(key)
@@ -154,12 +154,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         }
         switch method {
         case "item/started": itemStarted(params["item"] as? [String: Any])
-        case "item/completed":
-            let item = params["item"] as? [String: Any]
-            if let id = item?["id"] as? String { approvalItems[id] = nil }
-            if item?["type"] as? String == "agentMessage", let text = item?["text"] as? String {
-                journal.record(.agent, text)
-            }
+        case "item/completed": itemCompleted(params["item"] as? [String: Any])
         case "turn/plan/updated":
             let steps = (params["plan"] as? [[String: Any]] ?? []).map {
                 PlanStep(status: $0["status"] as? String, text: $0["step"] as? String ?? "")
@@ -169,6 +164,17 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
             turnCompleted(params["turn"] as? [String: Any])
         default:
             break
+        }
+    }
+
+    private func itemCompleted(_ item: [String: Any]?) {
+        guard let item else { return }
+        if let id = item["id"] as? String { approvalItems[id] = nil }
+        if item["type"] as? String == "agentMessage", let text = item["text"] as? String {
+            journal.record(.agent, text)
+        }
+        if let question = QuestionRequest.codexMessage(item) {
+            journal.ask(question, recordText: false) { _ in }
         }
     }
 

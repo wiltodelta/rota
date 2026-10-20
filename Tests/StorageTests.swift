@@ -54,6 +54,26 @@ final class StorageTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: TranscriptReader.journalURL(for: logs[2]).path))
     }
 
+    func testAsyncQuestionsSurviveOrphanRecoveryAndRetention() throws {
+        let history = RunHistory(location: location)
+        var record = RunRecord(routineID: "a", trigger: .manual, harness: .codex,
+                               startedAt: Date(timeIntervalSince1970: 0), outcome: .running)
+        var question = AgentQuestion(id: "async", title: "Choose")
+        question.replyViaMessage = true
+        record.questions = [question, .init(id: "rpc", title: "Expired RPC")]
+        try history.upsert(record)
+        history.closeOrphans(routineIDs: ["a"], now: Date(timeIntervalSince1970: 1))
+        XCTAssertEqual(history.records(for: "a").first?.questions, [question])
+        XCTAssertEqual(history.records(for: "a").first?.attention, "Choose")
+        for index in 1...(RunHistory.limit + 1) {
+            try history.upsert(RunRecord(routineID: "a", trigger: .scheduled, harness: .codex,
+                                        startedAt: Date(timeIntervalSince1970: TimeInterval(index)),
+                                        outcome: .succeeded))
+        }
+        XCTAssertEqual(history.records(for: "a").count, RunHistory.limit + 1)
+        XCTAssertEqual(history.records(for: "a").last?.questions, [question])
+    }
+
     func testOrphanedRunsBecomeInterrupted() throws {
         let history = RunHistory(location: location)
         let record = RunRecord(routineID: "a", trigger: .manual, harness: .grok,

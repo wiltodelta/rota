@@ -9,6 +9,7 @@ struct AntigravityStream {
         case text(String)
         case item(TranscriptItem.Kind, String)
         case result(RunOutcome)
+        case unknownStep
     }
 
     private var hadText = false
@@ -36,6 +37,7 @@ struct AntigravityStream {
     }
 
     private mutating func step(_ step: [String: Any]) -> [Event] {
+        if step["step_type"] as? String == "unknown" { return [.unknownStep] }
         if step["step_type"] as? String == "agent_response", let delta = step["text_delta"] as? String {
             hadText = hadText || !delta.isEmpty
             return [.text(delta)]

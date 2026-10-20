@@ -29,6 +29,20 @@ struct QuestionRequest {
         }
     }
 
+    /// Codex's async input tool completes as an agentMessage, with structured question metadata.
+    static func codexMessage(_ item: [String: Any]) -> AgentQuestion? {
+        guard item["type"] as? String == "agentMessage", let id = item["id"] as? String,
+              let questions = item["questions"] as? [[String: Any]], !questions.isEmpty else { return nil }
+        let fields = questions.enumerated().map { index, question in
+            QuestionField(id: String(index), title: question["title"] as? String ?? "Question",
+                          kind: (question["options"] as? [String] ?? []).isEmpty ? .text : .choice,
+                          options: (question["options"] as? [String] ?? []).map { .init(id: $0, label: $0) })
+        }
+        var question = AgentQuestion(id: id, title: "Codex needs your reply", fields: fields)
+        question.replyViaMessage = true
+        return question
+    }
+
     static func codex(_ method: String, _ params: [String: Any]) -> QuestionRequest? {
         switch method {
         case "item/tool/requestUserInput", "tool/requestUserInput":
@@ -187,56 +201,6 @@ struct QuestionRequest {
                 return ["outcome": ["outcome": "cancelled"]]
             }
         default: return nil
-        }
-    }
-
-    static func elicitation(_ params: [String: Any]) -> QuestionRequest? {
-        let mode = params["mode"] as? String ?? "form"
-        guard ["form", "url"].contains(mode) else { return nil }
-        let schema = params["requestedSchema"] as? [String: Any] ?? params["requested_schema"] as? [String: Any] ?? [:]
-        let required = schema["required"] as? [String] ?? []
-        let properties = schema["properties"] as? [String: [String: Any]] ?? [:]
-        let fields = properties.keys.sorted().map { key -> QuestionField in
-            let property = properties[key] ?? [:]
-            let multiple = property["type"] as? String == "array"
-            let source = multiple ? property["items"] as? [String: Any] ?? [:] : property
-            let enums = source["enum"] as? [String] ?? []
-            let names = source["enumNames"] as? [String] ?? enums
-            var options = enums.enumerated().map { index, value in
-                QuestionOption(id: value, label: names.indices.contains(index) ? names[index] : value)
-            }
-            for item in source["oneOf"] as? [[String: Any]] ?? source["anyOf"] as? [[String: Any]] ?? [] {
-                if let value = item["const"] as? String {
-                    options.append(.init(id: value, label: item["title"] as? String ?? value))
-                }
-            }
-            let type = property["type"] as? String ?? "string"
-            let kind: QuestionField.Kind
-            if multiple {
-                kind = .multiple
-            } else if !options.isEmpty {
-                kind = .choice
-            } else {
-                switch type {
-                case "boolean": kind = .boolean
-                case "integer": kind = .integer
-                case "number": kind = .number
-                default: kind = .text
-                }
-            }
-            return QuestionField(
-                id: key, title: property["title"] as? String ?? key,
-                detail: property["description"] as? String ?? "", kind: kind, options: options,
-                required: required.contains(key), allowsOther: options.isEmpty, schema: json(property))
-        }
-        let question = AgentQuestion(
-            title: "A tool needs your reply", detail: params["message"] as? String ?? "", fields: fields,
-            actions: [.init(id: "accept", label: mode == "url" ? "I've Finished" : "Send Answer")],
-            url: params["url"] as? String, allowsDecline: true)
-        return Self(question: question) { answer in
-            var content: [String: Any] = [:]
-            for field in fields { content[field.id] = field.content(answer.values[field.id] ?? []) }
-            return ["action": answer.action, "content": answer.action == "accept" ? content : NSNull()]
         }
     }
 

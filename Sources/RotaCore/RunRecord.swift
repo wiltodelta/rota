@@ -68,6 +68,11 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     /// the user answers in its chat or dismisses it.
     public var attention: String?
     public var questions: [AgentQuestion]?
+    /// A suspended provider must receive its RPC reply before async answers can steer the session.
+    public var nextQuestion: AgentQuestion? {
+        questions?.first { $0.replyViaMessage != true } ?? questions?.first
+    }
+
     /// How many times Rota continued this session on its own after the Mac slept
     /// or shut down in the middle of it (`Scheduler.resumeLimit` at most).
     public var resumes: Int?

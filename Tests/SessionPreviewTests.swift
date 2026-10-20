@@ -46,15 +46,32 @@ final class SessionPreviewTests: XCTestCase {
         XCTAssertTrue(SessionPreview.text(for: record(), snapshot: .init(problem: "missing")).contains("Couldn't read"))
     }
 
-    func testRunningToolsAndShellOutput() {
+    func testRunningToolsDoNotReplaceTheLatestReadableMessage() {
         let items = Transcript.parse("[you] Check\nAn update\n-> Inspect deployment")
-        XCTAssertEqual(SessionPreview.text(for: record(.running), snapshot: .init(items: items)),
-                       "Working: Inspect deployment")
+        for outcome in [RunOutcome.running, .succeeded, .cancelled, .failed(exitCode: 1)] {
+            XCTAssertEqual(SessionPreview.text(for: record(outcome), snapshot: .init(items: items)), "An update")
+        }
+        let toolsOnly = TranscriptSnapshot(items: [.init(id: 0, kind: .tool, text: "Inspect deployment")])
+        XCTAssertEqual(SessionPreview.text(for: record(.running), snapshot: toolsOnly),
+                       "Waiting for the first message…")
+    }
+
+    func testShellOutputRemainsReadable() {
         var run = record()
         run.harness = .shell
         XCTAssertEqual(SessionPreview.text(for: run, snapshot: .init(items: Transcript.parse(
             "[you] command\nFirst line\nLast line\n[result: Succeeded after 2 s]", shell: true))),
                        "First line Last line")
+    }
+
+    func testAgentToolOutputDoesNotReplaceTheReadableMessage() {
+        var run = record(.running)
+        run.harness = .antigravity
+        let snapshot = TranscriptSnapshot(items: [
+            .init(id: 0, kind: .agent, text: "The checks are complete."),
+            .init(id: 1, kind: .output, text: #"{"internal_tool_result":true}"#),
+        ])
+        XCTAssertEqual(SessionPreview.text(for: run, snapshot: snapshot), "The checks are complete.")
     }
 
     func testPreviewReadsTheRealJournalAndRemainsBounded() async throws {
@@ -71,10 +88,11 @@ final class SessionPreviewTests: XCTestCase {
         journal.text("Final answer ")
         journal.text(String(repeating: "long content ", count: 500))
         journal.endText()
+        journal.record(.tool, "Read deployment configuration")
         let reader = TranscriptSessionReader()
         let snapshot = await reader.read(log: log, shell: false, finished: false)
         XCTAssertTrue(snapshot.structured)
-        let preview = SessionPreview.text(for: record(), snapshot: snapshot)
+        let preview = SessionPreview.text(for: record(.running), snapshot: snapshot)
         XCTAssertTrue(preview.hasPrefix("Final answer"))
         XCTAssertLessThanOrEqual(preview.count, 320)
     }

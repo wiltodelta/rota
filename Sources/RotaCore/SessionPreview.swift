@@ -3,7 +3,7 @@ import Foundation
 /// A short excerpt of actual session content, never a generated summary or the user's prompt.
 public enum SessionPreview {
     public static func text(for record: RunRecord, snapshot: TranscriptSnapshot?) -> String {
-        if let question = record.questions?.first {
+        if let question = record.nextQuestion {
             return plain(([question.detail] + question.fields.map(\.title) + [question.title])
                 .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? question.title)
         }
@@ -18,11 +18,10 @@ public enum SessionPreview {
             return plain(error.text)
         }
         if let item = snapshot.items.last(where: {
-            ($0.kind == .agent || $0.kind == .output || $0.kind == .error
-                || (record.outcome == .running && $0.kind == .tool))
+            ($0.kind == .agent || ($0.kind == .output && record.harness == .shell) || $0.kind == .error)
                 && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }) {
-            return (item.kind == .tool ? "Working: " : "") + plain(item.text)
+            return plain(item.text)
         }
         if snapshot.problem != nil { return "Couldn't read the last message. Open the session for details." }
         return empty(record)

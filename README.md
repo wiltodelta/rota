@@ -66,7 +66,7 @@ Desktop.
   any other), or in the macOS default terminal, the one that opens executables
   (iTerm2 after "Make iTerm2 Default Term"). iTerm2 asks "OK to run" before
   each script until you tick "Suppress this message permanently" once. The last
-  50 finished sessions of each routine are kept. Running sessions are protected;
+  50 finished sessions of each routine are kept. Running sessions and unanswered questions are protected;
   skipped slots have a separate history limit and never displace sessions.
   Each routine's session list shows the last reply or command output beside
   its date, agent, duration and status. Pending questions take precedence over
@@ -94,7 +94,14 @@ Desktop.
   Free-text answers use the session composer, labeled with the current question.
   Numbered options highlight your selection; Something else moves focus to the composer.
   Multiple questions appear one at a time, with Back/Next and preserved drafts.
-  Ordinary message drafts and attachments are kept separately.
+  Ordinary message drafts and attachments are kept separately. Codex's asynchronous
+  questions and Antigravity questionnaires remain available after the turn ends
+  and after restarting Rota; answering continues the same session. Antigravity's
+  headless CLI skips its native questionnaire, so Rota reads its structured
+  call from the native archive and sends the explicit answer as a later user turn.
+  Device verification and forms Rota cannot
+  render explain how to continue in the provider's app and never offer a false approval.
+  Supported request types and verification coverage: [agent questions](docs/agent-questions.md).
 - **Routines can notify you.** A routine (or its skill) runs
   `"$ROTA_CLI" notify "…"`, or an agent calls the `notify_user` tool, and Rota
   shows a Mac notification from that session. With `--needs-reply` the session
@@ -212,8 +219,10 @@ mv Rota.app /Applications/
 
 Routine tools retain their unattended execution policy (`bypassPermissions`
 for Claude Code, `approvalPolicy: never` with `danger-full-access` for the Codex
-daemon, and `--always-approve` for Grok Build). Native questions, explicit plan
-confirmations and MCP requests that reach Rota wait for your explicit answer,
+daemon, `--always-approve` for Grok Build, and `--dangerously-skip-permissions`
+for Antigravity). Rota does not grant or revoke Antigravity permissions;
+permission requests surfaced from its archive offer only cancel/decline messages.
+Native questions, explicit plan confirmations and MCP requests that reach Rota wait for your explicit answer,
 in the app or through its CLI/MCP question tools.
 Point a routine only at a project whose skill you trust.
 

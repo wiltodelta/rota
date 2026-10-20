@@ -7,6 +7,8 @@
 # never quits or reads. Needs Accessibility and Screen Recording for the terminal.
 #   scripts/ui-check.sh           shell routine only, no agent quota spent
 #   scripts/ui-check.sh --live    also message a running Codex session
+#   scripts/ui-check.sh --questions-only  finished question and verification states only
+#   ROTA_UI_QUESTION_HARNESS=antigravity scripts/ui-check.sh --questions-only
 #   ROTA_UI_TERMINAL=terminal scripts/ui-check.sh  use Terminal in both appearances
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -136,12 +138,16 @@ check_agents_scrolling() {
 }
 
 capture() {
-    local title="$1" name="$2" id actual_width
-    "$DRIVER" window "$title" 820 600 || true
+    local title="$1" name="$2" id actual_width actual_height desired_height="${3:-600}"
+    "$DRIVER" window "$title" 820 "$desired_height" || true
     sleep 1
     actual_width="$("$DRIVER" bounds "$title" | awk '{print $3}')"
     awk -v width="$actual_width" 'BEGIN { exit !(width >= 819.5 && width <= 820.5) }' \
         || fail "$name is not at minimum width: $actual_width"
+    actual_height="$("$DRIVER" bounds "$title" | awk '{print $4}')"
+    awk -v height="$actual_height" -v expected="$desired_height" \
+        'BEGIN { exit !(height >= expected - 0.5 && height <= expected + 0.5) }' \
+        || fail "$name has height $actual_height, expected $desired_height"
     id="$("$DRIVER" wid "$title")"
     screencapture -x -o -l "$id" "$OUT/$name.png" && pass "captured $name"
     check_layout "$name"
@@ -181,6 +187,170 @@ terminal_of() {
 }
 
 ITERM="$(mdfind "kMDItemCFBundleIdentifier == 'com.googlecode.iterm2'" | head -1)"
+
+# Render only synthetic question states when auditing the question adapters.
+check_question_forms() {
+    local appearance="$1" routine="$2" kind="${3:-async}"
+    python3 - "$SUPPORT" "$routine" "$WORK/project" "$kind" "${ROTA_UI_QUESTION_HARNESS:-codex}" <<'PYTHON'
+from pathlib import Path
+from datetime import datetime, timezone
+import json
+import sys
+import uuid
+root, routine = Path(sys.argv[1]), sys.argv[2]
+harness = sys.argv[5]
+assert harness in {"codex", "antigravity"}, harness
+root.mkdir(parents=True, exist_ok=True)
+(root / "runs").mkdir(exist_ok=True)
+if not (root / "routines.json").exists():
+    (root / "routines.json").write_text(json.dumps([{
+        "id": routine, "name": "UI check " + routine.removeprefix("ui-shell-"),
+        "workingDirectory": sys.argv[3], "schedule": "0 10 * * *", "harness": "shell",
+        "enabled": False, "prompt": "Synthetic question fixture",
+    }]))
+history = root / "runs" / f"{routine}.json"
+if history.exists():
+    records = json.loads(history.read_text())
+else:
+    log = root / "Logs" / routine / "questions.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("A completed synthetic session with a question awaiting your answer.\n")
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    records = [{"id": str(uuid.uuid4()).upper(), "routineID": routine, "trigger": "manual",
+                "harness": "codex", "startedAt": stamp, "endedAt": stamp,
+                "outcome": {"succeeded": {}}, "logPath": str(log)}]
+records[0]["questions"] = [{
+    "id": "synthetic-async", "title": "Codex needs your reply", "detail": "",
+    "replyViaMessage": True, "allowsDecline": False,
+    "actions": [{"id": "accept", "label": "Send Answer", "detail": ""}],
+    "fields": [
+        {"id": "0", "title": "Which color?", "detail": "", "kind": "choice", "required": True,
+         "allowsOther": True, "options": [{"id": color, "label": color, "detail": ""}
+                                           for color in ["Blue", "Green"]]},
+        {"id": "1", "title": "Any notes?", "detail": "", "kind": "text", "options": [],
+         "required": True, "allowsOther": True},
+    ],
+}]
+records[0]["harness"] = harness
+if harness == "antigravity":
+    question = records[0]["questions"][0]
+    question["title"] = "Antigravity needs your reply"
+    question["fields"][1]["id"] = "2"
+    question["fields"].insert(1, {
+        "id": "1", "title": "Which fruit?", "detail": "", "kind": "multiple", "required": True,
+        "allowsOther": True, "options": [{"id": fruit, "label": fruit, "detail": ""}
+                                          for fruit in ["Apple", "Pear", "Plum"]],
+    })
+if sys.argv[4] == "verification":
+    records[0]["questions"] = [{"id": "verification", "title": "Device verification required",
+        "detail": "This request requires device verification in the provider's app. Cancel here to continue there.",
+        "fields": [], "actions": [], "allowsDecline": True, "replyViaMessage": True}]
+    if harness == "antigravity":
+        records[0]["questions"][0].update({
+            "title": "Permission request needs Antigravity",
+            "detail": "Antigravity handles permissions through its headless execution policy. "
+                      "Rota cannot grant or revoke them here. Cancel or decline to send that instruction "
+                      "to the conversation; use Antigravity itself to manage permissions.",
+        })
+records[0]["attention"] = records[0]["questions"][0]["title"]
+# No native session id: this fixture must never start a real continuation.
+records[0].pop("sessionID", None)
+history.write_text(json.dumps(records))
+PYTHON
+    launch "$appearance"
+    check "$DRIVER" exists questionCard
+    if [[ "$kind" == verification ]]; then
+        check "$DRIVER" visible cancelQuestion
+        check "$DRIVER" visible declineQuestion
+        if "$DRIVER" exists answerQuestion-accept; then fail "unsupported request must not offer approval"; fi
+        local refusal="$appearance-verification-question"
+        if [[ "${ROTA_UI_QUESTION_HARNESS:-codex}" == antigravity ]]; then
+            refusal="$appearance-permission-question"
+        fi
+        capture "UI check $appearance" "$refusal" 520
+        quit_rota
+        return
+    fi
+    check "$DRIVER" visible questionOption-0-Blue
+    capture "UI check $appearance" "$appearance-async-question-finished" 520
+    "$DRIVER" press questionOption-0-Blue
+    "$DRIVER" press nextQuestion
+    if [[ "${ROTA_UI_QUESTION_HARNESS:-codex}" == antigravity ]]; then
+        check "$DRIVER" visible questionOption-1-Pear
+        "$DRIVER" press questionOption-1-Pear
+        "$DRIVER" press questionOption-1-Plum
+        capture "UI check $appearance" "$appearance-async-question-multiple" 520
+        "$DRIVER" press nextQuestion
+    fi
+    check "$DRIVER" exists questionComposerContext
+    capture "UI check $appearance" "$appearance-async-question-text" 520
+    quit_rota
+
+}
+
+inject_question() {
+    python3 - "$SUPPORT" "$1" "$2" <<'PYTHON'
+import json
+from pathlib import Path
+import socket
+import sys
+root, session, kind = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+question = {"id": kind, "title": "Async note" if kind == "async-draft" else "Blocking approval",
+            "detail": "", "fields": [], "allowsDecline": False,
+            "actions": [{"id": "accept", "label": "Send Answer", "detail": ""}]}
+if kind == "async-draft":
+    question["replyViaMessage"] = True
+    question["fields"] = [{"id": "note", "title": "Your note?", "detail": "", "kind": "text",
+                            "options": [], "required": True, "allowsOther": True}]
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+    peer.settimeout(10)
+    peer.connect(str(root / "rota.sock"))
+    peer.sendall((json.dumps({"id": 1, "method": "questions.create",
+                             "params": {"session": session, "question": question}}) + "\n").encode())
+    reply = json.loads(peer.makefile("r").readline())
+    assert "error" not in reply, reply
+PYTHON
+}
+
+check_mixed_questions() {
+    local appearance="$1" routine="$2" session stopped=0
+    launch "$appearance"
+    "$APP/Contents/Helpers/rota" update "$routine" --prompt "sleep 60" >/dev/null
+    "$DRIVER" menu "Run Now"
+    sleep 1
+    session="$("$APP/Contents/Helpers/rota" sessions "$routine" --json \
+        | python3 -c 'import json,sys; print(next(r["session"] for r in json.load(sys.stdin) if r["running"]))')"
+    inject_question "$session" async-draft
+    wait_exists questionComposerContext
+    "$DRIVER" set composer "Keep this draft"
+    wait_value composer "Keep this draft" || fail "the async draft was entered"
+    inject_question "$session" blocking
+    wait_value questionTitle "Blocking approval" || fail "blocking request takes priority"
+    capture "UI check $appearance" "$appearance-mixed-blocking-question" 520
+    "$DRIVER" press cancelQuestion
+    wait_value questionTitle "Async note" || fail "async question returns after the RPC answer"
+    wait_value composer "Keep this draft" || fail "the async draft survives interruption"
+    capture "UI check $appearance" "$appearance-mixed-restored-draft" 520
+    "$APP/Contents/Helpers/rota" stop "$routine" >/dev/null
+    for _ in {1..60}; do
+        if [[ "$(session_value "$routine" cancelled)" == True* ]]; then stopped=1; break; fi
+        sleep 0.2
+    done
+    [[ "$stopped" == 1 ]] || fail "the synthetic shell session stopped"
+    quit_rota
+}
+
+if [[ "$LIVE" == --questions-only ]]; then
+    for appearance in light dark; do
+        rm -rf "$SUPPORT"
+        check_question_forms "$appearance" "ui-shell-$appearance"
+        check_question_forms "$appearance" "ui-shell-$appearance" verification
+        check_mixed_questions "$appearance" "ui-shell-$appearance"
+        quit_rota
+    done
+    pass "question forms in both appearances"
+    exit 0
+fi
 
 # Light must pass completely before dark is exercised. Any failed check stops the run.
 for appearance in light dark; do
@@ -447,6 +617,8 @@ PYTHON
     capture "UI check $appearance" "$appearance-table-zoom"
     "$DRIVER" key command-zero
     quit_rota
+
+    check_question_forms "$appearance" "ui-shell-$appearance"
 
     # Settings, with each agent's installed copies and versions; the light pass
     # shows the terminal picker on its default, which names the macOS default terminal.

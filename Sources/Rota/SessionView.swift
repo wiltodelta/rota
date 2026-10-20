@@ -16,6 +16,7 @@ struct SessionView: View {
     /// Messages sent from this view that the session has not shown yet.
     @State private var outbox: [Outgoing] = []
     @State private var questionDraft: QuestionDraft?
+    @State private var questionDrafts: [String: QuestionDraft] = [:]
 
     private var running: Bool { model.scheduler.isActive(record) }
 
@@ -63,9 +64,13 @@ struct SessionView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onChange(of: running ? current.questions?.first?.id : nil, initial: true) { _, id in
+        .onChange(of: current.nextQuestion?.id, initial: true) { _, id in
+            if let draft = questionDraft { questionDrafts[draft.question.id] = draft }
+            let pending = Set(current.questions?.map(\.id) ?? [])
+            questionDrafts = questionDrafts.filter { pending.contains($0.key) }
             questionDraft = id.flatMap { id in
-                current.questions?.first(where: { $0.id == id }).map { QuestionDraft(question: $0) }
+                questionDrafts[id]
+                    ?? current.questions?.first(where: { $0.id == id }).map { QuestionDraft(question: $0) }
             }
         }
         .task(id: RefreshKey(record: record.id, running: running, version: model.scheduler.historyVersion)) {

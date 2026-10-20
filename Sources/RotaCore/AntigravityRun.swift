@@ -15,10 +15,19 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
     private var outcome: RunOutcome?
     private var stopReason: RunOutcome?
     private var closing = false
+    private var questions: AntigravityQuestionArchive?
+    private var questionReadFailed = false
+    private var sawUnknownStep = false
+
+    private var questionHome: URL {
+        URL(fileURLWithPath: spec.environment["HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.path)
+    }
 
     private init(spec: LaunchSpec, journal: RunJournal) {
         self.spec = spec
         self.journal = journal
+        questions = spec.resume.flatMap { AntigravityQuestionArchive(session: $0, home: questionHome,
+                                                                    skipExisting: true) }
     }
 
     static func start(_ spec: LaunchSpec, journal: RunJournal) throws -> AntigravityRun {
@@ -101,21 +110,48 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
 
     private func handle(_ line: Data) {
         guard !journal.isFinished else { return }
-        for event in stream.events(line) {
-            switch event {
-            case .session(let id): journal.session(id)
-            case .configuration(let configuration): journal.configure(configuration)
-            case .text(let text): journal.text(text)
-            case .item(let kind, let text): journal.record(kind, text)
-            case .result(let result):
-                journal.endText()
-                if outcome == nil || result.isFailure { outcome = result }
-                if !pending.isEmpty, stopReason == nil {
-                    write(pending.removeFirst())
-                } else {
-                    closeInput()
-                }
+        for event in stream.events(line) { handle(event) }
+    }
+
+    private func handle(_ event: AntigravityStream.Event) {
+        switch event {
+        case .session(let id):
+            if questions?.session != id {
+                questions = AntigravityQuestionArchive(session: id, home: questionHome)
             }
+            journal.session(id)
+        case .unknownStep:
+            sawUnknownStep = true
+            readQuestions()
+        case .configuration(let configuration): journal.configure(configuration)
+        case .text(let text): journal.text(text)
+        case .item(let kind, let text): journal.record(kind, text)
+        case .result(let result):
+            readQuestions()
+            journal.endText()
+            if outcome == nil || result.isFailure { outcome = result }
+            if !pending.isEmpty, stopReason == nil {
+                write(pending.removeFirst())
+            } else {
+                closeInput()
+            }
+        }
+    }
+
+    private func readQuestions(final: Bool = false) {
+        guard !questionReadFailed else { return }
+        do {
+            if final, sawUnknownStep,
+               questions.map({ !FileManager.default.fileExists(atPath: $0.file.path) }) != false {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            for question in try questions?.read(final: final) ?? [] {
+                journal.ask(question, recordText: false) { _ in }
+            }
+        } catch {
+            questionReadFailed = true
+            journal.record(.error, "Antigravity's native questions could not be read. "
+                + "Question sync is paused; ask the agent to repeat its question in a message.")
         }
     }
 
@@ -132,10 +168,12 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
             handle(tail)
         }
         closeInput()
+        readQuestions(final: true)
         if outcome == nil, stopReason == nil {
             journal.record(.error, "Antigravity exited without a result. The session may be incomplete.")
         }
-        let result = status == 0 ? (outcome ?? .interrupted) : .failed(exitCode: status)
+        let result: RunOutcome = questionReadFailed
+            ? .failed(exitCode: 1) : status == 0 ? (outcome ?? .interrupted) : .failed(exitCode: status)
         journal.finish(stopReason ?? result)
     }
 

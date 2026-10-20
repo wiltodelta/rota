@@ -22,7 +22,7 @@ extension Scheduler {
         var next = latest
         next.outcome = .running
         next.endedAt = nil
-        next.questions = nil
+        next.questions = next.questions?.filter { $0.replyViaMessage == true }
         next.terminalState = .waiting
         var spec = spec(for: routine, record: latest, harness: record.harness, prompt: "",
                         log: URL(fileURLWithPath: logPath), resume: session)
@@ -42,7 +42,7 @@ extension Scheduler {
         record.endedAt = nil
         record.reportedModel = nil
         record.reportedEffort = nil
-        record.questions = nil
+        record.questions = record.questions?.filter { $0.replyViaMessage == true }
         record.terminalState = nil
         return start(record, spec: spec(for: routine, record: record, harness: record.harness, prompt: message,
                                  log: URL(fileURLWithPath: logPath), resume: session))

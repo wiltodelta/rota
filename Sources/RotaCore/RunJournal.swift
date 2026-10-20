@@ -97,12 +97,15 @@ final class RunJournal: @unchecked Sendable {
         DispatchQueue.main.async { self.events.session(id) }
     }
 
-    func ask(_ question: AgentQuestion, reply: @escaping @Sendable (QuestionAnswer) -> Void) {
+    func ask(_ question: AgentQuestion, recordText: Bool = true,
+             reply: @escaping @Sendable (QuestionAnswer) -> Void) {
         guard !isFinished else { return reply(.init(action: "cancel")) }
-        let body = ([question.title, question.detail] + question.fields.flatMap { field in
-            [field.title] + field.options.map { $0.label + ($0.detail.isEmpty ? "" : ": " + $0.detail) }
-        }).filter { !$0.isEmpty }.joined(separator: "\n")
-        record(.agent, body)
+        if recordText {
+            let body = ([question.title, question.detail] + question.fields.flatMap { field in
+                [field.title] + field.options.map { $0.label + ($0.detail.isEmpty ? "" : ": " + $0.detail) }
+            }).filter { !$0.isEmpty }.joined(separator: "\n")
+            record(.agent, body)
+        }
         DispatchQueue.main.async {
             self.events.question(question) { answer in
                 let visible = question.fields.map { field in

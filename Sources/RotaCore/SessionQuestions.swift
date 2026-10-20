@@ -34,8 +34,8 @@ extension Scheduler {
         reply: @escaping @Sendable (QuestionAnswer) -> Void
     ) {
         guard var record = current(runID), isActive(record) else { return reply(.init(action: "cancel")) }
-        guard questionReplies[runID]?[question.id] == nil else { return }
-        questionReplies[runID, default: [:]][question.id] = reply
+        guard record.questions?.contains(where: { $0.id == question.id }) != true else { return }
+        if question.replyViaMessage != true { questionReplies[runID, default: [:]][question.id] = reply }
         record.questions = (record.questions ?? []) + [question]
         let marked = setAttention(question.title, on: record)
         notifier?.sessionNotified(
@@ -44,22 +44,49 @@ extension Scheduler {
     }
 
     public func answerQuestion(_ id: String, on record: RunRecord, answer: QuestionAnswer) throws {
-        guard let current = current(record.id), isActive(current),
-            let question = current.questions?.first(where: { $0.id == id }),
-            let reply = questionReplies[record.id]?[id]
-        else {
+        guard let current = current(record.id), let question = current.questions?.first(where: { $0.id == id }) else {
             throw ControlError("This question is no longer waiting for an answer.")
         }
         try question.validate(answer)
+        if question.replyViaMessage == true {
+            return try answerMessageQuestion(question, on: current, answer: answer)
+        }
+        guard isActive(current), let reply = questionReplies[record.id]?[id] else {
+            throw ControlError("This question is no longer waiting for an answer.")
+        }
         resolveQuestion(id, runID: record.id)
         reply(answer)
+    }
+
+    private func answerMessageQuestion(_ question: AgentQuestion, on record: RunRecord,
+                                       answer: QuestionAnswer) throws {
+        guard canMessage(record), questionReplies[record.id]?.isEmpty != false else {
+            throw ControlError("Answer the blocking question or wait for this session to become available first.")
+        }
+        let fields = question.fields.map { field in
+            ["question": field.title, "answers": answer.values[field.id] ?? []] as [String: Any]
+        }
+        let text = "Answer to your question " + question.id + ":\n" + QuestionRequest.json([
+            "action": answer.action, "questions": fields,
+        ])
+        var next = record
+        next.questions?.removeAll { $0.id == question.id }
+        next.attention = next.nextQuestion?.title
+        if !deliverMessage(text, to: next) {
+            // A failed launch must leave the question available for retry.
+            var failed = current(record.id) ?? record
+            failed.questions = record.questions
+            failed.attention = record.attention
+            saveRecord(failed)
+            throw ControlError("Could not continue the session. Your question is still pending.")
+        }
     }
 
     func resolveQuestion(_ id: String, runID: UUID) {
         questionReplies[runID]?[id] = nil
         guard var record = current(runID), record.questions?.contains(where: { $0.id == id }) == true else { return }
         record.questions?.removeAll { $0.id == id }
-        record.attention = record.questions?.first?.title
+        record.attention = record.nextQuestion?.title
         if isActive(record) { active[record.routineID] = record }
         saveRecord(record)
     }
@@ -67,8 +94,9 @@ extension Scheduler {
     func cancelQuestions(on record: RunRecord) {
         let replies = questionReplies.removeValue(forKey: record.id) ?? [:]
         if !replies.isEmpty, var current = current(record.id) {
-            current.questions = nil
-            current.attention = nil
+            current.questions = current.questions?.filter { $0.replyViaMessage == true }
+            if current.questions?.isEmpty == true { current.questions = nil }
+            current.attention = current.nextQuestion?.title
             if isActive(current) { active[current.routineID] = current }
             saveRecord(current)
         }
