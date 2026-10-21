@@ -15,6 +15,26 @@ final class StorageTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
+    func testRunsStartedInTheSameSecondHaveIndependentLogs() throws {
+        let history = RunHistory(location: location)
+        let first = try savedSession(history, at: 0)
+        let second = try savedSession(history, at: 0.25)
+        XCTAssertNotEqual(first.logPath, second.logPath)
+        XCTAssertTrue(try history.remove(first.id, for: "a"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(second.logPath)))
+    }
+
+    func testUpsertDoesNotOverwriteUnreadableHistory() throws {
+        let history = RunHistory(location: location)
+        let record = try savedSession(history, at: 0)
+        let file = location.historyDirectory.appendingPathComponent("a.json")
+        let broken = Data("broken history".utf8)
+        try broken.write(to: file)
+        XCTAssertThrowsError(try history.upsert(record))
+        XCTAssertEqual(try Data(contentsOf: file), broken)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(record.logPath)))
+    }
+
     func testRoutinesRoundTrip() throws {
         let store = RoutineStore(location: location)
         XCTAssertEqual(try store.load(), [])

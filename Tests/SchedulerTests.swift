@@ -16,12 +16,14 @@ private final class FakeLauncher: RoutineLaunching {
     var failure: Error?
     /// Reports this session from inside `launch`, as a runner that spins the run loop does.
     var sessionDuringLaunch: String?
+    var finishDuringLaunch: RunOutcome?
 
     func launch(_ spec: LaunchSpec, events: RunEvents) throws -> RunControl {
         if let failure { throw failure }
         specs.append(spec)
         self.events.append(events)
         if let sessionDuringLaunch { events.session(sessionDuringLaunch) }
+        if let finishDuringLaunch { events.finished(finishDuringLaunch) }
         let control = FakeControl()
         controls.append(control)
         return control
@@ -78,6 +80,54 @@ final class SchedulerTests: XCTestCase {
                               harness: .codex, enabled: enabled, prompt: "go", timeLimitMinutes: 30)
         scheduler.save(routine)
         return routine
+    }
+
+    func testSynchronousCompletionDoesNotRestoreRunningState() throws {
+        let routine = addDailyRoutine()
+        launcher.finishDuringLaunch = .succeeded
+        scheduler.run(routine, trigger: .manual)
+        XCTAssertNil(scheduler.active[routine.id])
+        XCTAssertNil(scheduler.runStarts[routine.id])
+        XCTAssertNil(scheduler.launchIDs[routine.id])
+        XCTAssertEqual(scheduler.allRecords().first?.outcome, .succeeded)
+        scheduler.stopAll()
+        XCTAssertFalse(try XCTUnwrap(launcher.controls.first).stopped)
+    }
+
+    func testLateRunnerEventsCannotChangeANewerRun() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("first-session")
+        launcher.completions[0](.succeeded)
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[1].session("second-session")
+        let second = try XCTUnwrap(scheduler.active[routine.id])
+        launcher.events[0].session("stale-session")
+        launcher.completions[0](.failed(exitCode: 1))
+        XCTAssertEqual(scheduler.active[routine.id], second)
+        XCTAssertEqual(notifier.outcomes, [.succeeded])
+        launcher.completions[1](.succeeded)
+    }
+
+    func testLateRunnerEventsCannotChangeAContinuedSession() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("native-session")
+        launcher.completions[0](.succeeded)
+        let record = try XCTUnwrap(scheduler.allRecords().first)
+        XCTAssertTrue(scheduler.message("Continue with another task", to: record))
+        let continued = try XCTUnwrap(scheduler.active[routine.id])
+        XCTAssertEqual(continued.id, record.id)
+        launcher.events[0].session("stale-session")
+        launcher.events[0].configuration(.init(model: "stale-model"))
+        launcher.events[0].terminalState(.working)
+        let replies = AnswerRecorder()
+        launcher.events[0].question(.init(id: "stale", title: "Expired")) { replies.append($0) }
+        launcher.completions[0](.failed(exitCode: 1))
+        XCTAssertEqual(scheduler.active[routine.id], continued)
+        XCTAssertEqual(notifier.outcomes, [.succeeded])
+        XCTAssertEqual(replies.values.map(\.action), ["cancel"])
+        launcher.completions[1](.succeeded)
     }
 
     func testRunningShellKeepsItsTerminalFallback() throws {

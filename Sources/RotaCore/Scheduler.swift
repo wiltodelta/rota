@@ -66,6 +66,8 @@ public final class Scheduler {
     @ObservationIgnored var questionReplies: [UUID: [String: @Sendable (QuestionAnswer) -> Void]] = [:]
     @ObservationIgnored var hookAnswers: [String: QuestionAnswer] = [:]
     @ObservationIgnored private var controls: [String: RunControl] = [:]
+    /// Each launch has its own identity, including continuations of the same record.
+    @ObservationIgnored var launchIDs: [String: UUID] = [:]
     /// When each routine's current run started, a continued session included.
     @ObservationIgnored var runStarts: [String: Date] = [:]
     @ObservationIgnored private var timer: Timer?
@@ -238,17 +240,24 @@ public final class Scheduler {
     func start(_ record: RunRecord, spec: LaunchSpec) -> Bool {
         var record = record
         let id = record.routineID
-        let events = events(for: record)
+        let launchID = UUID()
+        launchIDs[id] = launchID
+        let events = events(for: record, launchID: launchID)
         do {
             active[id] = record
             runStarts[id] = now()
-            controls[id] = try launcher.launch(spec, events: events)
+            let control = try launcher.launch(spec, events: events)
+            guard launchIDs[id] == launchID else { return true }
+            controls[id] = control
             // The launch may already have reported the session (a runner that waits
             // on a process spins the run loop), so save what is active, not the copy.
             saveRecord(active[id] ?? record)
             Self.log.info("Started \(id, privacy: .public) on \(record.harness.rawValue, privacy: .public)")
             return true
         } catch {
+            guard launchIDs[id] == launchID else { return false }
+            launchIDs[id] = nil
+            runStarts[id] = nil
             active[id] = nil
             record.outcome = .launchFailed(error.localizedDescription)
             record.endedAt = now()
@@ -326,6 +335,7 @@ public final class Scheduler {
         record.outcome = outcome
         record.endedAt = now()
         active[routineID] = nil
+        launchIDs[routineID] = nil
         controls[routineID] = nil
         runStarts[routineID] = nil
         saveRecord(record)

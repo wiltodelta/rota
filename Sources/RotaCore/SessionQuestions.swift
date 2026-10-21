@@ -1,30 +1,40 @@
 import Foundation
 
 extension Scheduler {
-    func events(for record: RunRecord) -> RunEvents {
+    func events(for record: RunRecord, launchID: UUID) -> RunEvents {
         let id = record.routineID
         let runID = record.id
+        let isCurrent = { [weak self] in self?.launchIDs[id] == launchID }
         return RunEvents(
-            session: { [weak self] session in self?.attachSession(session, to: id) },
-            finished: { [weak self] outcome in self?.finish(id, outcome: outcome) },
+            session: { [weak self] session in
+                guard isCurrent() else { return }
+                self?.attachSession(session, to: id)
+            },
+            finished: { [weak self] outcome in
+                guard isCurrent() else { return }
+                self?.finish(id, outcome: outcome)
+            },
             configuration: { [weak self] configuration in
+                guard isCurrent() else { return }
                 self?.updateConfiguration(configuration, routineID: id, runID: runID)
             },
             question: { [weak self] question, reply in
+                guard isCurrent() else { return reply(.init(action: "cancel")) }
                 self?.receiveQuestion(question, runID: runID, reply: reply)
             },
             questionResolved: { [weak self] questionID in
+                guard isCurrent() else { return }
                 self?.resolveQuestion(questionID, runID: runID)
             },
             terminalState: { [weak self] state in
-                guard let self, var current = self.active[id], current.id == runID,
+                guard isCurrent(), let self, var current = self.active[id], current.id == runID,
                       current.terminalState != state else { return }
                 if state == .working { self.runStarts[id] = self.now() }
                 current.terminalState = state
                 self.active[id] = current
                 self.saveRecord(current)
             }, terminalInput: { [weak self] in
-                guard let self, let current = self.active[id], current.id == runID else { return }
+                guard isCurrent(), let self, let current = self.active[id], current.id == runID else { return }
                 self.dismissAttention(current)
             })
     }

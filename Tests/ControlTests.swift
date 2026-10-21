@@ -33,6 +33,23 @@ final class ControlCommandTests: XCTestCase {
                                  "harness": "codex", "prompt": "Summarize."].merging(extra) { $1 })
     }
 
+    func testIntegerParametersRejectFractionsBooleansAndOutOfRangeNumbers() throws {
+        for number: NSNumber in [0.5, 1.5, true, NSNumber(value: UInt64.max)] {
+            XCTAssertThrowsError(try scheduler.optional(["limit": number], "limit", as: Int.self), number.description)
+        }
+        for value in [0, 1, Int.max, Int.min] {
+            XCTAssertEqual(try scheduler.optional(["limit": NSNumber(value: value)], "limit", as: Int.self), value)
+        }
+    }
+
+    func testReadingALogWithTheLargestLimitDoesNotOverflow() throws {
+        let log = directory.appendingPathComponent("example.log")
+        try "Example log".write(to: log, atomically: true, encoding: .utf8)
+        let (text, truncated) = Scheduler.tail(of: log.path, characters: Int.max)
+        XCTAssertEqual(text, "Example log")
+        XCTAssertFalse(truncated)
+    }
+
     func testAnAgentCreatesARoutineThatRunsOnItsSchedule() throws {
         let created = try create(["model": "gpt-6-sol"]).get() as? [String: Any]
         XCTAssertEqual(created?["scheduleText"] as? String, ScheduleText.describe("0 9 * * 1-5"))

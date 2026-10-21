@@ -260,10 +260,11 @@ extension Scheduler {
         defer { try? file.close() }
         let size = (try? file.seekToEnd()) ?? 0
         // UTF-8 takes up to four bytes a character.
-        let start = size > UInt64(characters * 4) ? size - UInt64(characters * 4) : 0
+        let limit = max(characters, 0)
+        let start = UInt64(limit) < size / 4 ? size - UInt64(limit) * 4 : 0
         try? file.seek(toOffset: start)
         let text = lossyUTF8(file.readDataToEndOfFile())
-        return (String(text.suffix(characters)), start > 0 || text.count > characters)
+        return (String(text.suffix(limit)), start > 0 || text.count > limit)
     }
 
     func describe(_ record: RunRecord) -> [String: Any] {
@@ -295,11 +296,13 @@ extension Scheduler {
         if T.self == Bool.self, let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
             return number.boolValue as? T
         }
-        if T.self == Int.self, let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() {
+        if T.self == Int.self, let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+           NSNumber(value: number.intValue).compare(number) == .orderedSame {
             return number.intValue as? T
         }
         if let typed = raw as? T, T.self != Int.self, T.self != Bool.self { return typed }
-        let expected = T.self == Int.self ? "a number" : T.self == Bool.self ? "true or false" : "text"
+        let expected = T.self == Int.self ? "a number (an integer in range)"
+            : T.self == Bool.self ? "true or false" : "text"
         throw ControlError("\(key) should be \(expected).")
     }
 }

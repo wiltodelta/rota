@@ -104,7 +104,7 @@ public struct RunHistory: Sendable {
 
     /// Keeps running sessions and pending questions, plus limits for finished sessions and skipped slots.
     public func upsert(_ record: RunRecord) throws {
-        var records = self.records(for: record.routineID)
+        var records = try JSONFile.read([RunRecord].self, from: file(for: record.routineID)) ?? []
         if let index = records.firstIndex(where: { $0.id == record.id }) {
             records[index] = record
         } else {
@@ -217,7 +217,7 @@ public struct RunHistory: Sendable {
         let stamp = ISO8601DateFormatter().string(from: record.startedAt)
             .replacingOccurrences(of: ":", with: "-")
         return location.logs.appendingPathComponent(record.routineID)
-            .appendingPathComponent("\(stamp).log")
+            .appendingPathComponent("\(stamp)-\(record.id.uuidString).log")
     }
 }
 

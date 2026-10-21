@@ -114,9 +114,10 @@ public struct CronSchedule: Equatable, Sendable {
         if pieces[0] == "*" {
             bounds = range
         } else {
-            let ends = pieces[0].split(separator: "-", omittingEmptySubsequences: false).compactMap { Int($0) }
+            let ends = pieces[0].split(separator: "-", omittingEmptySubsequences: false)
             let expected = pieces[0].contains("-") ? 2 : 1
-            guard ends.count == expected, let low = ends.first, let high = ends.last, low <= high,
+            guard ends.count == expected, let first = ends.first, let last = ends.last,
+                  let low = Int(first), let high = Int(last), low <= high,
                   range.contains(low), range.contains(high) else { throw CronError.invalidField(field) }
             // "5/15" means "from 5 to the end, every 15", as in Vixie cron.
             bounds = low...(expected == 1 && pieces.count == 2 ? range.upperBound : high)

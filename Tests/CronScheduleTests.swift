@@ -77,7 +77,8 @@ final class CronScheduleTests: XCTestCase {
             XCTAssertEqual(error as? CronError, .fieldCount(4))
         }
         for bad in ["60 * * * *", "* 24 * * *", "* * 0 * *", "* * * 13 *", "* * * * 8",
-                    "5-1 * * * *", "*/0 * * * *", "a * * * *", "1,,2 * * * *", "MON * * * *"] {
+                    "5-1 * * * *", "*/0 * * * *", "a * * * *", "1,,2 * * * *", "MON * * * *",
+                    "1--2 * * * *", "1-nope-2 * * * *", "-1-2 * * * *", "1-2- * * * *"] {
             XCTAssertThrowsError(try CronSchedule(bad), bad)
         }
     }

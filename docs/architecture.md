@@ -23,9 +23,13 @@ flowchart LR
 
 - `CronSchedule` parses five-field cron (Vixie semantics: day of month and day
   of week OR when both are restricted; weekday 7 is Sunday) and finds the next
-  fire time day by day, skipping wall-clock times a DST change removes.
+  fire time day by day, skipping wall-clock times a DST change removes. Range
+  endpoints must both be integers; malformed ranges are rejected rather than
+  silently dropping empty or nonnumeric components.
 - `Scheduler` owns the routines (`routines.json` in Application Support) and
-  persists each routine's `nextFire`. A tick fires a due slot (a catch-up or a
+  persists each routine's `nextFire`. Each launch has a separate token, even
+  when continuing the same session: late callbacks cannot update or finish a
+  later launch, and expired question callbacks receive cancellation. A tick fires a due slot (a catch-up or a
   skip when it is late, below) and moves `nextFire` past now either way.
 - `Harness` holds everything per CLI: default path, headless arguments, launch
   mode and chat arguments.
@@ -79,7 +83,9 @@ flowchart LR
   `Routine.problem(checkingID:)` is the one rule for what may be saved: the
   control methods refuse with its sentence, and the New and Edit sheets keep
   Add and Save off with it beside the buttons. An update skips the id check,
-  so a routine keeps the id it was imported with.
+  so a routine keeps the id it was imported with. Integer control parameters
+  reject fractional and out-of-range numbers; log-tail limits are converted to
+  byte offsets without integer overflow.
 - Session control replies include the run's model and effort snapshot, unread
   state, available message/delete actions and pending structured questions.
   `session` gets metadata; `questions` reads question field, option and action
@@ -419,7 +425,10 @@ flowchart LR
 - `RunHistory` keeps the last 50 finished sessions and 50 skipped slots per
   routine, plus every running session and every session with pending questions. It writes the retained history before
   deleting dropped logs, preserving any log still referenced by a retained
-  record. Runs left `running` by a previous launch become
+  record. Updates refuse unreadable history rather than replacing it with an
+  empty collection. New log filenames include the run UUID as well as the
+  timestamp, so launches within one second cannot overwrite each other;
+  existing records continue using their saved log paths. Runs left `running` by a previous launch become
   `interrupted` at start.
 - Manual session deletion uses `Scheduler.deleteSession`, which reloads the
   stored record and rejects active runs, including interactive Claude processes
