@@ -30,12 +30,18 @@ struct RunActivityIndicator: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Image(systemName: "circle.dotted")
-            .resizable()
-            .scaledToFit()
-            .symbolEffect(.rotate, options: .repeating, isActive: !reduceMotion)
-            .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
-            .frame(width: metrics.points(8), height: metrics.points(8))
+        TimelineView(.animation(paused: reduceMotion)) { context in
+            let turn = reduceMotion ? 0 :
+                context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2
+            Circle()
+                .trim(from: 0, to: 0.72)
+                .stroke(style: StrokeStyle(lineWidth: metrics.points(1.2), lineCap: .round))
+                .rotationEffect(.degrees(turn * 360))
+                .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
+                .padding(metrics.points(0.6))
+                .frame(width: metrics.points(8), height: metrics.points(8))
+        }
+        .accessibilityIdentifier("runActivityIndicator")
     }
 }
 

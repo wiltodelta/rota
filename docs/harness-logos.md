@@ -19,8 +19,9 @@ color. The chat keeps Claude's orange; small list marks stay monochrome for
 contrast on gray sidebar and panel backgrounds. Selected sidebar captions use
 the primary text color too.
 
-`RunActivityIndicator` rotates the system `circle.dotted` mark at 8 pt and
-stops its motion under Reduce Motion. Its light/dark foreground stays legible
+`RunActivityIndicator` rotates an asymmetric 8 pt arc once every 1.2 seconds
+using `TimelineView`, matching the composer's stop ring. The open arc makes
+motion visible at badge size; Reduce Motion pauses the timeline. Its light/dark foreground stays legible
 on the badge halo even when the row is selected; the native mini progress
 view became white on its light halo in a selected row.
 
