@@ -229,7 +229,8 @@ public final class ProcessLauncher: RoutineLaunching {
     /// for the whole run.
     static func capture(_ executable: String, _ arguments: [String], in directory: String,
                         timeout: TimeInterval? = nil, errors: Bool = true,
-                        loginShell: Bool = true) -> (Int32, String) {
+                        loginShell: Bool = true,
+                        clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) -> (Int32, String) {
         let process: Process
         if loginShell {
             process = loginShellProcess(executable, arguments, in: directory, environment: [:])
@@ -249,12 +250,8 @@ public final class ProcessLauncher: RoutineLaunching {
         } catch {
             return (-1, error.localizedDescription)
         }
-        let deadline = DispatchWorkItem { if process.isRunning { process.terminate() } }
-        if let timeout { DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline) }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        deadline.cancel()
-        return (process.terminationStatus, lossyUTF8(data))
+        let result = CommandCapture.read(process, output: pipe.fileHandleForReading, timeout: timeout, clock: clock)
+        return (result.timedOut ? -1 : process.terminationStatus, lossyUTF8(result.data))
     }
 }
 

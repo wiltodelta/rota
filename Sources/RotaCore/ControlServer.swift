@@ -25,12 +25,15 @@ public final class ControlServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.wiltodelta.rota.control")
     private var listener: Int32 = -1
     private var acceptSource: DispatchSourceRead?
-    private var connections: [Int32: (DispatchSourceRead, Data)] = [:]
+    private var connections: [Int32: ControlConnection] = [:]
 
     public init(socket: URL = ControlServer.standardSocket, handler: @escaping Handler) {
         path = socket.path
         self.handler = handler
     }
+
+    /// Diagnostic snapshot, also used to prove descriptor reuse in socket regression tests.
+    var connectedDescriptors: [Int32] { queue.sync { Array(connections.keys) } }
 
     public func start() throws {
         try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
@@ -38,7 +41,8 @@ public final class ControlServer: @unchecked Sendable {
         unlink(path)
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw ControlError("Could not create the control socket.") }
-        var address = try Self.address(path)
+        var address: sockaddr_un
+        do { address = try Self.address(path) } catch { close(descriptor); throw error }
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
@@ -59,7 +63,7 @@ public final class ControlServer: @unchecked Sendable {
     public func stop() {
         queue.sync {
             acceptSource?.cancel()
-            connections.values.forEach { $0.0.cancel() }
+            connections.values.forEach { $0.cancel() }
             connections = [:]
             if listener >= 0 { close(listener) }
             listener = -1
@@ -85,31 +89,36 @@ public final class ControlServer: @unchecked Sendable {
     private func accept() {
         let client = Darwin.accept(listener, nil, nil)
         guard client >= 0 else { return }
-        let source = DispatchSource.makeReadSource(fileDescriptor: client, queue: queue)
-        source.setEventHandler { [weak self] in self?.read(client) }
-        source.setCancelHandler { close(client) }
-        connections[client] = (source, Data())
-        source.resume()
+        let connection = ControlConnection(descriptor: client, queue: queue)
+        connection.reader.setEventHandler { [weak self, weak connection] in
+            if let connection { self?.read(connection) }
+        }
+        connections[client] = connection
+        connection.reader.resume()
     }
 
-    private func read(_ client: Int32) {
+    private func remove(_ connection: ControlConnection) {
+        guard connections[connection.descriptor] === connection else { return }
+        connections[connection.descriptor] = nil
+        connection.cancel()
+    }
+
+    private func read(_ connection: ControlConnection) {
+        guard connections[connection.descriptor] === connection else { return }
         var chunk = [UInt8](repeating: 0, count: 65_536)
-        let count = Darwin.read(client, &chunk, chunk.count)
-        guard count > 0, let (source, previous) = connections[client] else {
-            connections.removeValue(forKey: client)?.0.cancel()
-            return
+        let count = Darwin.read(connection.descriptor, &chunk, chunk.count)
+        if count < 0, [EINTR, EAGAIN, EWOULDBLOCK].contains(errno) { return }
+        guard count > 0 else { return remove(connection) }
+        connection.input.append(contentsOf: chunk[0..<count])
+        guard connection.input.count <= 32 * 1024 * 1024 else { return remove(connection) }
+        while let newline = connection.input.firstIndex(of: UInt8(ascii: "\n")) {
+            let line = Data(connection.input[..<newline])
+            connection.input.removeSubrange(...newline)
+            handle(line, from: connection)
         }
-        var buffer = previous
-        buffer.append(contentsOf: chunk[0..<count])
-        while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-            let line = buffer[buffer.startIndex..<newline]
-            buffer.removeSubrange(buffer.startIndex...newline)
-            handle(Data(line), from: client)
-        }
-        connections[client] = (source, buffer)
     }
 
-    private func handle(_ line: Data, from client: Int32) {
+    private func handle(_ line: Data, from client: ControlConnection) {
         guard let request = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
               let method = request["method"] as? String else {
             return reply(["error": ["message": "Not a JSON request with a method."]], to: client)
@@ -129,18 +138,19 @@ public final class ControlServer: @unchecked Sendable {
         }
     }
 
-    private func reply(_ response: [String: Any], to client: Int32) {
-        guard connections[client] != nil,
+    private func reply(_ response: [String: Any], to client: ControlConnection) {
+        guard connections[client.descriptor] === client,
               var data = try? JSONSerialization.data(withJSONObject: response, options: [.sortedKeys]) else { return }
         data.append(UInt8(ascii: "\n"))
-        data.withUnsafeBytes { raw in
-            var offset = 0
-            while offset < raw.count {
-                let written = write(client, raw.baseAddress! + offset, raw.count - offset)
-                if written <= 0 { break }
-                offset += written
-            }
+        guard client.enqueue(data), client.flush() else { return remove(client) }
+        guard !client.output.isEmpty, client.writer == nil else { return }
+        let writer = DispatchSource.makeWriteSource(fileDescriptor: client.descriptor, queue: queue)
+        writer.setEventHandler { [weak self, weak client] in
+            guard let self, let client, self.connections[client.descriptor] === client else { return }
+            if !client.flush() { self.remove(client) }
         }
+        client.writer = writer
+        writer.resume()
     }
 }
 
@@ -163,12 +173,23 @@ public enum ControlClient {
             }
         }
         guard connected == 0 else { throw ControlError.notRunning }
+        var enabled: Int32 = 1
+        setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &enabled, socklen_t(MemoryLayout<Int32>.size))
+        let requestID = UUID().uuidString
         var wait = timeval(tv_sec: Int(timeout), tv_usec: 0)
         setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
-        var request = try JSONSerialization.data(withJSONObject: ["id": 1, "method": method, "params": params])
+        setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
+        var request = try JSONSerialization.data(withJSONObject: ["id": requestID, "method": method, "params": params])
         request.append(UInt8(ascii: "\n"))
-        let sent = request.withUnsafeBytes { write(descriptor, $0.baseAddress!, $0.count) }
-        guard sent == request.count else { throw ControlError("Could not send the request to Rota.") }
+        try request.withUnsafeBytes { bytes in
+            var offset = 0
+            while offset < bytes.count {
+                let sent = write(descriptor, bytes.baseAddress! + offset, bytes.count - offset)
+                if sent < 0, errno == EINTR { continue }
+                guard sent > 0 else { throw ControlError("Could not send the request to Rota.") }
+                offset += sent
+            }
+        }
         var buffer = Data()
         var chunk = [UInt8](repeating: 0, count: 65_536)
         while !buffer.contains(UInt8(ascii: "\n")) {
@@ -178,6 +199,9 @@ public enum ControlClient {
         }
         guard let response = (try? JSONSerialization.jsonObject(with: buffer)) as? [String: Any] else {
             throw ControlError("Rota's answer was not JSON.")
+        }
+        guard response["id"] as? String == requestID else {
+            throw ControlError("Rota returned an answer for a different request.")
         }
         if let error = response["error"] as? [String: Any] {
             throw ControlError(error["message"] as? String ?? "Rota refused the request.")

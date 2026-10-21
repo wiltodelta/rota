@@ -57,10 +57,16 @@ flowchart LR
   `ScheduleText.cron(fromRRule:anchor:)` converts where cron can say the same,
   and a rule without an hour, such as the default `FREQ=HOURLY;INTERVAL=24`,
   takes it from `next_run_at`). A Codex automation that continues a thread,
-  has no folder or has no cron equivalent is listed with the reason and cannot
+  has no folder, uses multiple folders or has no cron equivalent is listed with the reason and cannot
   be picked. Grok Build has nothing to import: its scheduler holds one
   session's `/loop` tasks for at most seven days. `ScheduleText.describe` puts
   common cron shapes in words for the import list and the schedule field.
+  `Routine.importIdentity` preserves the source's stable id separately from the
+  routine's name and local id. Duplicate names receive unused local ids; later
+  scans recognize imported records by source identity, including after a rename.
+  Legacy imports without identity match their original id, folder and prompt.
+  Minute lists and the anchor phase of hourly/minutely intervals survive RRULE
+  conversion; unsupported shapes are refused rather than substituted.
 - Other processes reach the scheduler through `ControlServer`, a Unix socket
   at `Application Support/Rota/rota.sock` (0600, one JSON request and reply
   per line), whose methods are `Scheduler.control` in `ControlCommands.swift`:
@@ -71,6 +77,14 @@ flowchart LR
   schema for each. Tests require every public method and editable routine field
   to be covered by both interfaces, and exercise each declared method's handler.
   Only `questions.create` and `questions.poll` are private hook transport.
+  Accepted sockets suppress SIGPIPE and use nonblocking writes. Each response
+  belongs to a connection object, so descriptor reuse cannot deliver it to a
+  later client. Pending input and output are bounded to 32 MiB per connection;
+  exceeding the bound closes that connection. ControlClient checks a unique
+  request id and handles partial writes. Routine edits publish memory only after
+  the atomic save succeeds; UI and control callers retain drafts/report failure
+  when it fails. Deletion invalidates launch callbacks before stopping the runner
+  and removing its history, preventing a late completion from recreating it.
   The `RotaCLI` target, bundled as `Contents/Helpers/rota`, is the `rota`
   command and, as `rota mcp`, an MCP stdio server. `rota tools` reports the
   current catalog without contacting the app; both interfaces update with the
@@ -1103,3 +1117,24 @@ the transcript, composer and persisted run retained the selected model and
 effort. The layout gate passed, and both finished-session captures were
 visually inspected. The disposable development app was closed and its complete
 preferences restored after the check.
+
+## Reliability boundaries
+
+A Claude screen that survives Rota's restart reserves its routine until it exits.
+The scheduler rechecks those reservations on ticks and before launching or
+continuing work. Scheduled slots skip while reserved; manual starts and chat
+continuations refuse. Open in Terminal attaches to that existing screen rather
+than starting another writer. Close the surviving screen before deleting its
+routine. The old record remains interrupted because Rota cannot reconstruct the
+output it missed while closed.
+
+Codex queues user messages received before the turn/start reply and flushes them
+in order once both thread and turn ids are available. A turn that ends before
+readiness records explicit delivery failures for queued messages.
+
+Short helper capture drains stdout with nonblocking reads and an injected
+monotonic clock. Its deadline sends SIGTERM, escalates to SIGKILL after 0.2 s,
+and signals an owned process group, never Rota's. A descendant holding stdout
+cannot extend the hard deadline; timeout returns a failure even if the immediate
+parent already exited successfully. Synthetic tests cover a TERM-ignoring helper
+and an exited parent with an inherited output pipe.

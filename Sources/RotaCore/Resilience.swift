@@ -68,6 +68,20 @@ extension Scheduler {
         return sessionAlive(ClaudeInteractiveRun.screenName(session))
     }
 
+    /// A surviving screen owns this routine until it exits. UI reads the last checked state.
+    public func isSurvivingClaude(_ record: RunRecord) -> Bool {
+        survivingClaude[record.routineID]?.id == record.id
+    }
+
+    func refreshSurvivingClaude() {
+        survivingClaude = survivingClaude.filter { stillRunning($0.value) }
+    }
+
+    func hasSurvivingClaude(_ routineID: String) -> Bool {
+        if let record = survivingClaude[routineID], !stillRunning(record) { survivingClaude[routineID] = nil }
+        return survivingClaude[routineID] != nil
+    }
+
     /// Continues or reruns what waits, each once its service answers; what cannot yet waits a minute.
     func resumePending() {
         guard !pendingResumes.isEmpty || !pendingReruns.isEmpty else { return }
@@ -81,7 +95,7 @@ extension Scheduler {
                 guard let self, reachable else { self?.retryLater(); return }
                 guard self.pendingResumes.removeValue(forKey: recordID) != nil,
                       // A routine already running again leaves the older session as it ended.
-                      self.active[routineID] == nil,
+                      self.active[routineID] == nil, !self.hasSurvivingClaude(routineID),
                       var record = self.history.records(for: routineID).first(where: { $0.id == recordID })
                 else { return }
                 record.resumes = (record.resumes ?? 0) + 1
@@ -96,7 +110,8 @@ extension Scheduler {
             }
             probe(routine.harness) { [weak self] reachable in
                 guard let self, reachable else { self?.retryLater(); return }
-                guard self.pendingReruns.removeValue(forKey: routineID) != nil, self.active[routineID] == nil,
+                guard self.pendingReruns.removeValue(forKey: routineID) != nil,
+                      self.active[routineID] == nil, !self.hasSurvivingClaude(routineID),
                       let routine = self.routine(routineID) else { return }
                 self.reruns[routineID, default: 0] += 1
                 Self.log.info("Running \(routineID, privacy: .public) again after a network failure")

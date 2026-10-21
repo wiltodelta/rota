@@ -135,7 +135,11 @@
   schedules in words, and copies the ones you pick, turned off, so nothing runs
   twice. Search by name, project folder, or source app; already imported routines
   stay hidden until you ask to see them. Selection survives filtering, and the
-  footer shows how many routines will be imported. Codex automations keep their model and reasoning effort. Grok Build
+  footer shows how many routines will be imported. Automations with the same
+  name remain separate; imported source IDs are remembered across renames.
+  Codex automations keep their model and reasoning effort. Automations with
+  several project folders are listed as unsupported; create a separate Rota
+  routine for each folder. Grok Build
   has no saved schedules to import: its `/loop` tasks live in one session.
 - **Safe defaults, as in Claude Desktop.** Slots missed while the Mac slept or
   Rota was closed run once, late, marked as a catch-up, if the last one is
@@ -195,3 +199,8 @@ Rota runs routines only while it is open; turn on **Launch at login** in
 Settings, so runs cut off by a shutdown continue after the Mac starts.
 Quitting Rota yourself while routines run asks first and stops them; their
 sessions can be continued later.
+
+If Rota restarts while an interactive Claude session is still alive, that routine
+stays occupied until the session exits. Open in Terminal attaches to the existing
+session. Another scheduled or manual run cannot start over it. Close that session
+before deleting the routine.

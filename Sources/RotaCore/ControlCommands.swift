@@ -103,7 +103,7 @@ extension Scheduler {
                               enabled: true, prompt: "")
         try apply(params, to: &routine)
         try validate(routine)
-        save(routine)
+        guard save(routine) else { throw ControlError(lastError ?? "Could not save the routine.") }
         notifier?.routineAdded(routine)
         return self.routine(id) ?? routine
     }
@@ -118,7 +118,7 @@ extension Scheduler {
             routine.effort = nil
         }
         try validate(routine, checkingID: false)
-        save(routine)
+        guard save(routine) else { throw ControlError(lastError ?? "Could not save the routine.") }
         return self.routine(routine.id) ?? routine
     }
 
@@ -157,7 +157,9 @@ extension Scheduler {
 
     private func enable(_ params: [String: Any]) throws -> Routine {
         let routine = try existing(params)
-        setEnabled(try value(params, "enabled", as: Bool.self), for: routine.id)
+        guard setEnabled(try value(params, "enabled", as: Bool.self), for: routine.id) else {
+            throw ControlError(lastError ?? "Could not save the routine.")
+        }
         return try existing(params)
     }
 
@@ -170,7 +172,7 @@ extension Scheduler {
 
     private func remove(_ params: [String: Any]) throws -> [String: Any] {
         let routine = try existing(params)
-        delete(routine.id)
+        guard delete(routine.id) else { throw ControlError(lastError ?? "Could not delete the routine.") }
         return ["deleted": routine.id]
     }
 

@@ -31,10 +31,12 @@ public struct ImportCandidate: Identifiable, Equatable, Sendable {
     public var onInSource: Bool
     /// Why it cannot be imported, when it cannot.
     public var unsupported: String?
-    public var id: String { "\(source.rawValue):\(routine.id)" }
+    public var id: String { routine.importIdentity ?? "\(source.rawValue):\(routine.id)" }
 
-    public init(routine: Routine, source: ImportSource, onInSource: Bool, unsupported: String? = nil) {
+    public init(routine: Routine, source: ImportSource, onInSource: Bool, unsupported: String? = nil,
+                sourceID: String? = nil) {
         self.routine = routine
+        if let sourceID { self.routine.importIdentity = "\(source.rawValue):\(sourceID)" }
         self.source = source
         self.onInSource = onInSource
         self.unsupported = unsupported
@@ -72,6 +74,31 @@ public enum RoutineImport {
                 return ImportScan(source: source, candidates: [], problem: error.localizedDescription)
             }
         }
+    }
+
+    public static func isImported(_ candidate: ImportCandidate, in routines: [Routine]) -> Bool {
+        routines.contains { routine in
+            if let identity = routine.importIdentity { return identity == candidate.routine.importIdentity }
+            // Older imports have no source identity. Match their original content and folder,
+            // not just a name shared by another source or project.
+            return routine.id == candidate.routine.id
+                && routine.workingDirectory == candidate.routine.workingDirectory
+                && routine.prompt == candidate.routine.prompt
+        }
+    }
+
+    /// Allocate a local id without losing the source identity used on subsequent scans.
+    public static func routineToImport(_ candidate: ImportCandidate, existing: [Routine]) -> Routine? {
+        guard candidate.unsupported == nil, !isImported(candidate, in: existing) else { return nil }
+        var routine = candidate.routine
+        let base = routine.id
+        var suffix = 2
+        while existing.contains(where: { $0.id == routine.id }) {
+            routine.id = "\(base)-\(suffix)"
+            suffix += 1
+        }
+        routine.enabled = false
+        return routine
     }
 
     /// A routine id from a name: lowercase words joined by hyphens, any script.
@@ -157,10 +184,12 @@ public enum CodexAutomationsImport {
             unsupported = "Continues a Codex thread, which a routine cannot."
         } else if folders.isEmpty {
             unsupported = "Has no project folder."
+        } else if folders.count > 1 {
+            unsupported = "Uses multiple project folders. Create a separate Rota routine for each folder."
         } else if cron == nil {
             unsupported = "Its schedule (\(row.rrule)) has no cron equivalent."
         }
         return ImportCandidate(routine: routine, source: .codex, onInSource: row.status == "ACTIVE",
-                               unsupported: unsupported)
+                               unsupported: unsupported, sourceID: row.id)
     }
 }

@@ -3,7 +3,8 @@ import Foundation
 extension Scheduler {
     /// Resumes the native CLI under Rota's ownership without submitting a new prompt.
     public func continueInTerminal(_ record: RunRecord) async -> Bool {
-        guard !openingTerminals.contains(record.id), active[record.routineID] == nil,
+        guard !openingTerminals.contains(record.id), !hasSurvivingClaude(record.routineID),
+              active[record.routineID] == nil,
               let record = current(record.id, routineID: record.routineID),
               let routine = routine(record.routineID), let session = record.sessionID,
               let logPath = record.logPath,
@@ -16,7 +17,7 @@ extension Scheduler {
             lastError = "Could not find this session's native transcript. Terminal continuation was not started."
             return false
         }
-        guard active[record.routineID] == nil, let latest = current(record.id),
+        guard active[record.routineID] == nil, !hasSurvivingClaude(record.routineID), let latest = current(record.id),
               latest.sessionID == session, latest.logPath == logPath,
               self.routine(record.routineID) != nil else { return false }
         var next = latest
@@ -35,7 +36,8 @@ extension Scheduler {
 
     @discardableResult
     func continueSession(_ record: RunRecord, with message: String) -> Bool {
-        guard let routine = routine(record.routineID), let session = record.sessionID,
+        guard !hasSurvivingClaude(record.routineID),
+              let routine = routine(record.routineID), let session = record.sessionID,
               let logPath = record.logPath else { return false }
         var record = record
         record.outcome = .running

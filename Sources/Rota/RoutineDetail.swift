@@ -143,7 +143,7 @@ struct EditRoutineSheet: View {
                 Button(interfaceTitle: "Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button(interfaceTitle: "Save") {
-                    model.scheduler.save(draft)
+                    guard model.scheduler.save(draft) else { return }
                     dismiss()
                 }
                 .accessibilityIdentifier("saveRoutine")
@@ -157,9 +157,9 @@ struct EditRoutineSheet: View {
         .frame(minHeight: 360, idealHeight: metrics.points(500))
         .confirmationDialog("Delete \(routine.name)?", isPresented: $confirmingDelete) {
             Button("Delete", role: .destructive) {
+                guard model.scheduler.delete(routine.id) else { return }
                 dismiss()
                 model.selection = nil
-                model.scheduler.delete(routine.id)
             }
         } message: {
             Text("Its sessions and logs are deleted too. The project skill is not touched.")

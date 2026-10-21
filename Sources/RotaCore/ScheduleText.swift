@@ -81,7 +81,9 @@ public enum ScheduleText {
     struct RRule {
         var frequency: String
         var interval: Int
-        var minute: Int
+        var minute: String
+        var anchorHour: Int?
+        var anchorMinute: Int?
         /// BYHOUR as written, else the anchor's hour.
         var hour: String?
         var setsHour: Bool
@@ -106,7 +108,17 @@ public enum ScheduleText {
             }
             self.frequency = frequency
             self.interval = interval
-            minute = parts["BYMINUTE"].flatMap(Int.init) ?? filled?.minute ?? 0
+            if let minutes = parts["BYMINUTE"] {
+                let fields = minutes.split(separator: ",", omittingEmptySubsequences: false)
+                guard !fields.isEmpty, fields.allSatisfy({ Int($0).map { (0...59).contains($0) } == true })
+                else { return nil }
+                minute = minutes
+            } else {
+                minute = String(filled?.minute ?? 0)
+            }
+            anchorHour = filled?.hour
+            anchorMinute = filled?.minute
+            if frequency == "MINUTELY", parts["BYMINUTE"] != nil { return nil }
             hour = parts["BYHOUR"] ?? filled?.hour.map(String.init)
             setsHour = parts["BYHOUR"] != nil
             anchorWeekday = filled?.weekday.map { $0 - 1 }
@@ -114,17 +126,27 @@ public enum ScheduleText {
 
         var minutelyCron: String? {
             guard 60 % interval == 0, !setsHour, days == nil else { return nil }
-            return interval == 1 ? "* * * * *" : "*/\(interval) * * * *"
+            if interval == 1 { return "* * * * *" }
+            guard let anchorMinute else { return nil }
+            return "\(Self.phase(anchorMinute, every: interval, through: 60)) * * * *"
         }
 
         var hourlyCron: String? {
             if interval < 24, 24 % interval == 0, !setsHour {
-                return "\(minute) \(interval == 1 ? "*" : "*/\(interval)") * * \(days ?? "*")"
+                if interval == 1 { return "\(minute) * * * \(days ?? "*")" }
+                guard let anchorHour else { return nil }
+                return "\(minute) \(Self.phase(anchorHour, every: interval, through: 24)) * * \(days ?? "*")"
             }
             guard let hour, days == nil else { return nil }
             if interval == 24 { return "\(minute) \(hour) * * *" }
             guard interval == 168, let anchorWeekday else { return nil }
             return "\(minute) \(hour) * * \(anchorWeekday)"
+        }
+
+        private static func phase(_ anchor: Int, every interval: Int, through end: Int) -> String {
+            let offset = anchor % interval
+            if offset == 0 { return "*/\(interval)" }
+            return stride(from: offset, to: end, by: interval).map(String.init).joined(separator: ",")
         }
 
         var dailyOrWeeklyCron: String? {

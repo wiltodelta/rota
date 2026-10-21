@@ -22,7 +22,7 @@ struct NewRoutineSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button(interfaceTitle: "Add") {
                     if draft.name.isEmpty { draft.name = draft.id }
-                    model.scheduler.save(draft)
+                    guard model.scheduler.save(draft) else { return }
                     model.selection = .routine(draft.id)
                     dismiss()
                 }

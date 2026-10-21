@@ -16,6 +16,8 @@ public struct Routine: Codable, Identifiable, Equatable, Sendable {
     public var effort: String?
     /// The next slot the scheduler will fire; nil while disabled.
     public var nextFire: Date?
+    /// Stable source identity, independent of the editable display name and local id.
+    public var importIdentity: String?
 
     public init(id: String, name: String, workingDirectory: String, schedule: String,
                 harness: Harness = .claude, enabled: Bool = false, prompt: String,
@@ -47,6 +49,7 @@ public struct Routine: Codable, Identifiable, Equatable, Sendable {
         enabled = try values.decode(Bool.self, forKey: .enabled)
         prompt = try values.decode(String.self, forKey: .prompt)
         nextFire = try values.decodeIfPresent(Date.self, forKey: .nextFire)
+        importIdentity = try values.decodeIfPresent(String.self, forKey: .importIdentity)
         model = try values.decodeIfPresent(String.self, forKey: .model)
         effort = try values.decodeIfPresent(String.self, forKey: .effort)
         let legacy = try decoder.container(keyedBy: LegacyKeys.self)

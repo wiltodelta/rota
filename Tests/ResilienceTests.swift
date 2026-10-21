@@ -118,6 +118,25 @@ final class ResilienceTests: XCTestCase {
         XCTAssertEqual(scheduler.history.records(for: routine.id).first?.outcome, .interrupted)
     }
 
+    func testSurvivingClaudeBlocksScheduledManualAndChatRunsUntilItExits() async throws {
+        let routine = add(.claude, schedule: "* * * * *")
+        startRun(routine)
+        scheduler = makeScheduler(alive: true)
+        scheduler.start()
+        let record = try XCTUnwrap(scheduler.history.records(for: routine.id).first)
+        clock = clock.addingTimeInterval(120)
+        scheduler.tick()
+        scheduler.run(routine, trigger: .manual)
+        XCTAssertFalse(scheduler.message("Do not start another writer", to: record))
+        let continued = await scheduler.continueInTerminal(record)
+        XCTAssertFalse(continued)
+        XCTAssertEqual(launcher.specs.count, 1)
+        scheduler.sessionAlive = { _ in false }
+        clock = clock.addingTimeInterval(60)
+        scheduler.tick()
+        XCTAssertEqual(launcher.specs.count, 2)
+    }
+
     func testAShellCommandIsNeverRunTwiceBehindTheUsersBack() {
         let routine = add(.shell)
         startRun(routine)

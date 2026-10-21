@@ -38,7 +38,8 @@ public enum ClaudeDesktopImport {
                 ?? Routine.defaultPrompt(skill: registration.id, workingDirectory: cwd)
             let routine = Routine(id: registration.id, name: registration.displayName ?? registration.id,
                                   workingDirectory: cwd, schedule: cron, prompt: prompt)
-            return ImportCandidate(routine: routine, source: .claudeDesktop, onInSource: registration.enabled ?? false)
+            return ImportCandidate(routine: routine, source: .claudeDesktop,
+                                   onInSource: registration.enabled ?? false, sourceID: registration.id)
         }
     }
 

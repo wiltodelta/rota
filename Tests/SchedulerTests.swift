@@ -734,6 +734,25 @@ final class SchedulerTests: XCTestCase {
         XCTAssertNil(scheduler.routine("report"))
         XCTAssertTrue(scheduler.history.records(for: "report").isEmpty)
     }
+
+    func testDeletingARunningRoutineRejectsItsLateCallbacks() {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        scheduler.delete(routine.id)
+        launcher.events[0].session("late-session")
+        launcher.completions[0](.cancelled)
+        XCTAssertNil(scheduler.active[routine.id])
+        XCTAssertTrue(scheduler.history.records(for: routine.id).isEmpty)
+        XCTAssertTrue(launcher.controls[0].stopped)
+    }
+
+    func testFailedSaveDoesNotPublishAnUnsavedRoutine() throws {
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("routines.json"),
+                                                withIntermediateDirectories: true)
+        _ = addDailyRoutine()
+        XCTAssertTrue(scheduler.routines.isEmpty)
+        XCTAssertNotNil(scheduler.lastError)
+    }
 }
 
 private final class AnswerRecorder: @unchecked Sendable {

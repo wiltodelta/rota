@@ -318,7 +318,7 @@ final class ScheduleTextTests: XCTestCase {
         func cron(_ rule: String) -> String? { ScheduleText.cron(fromRRule: rule, anchor: anchor, calendar: calendar) }
         XCTAssertEqual(cron("FREQ=HOURLY;INTERVAL=24;BYMINUTE=0"), "0 9 * * *")
         XCTAssertEqual(cron("FREQ=HOURLY;INTERVAL=1;BYMINUTE=15"), "15 * * * *")
-        XCTAssertEqual(cron("FREQ=HOURLY;INTERVAL=6;BYMINUTE=0"), "0 */6 * * *")
+        XCTAssertEqual(cron("FREQ=HOURLY;INTERVAL=6;BYMINUTE=0"), "0 3,9,15,21 * * *")
         XCTAssertEqual(cron("FREQ=DAILY;BYHOUR=10;BYMINUTE=30"), "30 10 * * *")
         XCTAssertEqual(cron("RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;BYHOUR=8;BYMINUTE=5"), "5 8 * * 1,3,5")
         XCTAssertEqual(cron("FREQ=WEEKLY"), "30 9 * * 3")
@@ -333,6 +333,17 @@ final class ScheduleTextTests: XCTestCase {
     func testIdentifiersKeepEveryScript() {
         XCTAssertEqual(RoutineImport.identifier(from: "Weekly SEO: report"), "weekly-seo-report")
         XCTAssertEqual(RoutineImport.identifier(from: "Отчёт по SEO"), "отчёт-по-seo")
+    }
+
+    func testRRuleMinuteListsAndIntervalPhasesArePreserved() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let anchor = calendar.date(from: DateComponents(year: 2026, month: 10, day: 21, hour: 1, minute: 7))!
+        func cron(_ rule: String) -> String? { ScheduleText.cron(fromRRule: rule, anchor: anchor, calendar: calendar) }
+        XCTAssertEqual(cron("FREQ=DAILY;BYHOUR=9;BYMINUTE=5,35"), "5,35 9 * * *")
+        XCTAssertEqual(cron("FREQ=HOURLY;INTERVAL=4"), "7 1,5,9,13,17,21 * * *")
+        XCTAssertEqual(cron("FREQ=MINUTELY;INTERVAL=15"), "7,22,37,52 * * * *")
+        XCTAssertNil(cron("FREQ=DAILY;BYHOUR=9;BYMINUTE=bad"))
     }
 }
 
@@ -363,7 +374,7 @@ final class CodexAutomationsImportTests: XCTestCase {
         let url = try store([
             """
             INSERT INTO automations (id, name, prompt, status, cwds, rrule, model, reasoning_effort, created_at,
-              updated_at) VALUES ('a1', 'Daily digest', 'Summarize.', 'ACTIVE', '["/p/one","/p/two"]',
+              updated_at) VALUES ('a1', 'Daily digest', 'Summarize.', 'ACTIVE', '["/p/one"]',
               'FREQ=DAILY;BYHOUR=7;BYMINUTE=15', 'gpt-6-sol', 'high', 0, 0);
             """,
             """

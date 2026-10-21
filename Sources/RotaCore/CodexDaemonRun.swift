@@ -14,13 +14,15 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     private var peer: JSONRPCPeer?
     private var threadID: String?
     private var turnID: String?
+    private var pendingMessages: [String] = []
     private var approvalItems: [String: [String: Any]] = [:]
     private var stopReason: RunOutcome?
 
-    init(spec: LaunchSpec, journal: RunJournal) {
+    init(spec: LaunchSpec, journal: RunJournal, peer: JSONRPCPeer? = nil) {
         self.spec = spec
         self.journal = journal
         threadID = spec.resume
+        self.peer = peer
     }
 
     static func start(_ spec: LaunchSpec, journal: RunJournal) -> CodexDaemonRun {
@@ -35,14 +37,36 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
 
     func send(_ message: String) {
         queue.async {
-            guard let threadID = self.threadID, let turnID = self.turnID, !self.journal.isFinished else { return }
-            self.journal.record(.user, message)
-            self.peer?.request("turn/steer", ["threadId": threadID, "expectedTurnId": turnID,
-                                              "input": [["type": "text", "text": message]]]) { result in
+            guard !self.journal.isFinished else { return }
+            self.pendingMessages.append(message)
+            self.deliverPendingMessages()
+        }
+    }
+
+    private func deliverPendingMessages() {
+        guard let threadID, let turnID, let peer else { return }
+        let messages = pendingMessages
+        pendingMessages = []
+        for message in messages {
+            journal.record(.user, message)
+            peer.request("turn/steer", ["threadId": threadID, "expectedTurnId": turnID,
+                                       "input": [["type": "text", "text": message]]]) { result in
                 if case .failure(let error) = result {
                     self.journal.line("[rota: message not delivered: \(error.message)]")
                 }
             }
+        }
+    }
+
+    func turnStarted(_ result: Result<Any, JSONRPCError>) {
+        let boxed = UncheckedSendable(result)
+        queue.async {
+            guard !self.journal.isFinished else { return }
+            guard case .success(let value) = boxed.value,
+                  let turn = (value as? [String: Any])?["turn"] as? [String: Any],
+                  let id = turn["id"] as? String else { return self.fail(boxed.value, "turn/start") }
+            self.turnID = id
+            self.deliverPendingMessages()
         }
     }
 
@@ -52,7 +76,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         let (status, output) = ProcessLauncher.capture(spec.executable, ["app-server", "daemon", "start"],
                                                        in: ProcessLauncher.helperDirectory)
         guard status == 0 else {
-            return journal.finish(.launchFailed("codex app-server daemon start: \(output.prefix(200))"))
+            return finish(.launchFailed("codex app-server daemon start: \(output.prefix(200))"))
         }
         let process = ProcessLauncher.loginShellProcess(spec.executable, ["app-server", "proxy"],
                                                         in: ProcessLauncher.helperDirectory, environment: [:])
@@ -64,7 +88,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         do {
             try process.run()
         } catch {
-            return journal.finish(.launchFailed(error.localizedDescription))
+            return finish(.launchFailed(error.localizedDescription))
         }
         proxy = process
         let peer = JSONRPCPeer(transport: WebSocketTransport(input: stdin.fileHandleForWriting,
@@ -75,7 +99,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
             guard let self else { return reply(nil) }
             self.handleRequest(id, method: method, params: params, reply: reply)
         }
-        peer.onClose = { [weak self] in self?.journal.finish(.interrupted) }
+        peer.onClose = { [weak self] in self?.finish(.interrupted) }
         self.peer = peer
         peer.request("initialize", ["clientInfo": ["name": "rota", "version": "1"],
                                     "capabilities": ["experimentalApi": true]]) { [weak self] result in
@@ -130,11 +154,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         if let model = spec.model { params["model"] = model }
         if let effort = spec.effort { params["effort"] = effort }
         peer?.request("turn/start", params) { [weak self] result in
-            guard case .success(let value) = result,
-                  let turn = (value as? [String: Any])?["turn"] as? [String: Any] else {
-                return self?.fail(result, "turn/start") ?? ()
-            }
-            self?.turnID = turn["id"] as? String
+            self?.turnStarted(result)
         }
     }
 
@@ -213,7 +233,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         default: outcome = .failed(exitCode: 1)
         }
         if let error = (turn?["error"] as? [String: Any])?["message"] as? String { journal.line("[error] \(error)") }
-        journal.finish(outcome)
+        finish(outcome)
         disconnect()
     }
 
@@ -233,20 +253,31 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         guard !journal.isFinished else { return }
         stopReason = reason
         guard let threadID, let turnID else {
-            journal.finish(reason)
+            finish(reason)
             return disconnect()
         }
         peer?.request("turn/interrupt", ["threadId": threadID, "turnId": turnID]) { _ in }
         // If the daemon never confirms, end the run anyway.
         queue.asyncAfter(deadline: .now() + 15) { [weak self] in
-            self?.journal.finish(reason)
+            self?.finish(reason)
             self?.disconnect()
         }
     }
 
     private func fail(_ result: Result<Any, JSONRPCError>, _ step: String) {
-        if case .failure(let error) = result { journal.finish(.launchFailed("\(step): \(error.message)")) }
+        let reason: String
+        if case .failure(let error) = result { reason = error.message } else { reason = "Malformed reply" }
+        finish(.launchFailed("\(step): \(reason)"))
         disconnect()
+    }
+
+    private func finish(_ outcome: RunOutcome) {
+        for message in pendingMessages {
+            journal.record(.user, message)
+            journal.line("[rota: message not delivered: the turn did not become ready]")
+        }
+        pendingMessages = []
+        journal.finish(outcome)
     }
 
     private func disconnect() {

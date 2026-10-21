@@ -76,6 +76,14 @@ final class ControlCommandTests: XCTestCase {
         XCTAssertEqual(create().failure?.message.contains("exists"), true)
     }
 
+    func testCreateFailsWhenTheRoutineCannotBeSaved() throws {
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("routines.json"),
+                                                withIntermediateDirectories: true)
+        XCTAssertNotNil(create().failure)
+        XCTAssertNil(scheduler.routine("digest"))
+        XCTAssertTrue(notifier.added.isEmpty)
+    }
+
     /// The window's sheets ask the same question, so what the API refuses never saves from the window.
     func testTheWindowSharesTheValidation() throws {
         var routine = Routine(id: "", name: "", workingDirectory: directory.path, schedule: "0 9 * * *",

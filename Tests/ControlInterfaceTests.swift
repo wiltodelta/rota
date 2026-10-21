@@ -19,7 +19,8 @@ final class ControlInterfaceTests: XCTestCase {
     func testRoutineFieldsRemainAvailableThroughBothInterfaces() throws {
         let routine = Routine(id: "digest", name: "Digest", workingDirectory: "/tmp/project",
                               schedule: "0 9 * * *", prompt: "Summarize.")
-        let editable = Set(Mirror(reflecting: routine).children.compactMap(\.label)).subtracting(["nextFire"])
+        let editable = Set(Mirror(reflecting: routine).children.compactMap(\.label))
+            .subtracting(["nextFire", "importIdentity"])
         let raw = ["add", "digest", "--name", "Digest", "--folder", "/tmp/project", "--schedule", "0 9 * * *",
                    "--harness", "codex", "--prompt", "Summarize.", "--model", "chosen-model", "--effort", "high",
                    "--time-limit", "30", "--off"]

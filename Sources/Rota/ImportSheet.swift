@@ -167,7 +167,7 @@ struct ImportSheet: View {
     private var stillOn: Int { candidates.filter { chosen.contains($0.id) && $0.onInSource }.count }
 
     private func isImported(_ candidate: ImportCandidate) -> Bool {
-        model.scheduler.routine(candidate.routine.id) != nil
+        RoutineImport.isImported(candidate, in: model.scheduler.routines)
     }
 
     private func canImport(_ candidate: ImportCandidate) -> Bool {
@@ -186,14 +186,14 @@ struct ImportSheet: View {
     private func importChosen() {
         var first: String?
         for candidate in candidates where chosen.contains(candidate.id) && canImport(candidate) {
-            var routine = candidate.routine
+            guard var routine = RoutineImport.routineToImport(candidate, existing: model.scheduler.routines)
+            else { continue }
             if let harness, harness != candidate.source.harness {
                 routine.harness = harness
                 routine.model = nil
                 routine.effort = nil
             }
-            routine.enabled = false
-            model.scheduler.save(routine)
+            guard model.scheduler.save(routine) else { return }
             first = first ?? routine.id
         }
         model.selection = first.map { .routine($0) }

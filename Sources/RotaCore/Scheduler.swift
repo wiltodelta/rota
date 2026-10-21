@@ -29,10 +29,10 @@ public final class Scheduler {
     public static let failuresBeforePause = 5
     static let log = Logger(subsystem: "com.wiltodelta.rota", category: "scheduler")
 
-    public private(set) var routines: [Routine] = []
+    public internal(set) var routines: [Routine] = []
     public internal(set) var active: [String: RunRecord] = [:]
     /// Bumped whenever a run record changes, so views re-read history.
-    public private(set) var historyVersion = 0
+    public internal(set) var historyVersion = 0
     public var lastError: String?
 
     @ObservationIgnored public var now: () -> Date = Date.init
@@ -47,6 +47,7 @@ public final class Scheduler {
     /// Routines whose run was going when the Mac went to sleep.
     @ObservationIgnored var sleptThrough: Set<String> = []
     /// Sessions cut off by sleep, shutdown or a lost network, to continue once online: record id to routine id.
+    var survivingClaude: [String: RunRecord] = [:]
     @ObservationIgnored var pendingResumes: [UUID: String] = [:]
     /// Agent runs that failed on the network before they had a session, to run again: routine id to trigger.
     @ObservationIgnored var pendingReruns: [String: RunTrigger] = [:]
@@ -65,7 +66,7 @@ public final class Scheduler {
     @ObservationIgnored let launcher: RoutineLaunching
     @ObservationIgnored var questionReplies: [UUID: [String: @Sendable (QuestionAnswer) -> Void]] = [:]
     @ObservationIgnored var hookAnswers: [String: QuestionAnswer] = [:]
-    @ObservationIgnored private var controls: [String: RunControl] = [:]
+    @ObservationIgnored var controls: [String: RunControl] = [:]
     /// Each launch has its own identity, including continuations of the same record.
     @ObservationIgnored var launchIDs: [String: UUID] = [:]
     /// When each routine's current run started, a continued session included.
@@ -87,9 +88,12 @@ public final class Scheduler {
     /// Closes runs a previous launch left open and starts the 30-second tick.
     public func start() {
         // Runs the last launch left open were cut off: the Mac shut down, or Rota stopped.
-        for record in history.closeOrphans(routineIDs: routines.map(\.id), now: now())
-        where resumable(record) && !stillRunning(record) {
-            pendingResumes[record.id] = record.routineID
+        for record in history.closeOrphans(routineIDs: routines.map(\.id), now: now()) {
+            if stillRunning(record) {
+                survivingClaude[record.routineID] = record
+            } else if resumable(record) {
+                pendingResumes[record.id] = record.routineID
+            }
         }
         tick()
         resumePending()
@@ -103,6 +107,7 @@ public final class Scheduler {
     public func tick() {
         // Offline (just woken, no Wi-Fi yet), a due slot waits rather than failing; it runs once online.
         guard isOnline() else { return }
+        refreshSurvivingClaude()
         let current = now()
         var changed = false
         for index in routines.indices where routines[index].enabled {
@@ -119,7 +124,7 @@ public final class Scheduler {
             if current.timeIntervalSince(due) > Self.missedRunGrace {
                 record(skipped: "missed the \(due.formatted(date: .abbreviated, time: .shortened)) slot",
                        routine: routine, at: current)
-            } else if active[routine.id] != nil {
+            } else if active[routine.id] != nil || survivingClaude[routine.id] != nil {
                 record(skipped: "the previous run was still going", routine: routine, at: current, notify: false)
             } else {
                 // A minute late is the tick's own lag; later than that, the slot was missed.
@@ -129,77 +134,14 @@ public final class Scheduler {
         if changed { persist() }
     }
 
-    // MARK: Editing
-
-    public func routine(_ id: String) -> Routine? {
-        routines.first { $0.id == id }
-    }
-
-    /// Adds or replaces a routine, recomputing its next slot from the saved schedule.
-    public func save(_ routine: Routine) {
-        var routine = routine
-        routine.nextFire = routine.enabled
-            ? (try? CronSchedule(routine.schedule))?.next(after: now(), calendar: calendar)
-            : nil
-        if let index = routines.firstIndex(where: { $0.id == routine.id }) {
-            routines[index] = routine
-        } else {
-            routines.append(routine)
-        }
-        persist()
-    }
-
-    public func setEnabled(_ enabled: Bool, for id: String) {
-        guard var routine = routine(id) else { return }
-        routine.enabled = enabled
-        save(routine)
-    }
-
-    public func delete(_ id: String) {
-        stop(id)
-        routines.removeAll { $0.id == id }
-        history.removeAll(for: id)
-        persist()
-    }
-
-    public func canDelete(_ record: RunRecord) -> Bool {
-        guard let stored = current(record.id, routineID: record.routineID) else { return false }
-        return stored.outcome != .running && !isActive(stored)
-    }
-
-    /// The confirmation can outlive the record it showed, so check current state again.
-    @discardableResult
-    public func deleteSession(_ record: RunRecord) -> Bool {
-        guard let stored = current(record.id, routineID: record.routineID),
-              stored.outcome != .running, !isActive(stored), !stillRunning(stored) else {
-            lastError = "The session is running or is no longer in history."
-            return false
-        }
-        do {
-            guard try history.remove(record.id, for: record.routineID) else { return false }
-            pendingResumes[record.id] = nil
-            historyVersion += 1
-            return true
-        } catch {
-            lastError = "Could not delete the session: \(error.localizedDescription)"
-            Self.log.error("Could not delete session: \(error.localizedDescription, privacy: .public)")
-            return false
-        }
-    }
-
-    private func persist() {
-        do {
-            try store.save(routines)
-        } catch {
-            lastError = "Could not save routines: \(error.localizedDescription)"
-            Self.log.error("Could not save routines: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-
     // MARK: Running
 
     public func run(_ routine: Routine, trigger: RunTrigger) {
         guard active[routine.id] == nil else { return }
+        guard !hasSurvivingClaude(routine.id) else {
+            lastError = "This routine still has a Claude session running. Open it in Terminal before starting another."
+            return
+        }
         var record = RunRecord(routineID: routine.id, trigger: trigger, harness: routine.harness,
                                startedAt: now(), outcome: .running)
         record.model = routine.model
@@ -311,6 +253,9 @@ public final class Scheduler {
 
     /// The terminal command for `record`'s session, with the harness's executable filled in.
     public func terminalCommand(for record: RunRecord) -> (executable: String, arguments: [String])? {
+        if isSurvivingClaude(record), let session = record.sessionID {
+            return (ScreenRun.screen, ["-r", ClaudeInteractiveRun.screenName(session)])
+        }
         if isActive(record), let command = controls[record.routineID]?.attachCommand, let program = command.first {
             return (program, Array(command.dropFirst()))
         }

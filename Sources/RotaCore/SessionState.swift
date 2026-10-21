@@ -14,7 +14,8 @@ extension Scheduler {
 
     /// Whether Rota can message this session now, running or finished.
     public func canMessage(_ record: RunRecord) -> Bool {
-        guard !openingTerminals.contains(record.id), record.sessionID != nil else { return false }
+        guard !openingTerminals.contains(record.id), survivingClaude[record.routineID] == nil,
+              record.sessionID != nil else { return false }
         if isActive(record), active[record.routineID]?.terminalState != nil { return false }
         let running = isActive(record)
         // While another run of the routine works, its finished sessions wait.
