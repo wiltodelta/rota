@@ -63,12 +63,7 @@ extension Scheduler {
         guard canMessage(record), questionReplies[record.id]?.isEmpty != false else {
             throw ControlError("Answer the blocking question or wait for this session to become available first.")
         }
-        let fields = question.fields.map { field in
-            ["question": field.title, "answers": answer.values[field.id] ?? []] as [String: Any]
-        }
-        let text = "Answer to your question " + question.id + ":\n" + QuestionRequest.json([
-            "action": answer.action, "questions": fields,
-        ])
+        let text = QuestionReceipt.message(question, answer: answer)
         var next = record
         next.questions?.removeAll { $0.id == question.id }
         next.attention = next.nextQuestion?.title

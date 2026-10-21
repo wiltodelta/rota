@@ -41,6 +41,33 @@ final class TranscriptJournalTests: XCTestCase {
         XCTAssertEqual(snapshot.items[3].text, "after the tool")
     }
 
+    func testImageCopyFailureKeepsCompletedMessagesPageable() throws {
+        let source = folder.appendingPathComponent("proof.png")
+        try Data("synthetic image bytes".utf8).write(to: source)
+        let outside = folder.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let attachments = ChatAttachmentStore.folder(for: log)
+        try FileManager.default.createSymbolicLink(at: attachments, withDestinationURL: outside)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: attachments.path), outside.path)
+        let writer = RunJournal(output: try FileHandle(forWritingTo: log),
+            events: RunEvents(session: { _ in }, finished: { _ in }),
+            transcript: try TranscriptJournal(log: log, resuming: false, logSize: 0),
+            images: SessionImageStore(log: log, workingDirectory: folder))
+        writer.text("![Proof](proof.png)")
+        writer.endText()
+        writer.finish(.succeeded)
+        var reader = TranscriptReader()
+        let full = reader.read(log: log, finished: true)
+        XCTAssertTrue(full.items.contains { $0.kind == .status && $0.text.hasPrefix("Couldn't preserve an image") })
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: outside.path).isEmpty)
+        var paged = TranscriptReader(pageSize: 1)
+        var page = paged.read(log: log, finished: true)
+        while page.hasEarlier { page = paged.readEarlier(log: log, finished: true) }
+        XCTAssertTrue(page.structured)
+        XCTAssertNil(page.problem)
+        XCTAssertEqual(page.items, full.items)
+    }
+
     func testContinuationKeepsIDsAndIdenticalMessagesDistinct() throws {
         let first = try journal()
         first.record(.user, "same")

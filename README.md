@@ -16,8 +16,8 @@ Desktop.
   effort to run on: Rota lists the models each agent's CLI offers. Standard five-field cron
   schedules, with common ones a click away and the next three run times shown
   as you type.
-- **Sessions are the main view.** Routines stay at the top of the sidebar.
-  Below them, the sidebar lists every routine's sessions,
+- **Sessions are the main view.** The collapsible Routines section stays at the top of the sidebar
+  and remembers whether you left it expanded. Below it, the Sessions section lists every routine's sessions,
   newest first, by day. A session reads as a chat laid out like
   super.engineering's: your prompt and messages in bubbles, agent messages
   under the agent's own logo and model, basic tool activity, optional plans,
@@ -121,8 +121,9 @@ Desktop.
   font, monospaced font for commands and output, and base text size.
 - **Agent Markdown as it is meant to read:** headings, lists, code blocks and
   tables with wrapping, content-based column widths and horizontal scrolling.
+  Local images appear as clickable previews; new sessions keep copies with their attachments.
 - **Notifications** when a run fails, times out or cannot start, and when a
-  missed slot is skipped; click one to open its session. Successes notify too if you ask for it. A routine
+  missed slot is skipped; click one to open its session or routine. Completed runs notify too if you ask for it. A routine
   whose last five scheduled runs failed pauses itself and says so.
   In System Settings > Notifications > Rota, select the **Persistent** alert
   style so questions and problems stay visible until dismissed. macOS applies

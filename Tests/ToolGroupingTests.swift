@@ -9,8 +9,8 @@ final class ToolGroupingTests: XCTestCase {
         let items = kinds.enumerated().map { TranscriptItem(id: $0.offset, kind: $0.element, text: "same") }
         let rows = WorkRow.group(items)
         XCTAssertEqual(rows.flatMap(\.items), items, "Grouping must preserve order, IDs, and repeated calls")
-        XCTAssertEqual(rows.map(\.id), [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
-        XCTAssertEqual(rows.filter { if case .tools = $0 { true } else { false } }.count, 6)
+        XCTAssertEqual(rows.map(\.id), [0, 1, 3, 4, 5, 6, 7, 8, 9, 10])
+        XCTAssertEqual(rows.filter { if case .tools = $0 { true } else { false } }.count, 5)
         for row in rows {
             if case .note(let item) = row { XCTAssertNotEqual(item.kind, .tool) }
         }

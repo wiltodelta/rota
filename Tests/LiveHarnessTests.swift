@@ -84,7 +84,7 @@ final class LiveHarnessTests: XCTestCase {
         XCTAssertEqual(outcome, .succeeded, log)
         XCTAssertNotNil(session)
         XCTAssertTrue(log.contains("[you] Reply with exactly: purple otter"), log)
-        XCTAssertTrue(log.lowercased().contains("purple otter\n[rota: succeeded"), log)
+        XCTAssertTrue(log.lowercased().contains("purple otter\n[rota: completed"), log)
     }
 
     /// A finished session takes a follow-up message as a new run of the same session.
@@ -235,7 +235,7 @@ final class LiveHarnessTests: XCTestCase {
         XCTAssertEqual(outcome, .succeeded, log)
         XCTAssertNotNil(session)
         XCTAssertTrue(log.contains("[you] Reply with exactly: purple otter"), log)
-        XCTAssertTrue(log.lowercased().contains("purple otter\n[rota: succeeded"), log)
+        XCTAssertTrue(log.lowercased().contains("purple otter\n[rota: completed"), log)
     }
 
     func testAntigravityContinuesAFinishedSession() throws {

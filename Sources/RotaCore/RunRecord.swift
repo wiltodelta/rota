@@ -21,7 +21,7 @@ public enum RunOutcome: Codable, Equatable, Sendable {
     public var title: String {
         switch self {
         case .running: return "Running"
-        case .succeeded: return "Succeeded"
+        case .succeeded: return "Completed"
         case .failed(let code): return "Failed (exit \(code))"
         case .timedOut: return "Timed out"
         case .cancelled: return "Stopped"

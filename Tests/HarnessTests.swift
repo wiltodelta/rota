@@ -130,7 +130,7 @@ final class TranscriptTests: XCTestCase {
         XCTAssertEqual(items.map(\.kind), [.user, .agent, .tool, .agent, .agent, .status, .error])
         XCTAssertEqual(items[0].text, "Run the weekly check.\nThen report.")
         XCTAssertEqual(items[3].text, "Found three files.\nThey look fine.")
-        XCTAssertEqual(items[5].text, "Succeeded after 20s")
+        XCTAssertEqual(items[5].text, "Completed after 20s")
         XCTAssertEqual(items.map(\.id), Array(0..<7))
     }
 
@@ -212,7 +212,8 @@ final class ExecutableDiscoveryTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: script) }
         try Data("#!/bin/sh\necho 'tool 1.2.3'\necho second\n".utf8).write(to: script)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
-        XCTAssertEqual(ExecutableDiscovery.version(of: script.path), "tool 1.2.3")
+        // This integration check tests parsing, not the production startup deadline.
+        XCTAssertEqual(ExecutableDiscovery.version(of: script.path, timeout: 30), "tool 1.2.3")
     }
 }
 

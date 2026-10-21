@@ -101,9 +101,9 @@ final class QuestionCoverageTests: XCTestCase {
                 asked.fulfill()
             }))
         let spec = LaunchSpec(executable: "/bin/false", prompt: "", arguments: [], workingDirectory: folder.path,
-                              environment: [:], mode: .codexDaemon, timeout: nil, log: file)
+                              environment: [:], mode: .codexDaemon, timeout: nil, log: file, resume: "owned-thread")
         let runner = CodexDaemonRun(spec: spec, journal: journal)
-        runner.handle("item/completed", ["item": [
+        runner.handle("item/completed", ["threadId": "owned-thread", "item": [
             "id": "call-synthetic", "type": "agentMessage", "delivery": "async", "text": "Choose?",
             "questions": [["title": "Choose?", "options": ["One", "Two"]]],
         ]])

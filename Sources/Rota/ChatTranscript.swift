@@ -193,6 +193,7 @@ struct ChatTranscript: View {
                 }
             }
         }
+        .environment(\.sessionLogURL, record.logPath.map { URL(fileURLWithPath: $0) })
         .background(Color(nsColor: .textBackgroundColor))
     }
 }
@@ -221,7 +222,17 @@ private struct TranscriptRow: View {
                 .foregroundStyle(Color.secondaryText)
             case .plan: PlanCard(steps: PlanStep.parse(item.text))
             case .output: CodeBox(text: item.text)
-            case .status, .error: NoteView(item: item)
+            case .status, .error:
+                if let title = TranscriptService.title(item.text) {
+                    DisclosureGroup(title) {
+                        Text(item.text).font(model.chatText.smallCode).textSelection(.enabled)
+                    }
+                    .font(model.chatText.small)
+                    .foregroundStyle(Color.secondaryText)
+                    .accessibilityIdentifier("serviceEvent-\(item.id)")
+                } else {
+                    NoteView(item: item)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -292,7 +303,19 @@ private struct UserBubble: View {
             Spacer(minLength: 80)
             let message = ChatMessage.decode(text)
             VStack(alignment: .leading, spacing: metrics.points(8)) {
-                if !message.text.isEmpty { Text(message.text).textSelection(.enabled) }
+                if let receipt = QuestionReceipt.decode(message.text) {
+                    Text(receipt.summary).textSelection(.enabled)
+                    DisclosureGroup("Answered Question") {
+                        ForEach(Array(receipt.questions.enumerated()), id: \.offset) { _, field in
+                            Text(field.question).textSelection(.enabled)
+                        }
+                    }
+                    .font(model.chatText.small)
+                    .foregroundStyle(Color.secondaryText)
+                    .accessibilityIdentifier("questionReceipt")
+                } else if !message.text.isEmpty {
+                    Text(message.text).textSelection(.enabled)
+                }
                 if !message.attachments.isEmpty { AttachmentChips(attachments: message.attachments) }
             }
                 .font(model.chatText.body)
@@ -360,7 +383,7 @@ private struct AnswerView: View {
     var body: some View {
         switch item.kind {
         case .output: CodeBox(text: item.text)
-        default: MarkdownText(source: item.text)
+        default: MarkdownText(source: item.text).environment(\.sessionImageItemID, item.id)
         }
     }
 }

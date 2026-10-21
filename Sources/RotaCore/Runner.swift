@@ -171,7 +171,9 @@ public final class ProcessLauncher: RoutineLaunching {
         do {
             let transcript = try TranscriptJournal(log: spec.log, resuming: spec.resume != nil,
                                                    logSize: output.offsetInFile)
-            return RunJournal(output: output, events: events, transcript: transcript)
+            return RunJournal(output: output, events: events, transcript: transcript,
+                              images: SessionImageStore(log: spec.log,
+                                  workingDirectory: URL(fileURLWithPath: spec.workingDirectory)))
         } catch {
             let journal = RunJournal(output: output, events: events)
             journal.line("[error] Couldn't open chat history. This run will use the readable log.")

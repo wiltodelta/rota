@@ -92,8 +92,9 @@ enum WorkRow: Identifiable {
     static func group(_ items: [TranscriptItem]) -> [WorkRow] {
         var rows: [WorkRow] = []
         var calls: [TranscriptItem] = []
-        for item in items {
-            if item.kind == .tool {
+        for raw in items {
+            let item = raw.presented
+            if item.kind == .tool || (item.kind == .output && !calls.isEmpty) {
                 calls.append(item)
                 continue
             }

@@ -21,7 +21,7 @@ public enum SessionPreview {
             ($0.kind == .agent || ($0.kind == .output && record.harness == .shell) || $0.kind == .error)
                 && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }) {
-            return plain(item.text)
+            return plain(excerpt(item.text))
         }
         if snapshot.problem != nil { return "Couldn't read the last message. Open the session for details." }
         return empty(record)
@@ -30,6 +30,17 @@ public enum SessionPreview {
     private static func empty(_ record: RunRecord) -> String {
         if record.outcome == .running { return "Waiting for the first message…" }
         return record.harness == .shell ? "No command output." : "No agent message."
+    }
+
+    /// Maintenance reports have a fixed machine-readable prefix. Skip that
+    /// leading paragraph only when the agent supplied actual content after it.
+    private static func excerpt(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let end = trimmed.range(of: "\n\n") else { return text }
+        let leading = String(inlineMarkdown(String(trimmed[..<end.lowerBound])).characters)
+        guard leading.hasPrefix("pre-commit:") else { return text }
+        let rest = String(trimmed[end.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return rest.isEmpty ? text : rest
     }
 
     private static func plain(_ text: String) -> String {

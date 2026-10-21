@@ -215,6 +215,8 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
                 journal.line("[session started, \(model)]")
             }
             for item in items { journal.record(item.kind, item.text) }
+        case .service(let text):
+            journal.record(.status, text)
         case .apiError(let text):
             failed = true
             journal.line("[error] \(text)")
@@ -283,6 +285,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
 enum ClaudeTranscript: Equatable {
     case user(String)
     case queued(String)
+    case service(String)
     case assistant(model: String?, items: [TranscriptItem])
     case apiError(String)
     case turnEnded
@@ -292,9 +295,7 @@ enum ClaudeTranscript: Equatable {
         guard let entry = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let type = entry["type"] as? String else { return .other }
         switch type {
-        case "user":
-            guard entry["isMeta"] as? Bool != true, let text = userText(entry) else { return .other }
-            return .user(text)
+        case "user": return userEntry(entry)
         case "attachment":
             guard let attachment = entry["attachment"] as? [String: Any],
                   attachment["type"] as? String == "queued_command",
@@ -316,10 +317,17 @@ enum ClaudeTranscript: Equatable {
         }
     }
 
+    private static func userEntry(_ entry: [String: Any]) -> ClaudeTranscript {
+        guard entry["isMeta"] as? Bool != true, let text = userText(entry) else { return .other }
+        if TranscriptService.title(text) != nil { return .service(text) }
+        if text.hasPrefix("<command-name>") { return .other }
+        return .user(text)
+    }
+
     /// What the user typed, without the tool results and command echoes Claude files under the user role.
     static func userText(_ entry: [String: Any]) -> String? {
         let content = (entry["message"] as? [String: Any])?["content"]
-        if let text = content as? String { return text.hasPrefix("<") ? nil : text }
+        if let text = content as? String { return text }
         let parts = (content as? [[String: Any]])?.filter { $0["type"] as? String == "text" }
             .compactMap { $0["text"] as? String } ?? []
         return parts.isEmpty ? nil : parts.joined(separator: "\n")

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import os
 
@@ -19,7 +20,7 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     private var stopReason: RunOutcome?
     private var questions: [String: String] = [:]
 
-    private init(spec: LaunchSpec, journal: RunJournal) {
+    init(spec: LaunchSpec, journal: RunJournal) {
         self.spec = spec
         self.journal = journal
     }
@@ -80,6 +81,7 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         }
         self.process = process
         input = stdin.fileHandleForWriting
+        _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         try input?.write(contentsOf: ClaudeConfiguration.request("initialize", id: ClaudeConfiguration.initializeID))
         try input?.write(contentsOf: ClaudeConfiguration.request("get_settings", id: ClaudeConfiguration.settingsID))
         try input?.write(contentsOf: Self.userMessage(spec.prompt))
@@ -195,10 +197,10 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         input = nil
     }
 
-    private func exited(status: Int32) {
+    func exited(status: Int32) {
         if let hookSettings { try? FileManager.default.removeItem(at: hookSettings) }
         // Normally the result came first; an exit without one is a crash or a refusal to start.
-        journal.finish(stopReason ?? (status == 0 ? .succeeded : .failed(exitCode: status)))
+        journal.finish(stopReason ?? (status == 0 ? .interrupted : .failed(exitCode: status)))
         Self.log.info("claude exited with \(status)")
     }
 

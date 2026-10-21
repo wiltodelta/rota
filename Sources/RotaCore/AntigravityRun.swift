@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// An Antigravity conversation over its NDJSON interface. All mutable state is
@@ -59,6 +60,7 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
         try process.run()
         self.process = process
         input = stdin.fileHandleForWriting
+        _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         // A single reader orders final output before the exit, including a last
         // JSON object without a newline. No byte crosses queues as an Any value.
         DispatchQueue.global(qos: .utility).async {

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Carries whole JSON-RPC messages to and from a peer.
@@ -162,6 +163,9 @@ final class LineTransport: MessageTransport, @unchecked Sendable {
 
     init(input: FileHandle, output: FileHandle) {
         self.input = input
+        // A peer can exit between EOF and the next write. Report EPIPE as an
+        // ordinary I/O error instead of terminating the app with SIGPIPE.
+        _ = fcntl(input.fileDescriptor, F_SETNOSIGPIPE, 1)
         output.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty {
@@ -211,6 +215,9 @@ final class WebSocketTransport: MessageTransport, @unchecked Sendable {
 
     init(input: FileHandle, output: FileHandle) {
         self.input = input
+        // A peer can exit between EOF and the next write. Report EPIPE as an
+        // ordinary I/O error instead of terminating the app with SIGPIPE.
+        _ = fcntl(input.fileDescriptor, F_SETNOSIGPIPE, 1)
         output.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty {

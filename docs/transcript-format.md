@@ -86,10 +86,10 @@ repeat the status as a transcript row or offer a bulk Copy action. Earlier statu
 entries from continued runs remain in order, and a missing final status uses the
 run record outcome. Legacy sessions share the footer without Copy. Normalized entries render
 in their recorded order with stable IDs and SwiftUI scroll targets. Adjacent tool
-calls form a collapsed group labeled with the number of loaded calls, including
-a single call. Expanding reveals complete, selectable titles with wrapping.
-Every other kind, including agent text and errors, ends the group and stays
-visible. This is a view projection over the existing items, not a journal change.
+calls and their intervening output form a collapsed group labeled with the number
+of loaded calls, including a single call. Expanding reveals complete, selectable
+titles and output in order, with wrapping. Standalone output stays visible.
+Agent text, errors and other kinds end the group and stay visible. This is a view projection over the existing items, not a journal change.
 Expansion belongs to the session view and survives live appends and paging that
 extends the first group. A paged reading anchor maps an old tool ID to its new
 group header; toggling preserves the header offset instead of following the end.

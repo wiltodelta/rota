@@ -14,13 +14,13 @@ struct MarkdownText: View {
             ForEach(Array(MarkdownBlock.parse(source).enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .heading(let level, let content):
-                    Text(inlineMarkdown(content))
+                    MarkdownInlineView(source: content)
                         .font(text.heading(level: level))
                         .padding(.top, metrics.points(4))
                 case .listItem(let marker, let content, let indent):
                     HStack(alignment: .firstTextBaseline, spacing: metrics.points(6)) {
                         Text(marker).foregroundStyle(Color.secondaryText)
-                        Text(inlineMarkdown(content))
+                        MarkdownInlineView(source: content)
                     }
                     .font(text.body)
                     .padding(.leading, CGFloat(indent) * 16)
@@ -29,7 +29,7 @@ struct MarkdownText: View {
                 case .table(let table):
                     MarkdownTableView(table: table, text: text)
                 case .paragraph(let content):
-                    Text(inlineMarkdown(content)).font(text.body)
+                    MarkdownInlineView(source: content).font(text.body)
                 }
             }
         }

@@ -156,6 +156,8 @@ final class LiveRunPieceTests: XCTestCase {
     func testCodexItemDescriptions() {
         XCTAssertEqual(CodexDaemonRun.describe(started: ["type": "commandExecution", "command": "ls"]), "$ ls")
         XCTAssertEqual(CodexDaemonRun.describe(started: ["type": "mcpToolCall", "tool": "search"]), "search")
+        XCTAssertEqual(CodexDaemonRun.describe(started: ["type": "collabAgentToolCall", "tool": "spawnAgent"]),
+                       "agent spawnAgent")
         XCTAssertNil(CodexDaemonRun.describe(started: ["type": "reasoning"]))
     }
 

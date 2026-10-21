@@ -73,7 +73,7 @@ public enum Transcript {
             }
         }
         return items.filter { !($0.kind == .status && $0.text.isEmpty) }.enumerated().map {
-            TranscriptItem(id: $0.offset, kind: $0.element.kind, text: $0.element.text)
+            TranscriptItem(id: $0.offset, kind: $0.element.kind, text: $0.element.text).presented
         }
     }
 
@@ -152,7 +152,8 @@ public struct TranscriptTurn: Equatable, Identifiable, Sendable {
             current = TranscriptTurn()
             body = []
         }
-        for item in items {
+        for raw in items {
+            let item = raw.presented
             if item.kind == .user {
                 close()
                 current.prompt = item

@@ -27,8 +27,11 @@ public enum StreamJSONFormatter {
     /// never suppress supported text, and tool argument schemas remain optional.
     static func items(_ data: Data) -> [TranscriptItem] {
         guard let event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              event["type"] as? String == "assistant" else { return [] }
-        return assistantItems(event)
+              let type = event["type"] as? String else { return [] }
+        if type == "user", let text = ClaudeTranscript.userText(event), TranscriptService.title(text) != nil {
+            return [TranscriptItem(id: 0, kind: .status, text: text)]
+        }
+        return type == "assistant" ? assistantItems(event) : []
     }
 
     private static func assistantText(_ event: [String: Any]) -> String? {

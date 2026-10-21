@@ -339,6 +339,21 @@ flowchart LR
   `[you] ` for user text, `-> ` for a tool, `[rota: …]` for status, `[error] `.
   `TranscriptTurn.group` preserves their existing inferred turn layout. Legacy
   continuation does not manufacture a normalized history from old log text.
+- Codex daemon events and approval requests must carry the run's root `threadId`.
+  Other roots and child threads are ignored without replying to their requests;
+  a root's collaboration events represent its child work. Foreign turns cannot
+  write content, resolve questions, change plans or finish this run.
+  JSON-RPC transports and agent input pipes disable SIGPIPE per descriptor,
+  so a peer exiting during a write produces an I/O error rather than killing Rota.
+- `Completed` means the harness ended normally, not that its business task succeeded.
+  The persisted `succeeded` outcome remains compatible with earlier releases.
+  Old `Succeeded after` notes display as `Completed after` without rewriting files.
+  A Claude stream process exiting without a result is interrupted even at exit 0.
+- Whole Claude task-notification envelopes and the exact tool-interruption marker
+  render as collapsible service notices, never human turns. This classification
+  also applies when reading old journals; arbitrary markup remains user text.
+  Rota's asynchronous answer envelopes show the selected answers with the original
+  questions behind a disclosure instead of exposing their transport JSON.
 - Agent text renders through `MarkdownBlock` (headings, list items, fenced
   code, pipe tables, paragraphs; inline Markdown inside each), because SwiftUI `Text` draws
   inline Markdown only. Typed messages preserve their complete text, including
@@ -733,14 +748,23 @@ Layout rules learned while measuring the narrowest window (820 pt):
   must never navigate to a session detail. `SessionPreview` prioritizes pending questions and
   attention, then recorded failure reasons or the latest agent/command output.
   Tool calls and agent tool output never replace the latest readable message, including while a
-  session is running. User prompts and routine instructions never become previews. Markdown is
+  session is running. A leading `pre-commit:` paragraph, including inline Markdown formatting, is omitted when the same
+  agent message contains a following content paragraph. No task outcome is inferred
+  from prose. User prompts and routine instructions never become previews. Markdown is
   reduced to plain text through the block parser and the shared `inlineMarkdown`
   policy used by chat messages. Each visible row
   reuses `TranscriptSessionReader` off the UI actor, polling active sessions
   every three seconds and reading finished sessions once. Previews are derived
   from logs rather than persisted as another copy of session content.
-- Routines appear first in the sidebar, above session history grouped by day,
-  so history growth does not push routine navigation below it. The sidebar and
+- Routines appear first in a collapsible sidebar section. Its expanded state
+  is stored in the `routinesExpanded` preference, which defaults to true.
+  The Sessions section below it leads with each session's actual message preview,
+  followed by its routine name, time and status. Harness logos remain the primary
+  row icons. The menu panel selects the latest actual session, skipping scheduled
+  slots that never ran and falling back to the routine when none exists.
+  History stays grouped by day; date labels
+  are nonselectable accessibility headers, and only session rows select a chat.
+  Collapsing routines leaves the current detail open. The sidebar and
   menu bar panel share `RoutineOrder.byNextRun`: enabled routines with a next
   slot appear earliest first, followed by routines without a scheduled launch
   (including paused routines). Equal slots and unscheduled routines retain
@@ -816,6 +840,17 @@ local paths, letting agent tools read files without requiring native attachment
 payload support in every provider. This does not promise native multimodal input
 or support for every file format. The transcript decodes the manifest into file
 chips, including file-only messages; malformed manifests remain visible text.
+
+`MarkdownImageReference` uses Foundation's inline Markdown attributes to separate
+images from surrounding text, preserving order and formatting outside code fences.
+`MarkdownImageView` downsamples local images, opens them on click and labels missing
+files explicitly. Remote images are links opened only on request, never fetched
+while reading history. `SessionImageStore` uses `ChatAttachmentStore` to copy local
+image references when an agent message completes, indexed by message ID and original URL in
+`<log>.attachments/images.json`. Relative references resolve against the launch
+working directory. Archiving warnings follow the completed streamed entry, so
+even one-entry pages remain replayable after a copy failure. The Markdown and source files are preserved; old references
+fall back to their original absolute paths. Missing source files cannot be recovered.
 
 Draft text and attachment references are keyed by session ID in `AppModel`, so
 switching sessions preserves both. Removing a draft chip deletes only its owned

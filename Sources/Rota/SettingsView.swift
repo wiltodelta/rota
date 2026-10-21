@@ -15,7 +15,7 @@ struct GeneralSettings: View {
         Form {
             InterfaceScaleSection()
             Section {
-                Toggle("Notify when a run succeeds", isOn: $settings.notifyOnSuccess)
+                Toggle("Notify on normal completion", isOn: $settings.notifyOnSuccess)
             } footer: {
                 Text("Failed runs and missed slots notify. Slots skipped while a run is still going stay quiet.")
                     .foregroundStyle(Color.secondaryText)

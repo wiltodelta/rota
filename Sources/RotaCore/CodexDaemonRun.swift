@@ -20,6 +20,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     init(spec: LaunchSpec, journal: RunJournal) {
         self.spec = spec
         self.journal = journal
+        threadID = spec.resume
     }
 
     static func start(_ spec: LaunchSpec, journal: RunJournal) -> CodexDaemonRun {
@@ -72,16 +73,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         peer.onNotification = { [weak self] method, params in self?.handle(method, params) }
         peer.onRequestAsync = { [weak self] id, method, params, reply in
             guard let self else { return reply(nil) }
-            var details = params
-            if let itemID = params["itemId"] as? String, let item = self.approvalItems[itemID] {
-                details["fileChanges"] = item["changes"]
-            }
-            guard var request = QuestionRequest.codex(method, details) else { return reply(nil) }
-            request.question.id = id
-            let boxed = UncheckedSendable((request, reply))
-            self.journal.ask(request.question) { answer in
-                self.queue.async { boxed.value.1(boxed.value.0.response(answer)) }
-            }
+            self.handleRequest(id, method: method, params: params, reply: reply)
         }
         peer.onClose = { [weak self] in self?.journal.finish(.interrupted) }
         self.peer = peer
@@ -146,7 +138,34 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         }
     }
 
+    /// The daemon broadcasts other roots and child threads on the same connection.
+    /// Their root's collaboration items already describe child work; child messages
+    /// must never become this session's answers, questions, plans or completion.
+    private func owns(_ params: [String: Any]) -> Bool {
+        guard let threadID, let source = params["threadId"] as? String else { return false }
+        return source == threadID
+    }
+
+    func handleRequest(_ id: String, method: String, params: [String: Any], reply: @escaping (Any?) -> Void) {
+        guard owns(params), !journal.isFinished else {
+            // A reply would resolve a request belonging to another client.
+            peer?.dismissRequest(id)
+            return
+        }
+        var details = params
+        if let itemID = params["itemId"] as? String, let item = approvalItems[itemID] {
+            details["fileChanges"] = item["changes"]
+        }
+        guard var request = QuestionRequest.codex(method, details) else { return reply(nil) }
+        request.question.id = id
+        let boxed = UncheckedSendable((request, reply))
+        journal.ask(request.question) { answer in
+            self.queue.async { boxed.value.1(boxed.value.0.response(answer)) }
+        }
+    }
+
     func handle(_ method: String, _ params: [String: Any]) {
+        guard owns(params), !journal.isFinished else { return }
         if method == "serverRequest/resolved", let id = params["requestId"] {
             let key = String(describing: id)
             peer?.dismissRequest(key)
@@ -203,6 +222,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         case "commandExecution": return (item?["command"] as? String).map { "$ \($0)" }
         case "mcpToolCall": return item?["tool"] as? String
         case "dynamicToolCall": return item?["tool"] as? String
+        case "collabAgentToolCall": return "agent " + (item?["tool"] as? String ?? "collaboration")
         case "fileChange": return "edit files"
         case "webSearch": return (item?["query"] as? String).map { "search \($0)" }
         default: return nil

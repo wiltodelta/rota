@@ -5,6 +5,11 @@ import SwiftUI
 enum SidebarItem: Hashable {
     case session(UUID)
     case routine(String)
+
+    static func latest(routineID: String, records: [RunRecord]) -> SidebarItem {
+        records.filter { !$0.isSkip }.max { $0.startedAt < $1.startedAt }
+            .map { .session($0.id) } ?? .routine(routineID)
+    }
 }
 
 /// Routines stay above the growing session history, which is grouped by day
@@ -38,43 +43,7 @@ struct MainWindow: View {
             get: { model.sidebarVisible ? .all : .detailOnly },
             set: { model.sidebarVisible = $0 != .detailOnly }
         )) {
-            List(selection: $model.selection) {
-                Section {
-                    ForEach(RoutineOrder.byNextRun(model.scheduler.routines)) { routine in
-                        HStack(spacing: metrics.points(8)) {
-                            HarnessStatusIcon(harness: routine.harness) {
-                                StatusDot(routine: routine)
-                            }
-                            VStack(alignment: .leading, spacing: metrics.points(1)) {
-                                Text(routine.name).lineLimit(1)
-                                TimelineView(.periodic(from: .now, by: 30)) { _ in
-                                    Text(NextRunFormat.subtitle(routine,
-                                        running: model.scheduler.active[routine.id] != nil))
-                                        .interfaceFont(.caption)
-                                        .foregroundStyle(model.selection == .routine(routine.id)
-                                            ? Color.primary : Color.secondaryText)
-                                        .lineLimit(2)
-                                        .accessibilityIdentifier("routineHarness-" + routine.id)
-                                }
-                            }
-                        }
-                        .interfaceFont(.body)
-                        .tag(SidebarItem.routine(routine.id))
-                    }
-                } header: {
-                    Text("Routines").interfaceFont(.caption).fontWeight(.semibold)
-                }
-                ForEach(DayGroup.group(records), id: \.title) { group in
-                    Section {
-                        ForEach(group.records) { record in
-                            SessionRow(record: record).interfaceFont(.body).tag(SidebarItem.session(record.id))
-                        }
-                    } header: {
-                        Text(group.title).interfaceFont(.caption).fontWeight(.semibold)
-                    }
-                }
-            }
-            .accessibilityIdentifier("routineSidebar")
+            MainSidebar(records: records)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { sidebarWidth = $0 }
             .navigationSplitViewColumnWidth(min: min(metrics.points(240), 280),
                                             ideal: min(metrics.points(280), 360),
@@ -177,6 +146,61 @@ struct MainWindow: View {
     }
 }
 
+private struct MainSidebar: View {
+    @Environment(\.interfaceScale) private var metrics
+    @Environment(AppModel.self) private var model
+    @AppStorage("routinesExpanded") private var routinesExpanded = true
+
+    let records: [RunRecord]
+
+    var body: some View {
+        @Bindable var model = model
+        List(selection: $model.selection) {
+            Section(isExpanded: $routinesExpanded) {
+                ForEach(RoutineOrder.byNextRun(model.scheduler.routines)) { routine in
+                    HStack(spacing: metrics.points(8)) {
+                        HarnessStatusIcon(harness: routine.harness) {
+                            StatusDot(routine: routine)
+                        }
+                        VStack(alignment: .leading, spacing: metrics.points(1)) {
+                            Text(routine.name).lineLimit(1)
+                            TimelineView(.periodic(from: .now, by: 30)) { _ in
+                                Text(NextRunFormat.subtitle(routine,
+                                    running: model.scheduler.active[routine.id] != nil))
+                                    .interfaceFont(.caption)
+                                    .foregroundStyle(model.selection == .routine(routine.id)
+                                        ? Color.primary : Color.secondaryText)
+                                    .lineLimit(2)
+                                    .accessibilityIdentifier("routineHarness-" + routine.id)
+                            }
+                        }
+                    }
+                    .interfaceFont(.body)
+                    .tag(SidebarItem.routine(routine.id))
+                }
+            } header: {
+                Text("Routines").interfaceFont(.caption).fontWeight(.semibold)
+            }
+            Section {
+                ForEach(DayGroup.group(records), id: \.title) { group in
+                    Text(group.title)
+                        .interfaceFont(.caption)
+                        .foregroundStyle(Color.secondaryText)
+                        .accessibilityAddTraits(.isHeader)
+                        .selectionDisabled()
+                    ForEach(group.records) { record in
+                        SessionRow(record: record).interfaceFont(.body).tag(SidebarItem.session(record.id))
+                    }
+                }
+            } header: {
+                Text("Sessions").interfaceFont(.caption).fontWeight(.semibold)
+                    .accessibilityIdentifier("sessionsSection")
+            }
+        }
+        .accessibilityIdentifier("routineSidebar")
+    }
+}
+
 /// Sessions grouped the way a chat app does: Today, Yesterday, then by date.
 struct DayGroup {
     let title: String
@@ -208,6 +232,8 @@ private struct SessionRow: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
+    @State private var snapshot: TranscriptSnapshot?
+    @State private var reader = TranscriptSessionReader()
 
     var body: some View {
         HStack(spacing: metrics.points(8)) {
@@ -225,8 +251,13 @@ private struct SessionRow: View {
                 .accessibilityLabel(record.statusTitle)
             }
             VStack(alignment: .leading, spacing: metrics.points(1)) {
-                Text(model.scheduler.routine(record.routineID)?.name ?? record.routineID)
+                Text(verbatim: SessionPreview.text(for: record, snapshot: snapshot))
                     .fontWeight(record.isUnread ? .semibold : .regular)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("sidebarPreview-" + record.id.uuidString)
+                Text(model.scheduler.routine(record.routineID)?.name ?? record.routineID)
+                    .interfaceFont(.caption)
+                    .foregroundStyle(model.selection == .session(record.id) ? Color.primary : Color.secondaryText)
                     .lineLimit(1)
                 Text(details)
                     .interfaceFont(.caption)
@@ -246,6 +277,17 @@ private struct SessionRow: View {
                 dot(.accentColor, size: 7)
                     .accessibilityLabel("Unread")
             }
+        }
+        .task(id: record) {
+            guard let path = record.logPath else { return }
+            repeat {
+                let next = await reader.read(log: URL(fileURLWithPath: path), shell: record.harness == .shell,
+                                             finished: record.outcome != .running)
+                guard !Task.isCancelled else { return }
+                if snapshot != next { snapshot = next }
+                if record.outcome != .running { return }
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            } while !Task.isCancelled
         }
         .contextMenu {
             Button("Delete Session…", role: .destructive) { model.sessionToDelete = record }

@@ -12,12 +12,15 @@ final class RunJournal: @unchecked Sendable {
     private var pendingText = ""
     private var pendingID: Int?
     private var transcript: TranscriptJournal?
+    private let images: SessionImageStore?
     private var reportedConfiguration = SessionConfiguration()
 
-    init(output: FileHandle, events: RunEvents, transcript: TranscriptJournal? = nil) {
+    init(output: FileHandle, events: RunEvents, transcript: TranscriptJournal? = nil,
+         images: SessionImageStore? = nil) {
         self.output = output
         self.events = events
         self.transcript = transcript
+        self.images = images
     }
 
     var isFinished: Bool {
@@ -46,8 +49,10 @@ final class RunJournal: @unchecked Sendable {
         defer { lock.unlock() }
         guard !closed else { return }
         flushText()
-        write(Self.readable(kind, text))
-        appendItem(kind, text)
+        let item = TranscriptItem(id: 0, kind: kind, text: text).presented
+        if item.kind == .agent { captureImages(item.text, itemID: transcript?.nextID) }
+        write(Self.readable(item.kind, item.text))
+        appendItem(item.kind, item.text)
     }
 
     /// Partial text is visible immediately; the readable log gets one completed message.
@@ -151,12 +156,27 @@ final class RunJournal: @unchecked Sendable {
 
     private func flushText() {
         guard !pendingText.isEmpty else { return }
-        write(pendingText.trimmingCharacters(in: .newlines))
-        if let pendingID {
-            persist(TranscriptRecord(type: "complete", id: pendingID, logSize: output.offsetInFile))
+        let text = pendingText
+        let itemID = pendingID
+        write(text.trimmingCharacters(in: .newlines))
+        if let itemID {
+            persist(TranscriptRecord(type: "complete", id: itemID, logSize: output.offsetInFile))
         }
         pendingID = nil
         pendingText = ""
+        // Archiving may add a warning. Complete the streamed entry first so
+        // every page remains a sequence of independently replayable messages.
+        captureImages(text, itemID: itemID)
+    }
+
+    private func captureImages(_ text: String, itemID: Int?) {
+        do {
+            try images?.capture(MarkdownImageReference.references(in: MarkdownBlock.parse(text)), itemID: itemID)
+        } catch {
+            // The original URL still renders; make the missing durable copy explicit.
+            write(Self.readable(.status, "Couldn't preserve an image: " + error.localizedDescription))
+            appendItem(.status, "Couldn't preserve an image: " + error.localizedDescription)
+        }
     }
 
     private func appendItem(_ kind: TranscriptItem.Kind, _ text: String) {

@@ -188,7 +188,7 @@ final class AppModel {
 
     /// A routine's latest session, or the routine itself before its first run.
     func latest(of routineID: String) -> SidebarItem {
-        scheduler.history.records(for: routineID).first.map { .session($0.id) } ?? .routine(routineID)
+        SidebarItem.latest(routineID: routineID, records: scheduler.history.records(for: routineID))
     }
 
     func showSettings() {
