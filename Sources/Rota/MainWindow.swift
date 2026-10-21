@@ -45,19 +45,17 @@ struct MainWindow: View {
         )) {
             MainSidebar(records: records)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { sidebarWidth = $0 }
-            .navigationSplitViewColumnWidth(min: min(metrics.points(240), 280),
-                                            ideal: min(metrics.points(280), 360),
+            // A fixed ideal: the split view applies it only at launch, so a scaled one stuck
+            // at 360 pt after zooming back to 100%, and at 150% it would overflow 820 pt.
+            .navigationSplitViewColumnWidth(min: min(metrics.points(240), 280), ideal: 280,
                                             max: metrics.points(360))
             .overlay {
+                // The detail explains a first routine and offers both ways to add one.
                 if model.scheduler.routines.isEmpty {
-                    ContentUnavailableView {
-                        Label("No routines", systemImage: "calendar.badge.clock").interfaceFont(.title2)
-                    } description: {
-                        Text("Import the routines Claude Desktop or Codex schedules, or add one.")
-                            .interfaceFont(.body)
-                    } actions: {
-                        Button(interfaceTitle: "Import Routines") { model.presentingImport = true }
-                    }
+                    Text("No routines yet")
+                        .interfaceFont(.body)
+                        .foregroundStyle(Color.secondaryText)
+                        .accessibilityIdentifier("sidebarEmpty")
                 }
             }
         } detail: {
@@ -126,11 +124,20 @@ struct MainWindow: View {
         Group {
             if model.scheduler.routines.isEmpty {
                 ContentUnavailableView {
-                    Label("No sessions yet", systemImage: "bubble.left.and.text.bubble.right").interfaceFont(.title2)
+                    Label("No routines yet", systemImage: "calendar.badge.clock").interfaceFont(.title2)
                 } description: {
-                    Text("Add a routine with + or import one from Claude Desktop or Codex. "
+                    Text("A routine runs a prompt or a command on a schedule. "
                          + "Each run becomes a session here.")
                         .interfaceFont(.body)
+                        .foregroundStyle(Color.secondaryText)
+                } actions: {
+                    HStack(spacing: metrics.points(12)) {
+                        Button(interfaceTitle: "Import Routines\u{2026}") { model.presentingImport = true }
+                            .accessibilityIdentifier("emptyImport")
+                        Button(interfaceTitle: "New Routine\u{2026}") { model.presentingNew = true }
+                            .buttonStyle(.borderedProminent)
+                            .accessibilityIdentifier("emptyNewRoutine")
+                    }
                 }
             } else if model.scheduler.allRecords().isEmpty {
                 ContentUnavailableView {
@@ -138,6 +145,7 @@ struct MainWindow: View {
                 } description: {
                     Text("Routines start a session when they run. Pick a routine and choose Run Now.")
                         .interfaceFont(.body)
+                        .foregroundStyle(Color.secondaryText)
                 }
             } else {
                 Text("Select a session").foregroundStyle(Color.secondaryText)
@@ -148,6 +156,7 @@ struct MainWindow: View {
 
 private struct MainSidebar: View {
     @Environment(\.interfaceScale) private var metrics
+    @Environment(\.appearsActive) private var appearsActive
     @Environment(AppModel.self) private var model
     @AppStorage("routinesExpanded") private var routinesExpanded = true
 
@@ -158,28 +167,14 @@ private struct MainSidebar: View {
         List(selection: $model.selection) {
             Section(isExpanded: $routinesExpanded) {
                 ForEach(RoutineOrder.byNextRun(model.scheduler.routines)) { routine in
-                    HStack(spacing: metrics.points(8)) {
-                        HarnessStatusIcon(harness: routine.harness) {
-                            StatusDot(routine: routine)
-                        }
-                        VStack(alignment: .leading, spacing: metrics.points(1)) {
-                            Text(routine.name).lineLimit(1)
-                            TimelineView(.periodic(from: .now, by: 30)) { _ in
-                                Text(NextRunFormat.subtitle(routine,
-                                    running: model.scheduler.active[routine.id] != nil))
-                                    .interfaceFont(.caption)
-                                    .foregroundStyle(model.selection == .routine(routine.id)
-                                        ? Color.primary : Color.secondaryText)
-                                    .lineLimit(2)
-                                    .accessibilityIdentifier("routineHarness-" + routine.id)
-                            }
-                        }
-                    }
-                    .interfaceFont(.body)
-                    .tag(SidebarItem.routine(routine.id))
+                    RoutineRow(routine: routine,
+                               onAccent: appearsActive && model.selection == .routine(routine.id))
+                        .interfaceFont(.body)
+                        .tag(SidebarItem.routine(routine.id))
                 }
             } header: {
                 Text("Routines").interfaceFont(.caption).fontWeight(.semibold)
+                    .foregroundStyle(Color.secondaryText)
             }
             Section {
                 ForEach(DayGroup.group(records), id: \.title) { group in
@@ -189,15 +184,55 @@ private struct MainSidebar: View {
                         .accessibilityAddTraits(.isHeader)
                         .selectionDisabled()
                     ForEach(group.records) { record in
-                        SessionRow(record: record).interfaceFont(.body).tag(SidebarItem.session(record.id))
+                        SessionRow(record: record,
+                                   onAccent: appearsActive && model.selection == .session(record.id))
+                            .interfaceFont(.body).tag(SidebarItem.session(record.id))
                     }
                 }
             } header: {
                 Text("Sessions").interfaceFont(.caption).fontWeight(.semibold)
+                    .foregroundStyle(Color.secondaryText)
                     .accessibilityIdentifier("sessionsSection")
             }
         }
         .accessibilityIdentifier("routineSidebar")
+    }
+}
+
+/// A routine in the sidebar: its name, and its agent with the next run.
+private struct RoutineRow: View {
+    @Environment(\.interfaceScale) private var metrics
+    @Environment(AppModel.self) private var model
+    let routine: Routine
+    /// Selected in the active window; passed in, so only the rows whose value flips redraw.
+    let onAccent: Bool
+
+    var body: some View {
+        HStack(spacing: metrics.points(8)) {
+            HarnessStatusIcon(harness: routine.harness) {
+                StatusDot(routine: routine)
+            }
+            VStack(alignment: .leading, spacing: metrics.points(1)) {
+                // Explicit, so an inactive window does not dim the name below its caption.
+                Text(routine.name).lineLimit(1).foregroundStyle(Color.primary)
+                TimelineView(.periodic(from: .now, by: 30)) { _ in
+                    Text(NextRunFormat.subtitle(routine, running: model.scheduler.active[routine.id] != nil))
+                        .interfaceFont(.caption)
+                        .foregroundStyle(SidebarText.caption(onAccent: onAccent))
+                        .lineLimit(2)
+                        .accessibilityIdentifier("routineHarness-" + routine.id)
+                }
+            }
+        }
+    }
+}
+
+/// Sidebar captions stay secondary, except on the accent fill of a selected row
+/// in the active window, where secondary gray would vanish into the blue. An
+/// inactive window's selection is gray, so there they stay below the title.
+enum SidebarText {
+    static func caption(onAccent: Bool) -> Color {
+        onAccent ? Color.primary : Color.secondaryText
     }
 }
 
@@ -232,6 +267,8 @@ private struct SessionRow: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
+    /// Selected in the active window, as for `RoutineRow`.
+    let onAccent: Bool
     @State private var snapshot: TranscriptSnapshot?
     @State private var reader = TranscriptSessionReader()
 
@@ -253,23 +290,25 @@ private struct SessionRow: View {
             VStack(alignment: .leading, spacing: metrics.points(1)) {
                 Text(verbatim: SessionPreview.text(for: record, snapshot: snapshot))
                     .fontWeight(record.isUnread ? .semibold : .regular)
+                    // Explicit, so an inactive window does not dim the preview below its captions.
+                    .foregroundStyle(Color.primary)
                     .lineLimit(2)
                     .accessibilityIdentifier("sidebarPreview-" + record.id.uuidString)
                 Text(model.scheduler.routine(record.routineID)?.name ?? record.routineID)
                     .interfaceFont(.caption)
-                    .foregroundStyle(model.selection == .session(record.id) ? Color.primary : Color.secondaryText)
+                    .foregroundStyle(SidebarText.caption(onAccent: onAccent))
                     .lineLimit(1)
                 Text(details)
                     .interfaceFont(.caption)
-                    .foregroundStyle(model.selection == .session(record.id)
-                        ? Color.primary : Color.secondaryText)
+                    .foregroundStyle(SidebarText.caption(onAccent: onAccent))
                     .lineLimit(1)
                     .accessibilityIdentifier("sessionHarness-" + record.id.uuidString)
             }
             Spacer(minLength: 0)
             if record.attention != nil {
                 Image(systemName: "exclamationmark.bubble.fill")
-                    .foregroundStyle(.orange)
+                    // Orange on the accent fill measured 1.24:1; white keeps the mark visible there.
+                    .foregroundStyle(onAccent ? Color.white : Color.orange)
                     .help(model.scheduler.canMessage(record) ? "Needs your reply" : "Needs your attention")
                     .accessibilityLabel(model.scheduler.canMessage(record)
                         ? "Needs your reply" : "Needs your attention")
@@ -299,7 +338,7 @@ private struct SessionRow: View {
         Circle()
             .fill(fill)
             // The selected row's accent fill hides a blue or green dot.
-            .overlay { if model.selection == .session(record.id) { Circle().strokeBorder(.white, lineWidth: 1.5) } }
+            .overlay { if onAccent { Circle().strokeBorder(.white, lineWidth: 1.5) } }
             .frame(width: metrics.points(size), height: metrics.points(size))
     }
 
@@ -312,6 +351,7 @@ private struct SessionRow: View {
 
     private var color: Color {
         if record.outcome == .running { return .blue }
+        if record.awaitsReply { return .orange }
         if record.outcome == .cancelled { return Color.secondary }
         return record.outcome.isFailure ? .red : .green
     }

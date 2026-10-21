@@ -161,14 +161,13 @@ struct SessionView: View {
         }
     }
 
+    /// Labeled actions first, then the icon-only utilities, with Delete last and apart from Stop.
     @ViewBuilder
     private var actionButtons: some View {
-        if let path = record.logPath {
-            Button(interfaceTitle: "Show Log in Finder", systemImage: "folder") {
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-            }
-            .labelStyle(.iconOnly)
-            .help("Show log in Finder")
+        // A session that takes messages has Stop beside its field.
+        if running && !model.scheduler.canMessage(record) {
+            Button(interfaceTitle: "Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }
+                .accessibilityIdentifier("stopSession")
         }
         if model.scheduler.terminalCommand(for: record) != nil {
             Button(interfaceTitle: running ? "Open in Terminal" : "Continue in Terminal", systemImage: "terminal") {
@@ -178,6 +177,13 @@ struct SessionView: View {
             .help(running ? "Open this session in Terminal" : "Continue this session in Terminal")
             .accessibilityIdentifier("openTerminal")
         }
+        if let path = record.logPath {
+            Button(interfaceTitle: "Show Log in Finder", systemImage: "folder") {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+            }
+            .labelStyle(.iconOnly)
+            .help("Show log in Finder")
+        }
         Button(interfaceTitle: "Delete Session…", systemImage: "trash", role: .destructive) {
             model.sessionToDelete = record
         }
@@ -185,11 +191,6 @@ struct SessionView: View {
         .help("Delete this session and its logs")
         .disabled(!model.scheduler.canDelete(current))
         .accessibilityIdentifier("deleteSession")
-        // A session that takes messages has Stop beside its field.
-        if running && !model.scheduler.canMessage(record) {
-            Button(interfaceTitle: "Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }
-                .accessibilityIdentifier("stopSession")
-        }
     }
 
 }

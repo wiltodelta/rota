@@ -70,12 +70,14 @@ struct RoutineDetail: View {
 
     private var actions: some View {
         HStack(spacing: metrics.points(12)) {
-            Toggle("On", isOn: Binding(
+            // Labeled, so the switch says what it pauses rather than reading as "On".
+            Toggle(isOn: Binding(
                 get: { routine.enabled },
                 set: { model.scheduler.setEnabled($0, for: routine.id) }
-            ))
+            )) {
+                Text("Scheduled").interfaceFont(.body)
+            }
             .toggleStyle(.switch)
-            .labelsHidden()
             .help(routine.enabled ? "Runs on schedule; turn off to pause" : "Paused; turn on to run on schedule")
             .accessibilityIdentifier("routineEnabled")
             if model.scheduler.active[routine.id] != nil {

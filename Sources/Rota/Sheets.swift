@@ -13,7 +13,7 @@ struct NewRoutineSheet: View {
 
     var body: some View {
         // A taken id is said under its field.
-        let problem = draft.problem()
+        let problem = Self.problem(draft)
         VStack(alignment: .leading, spacing: 0) {
             SheetTitle(text: "New Routine")
             RoutineForm(draft: $draft, skillTaken: identifierTaken)
@@ -44,6 +44,18 @@ struct NewRoutineSheet: View {
                 fillPrompt()
             }
         }
+    }
+
+    /// The shared check, in the field's own words: an agent routine's id is its skill.
+    static func problem(_ draft: Routine) -> String? {
+        if draft.id.isEmpty {
+            return draft.harness.isAgent ? "Enter the project skill this routine runs, such as weekly-report."
+                : "Give the routine an ID, such as weekly-backup."
+        }
+        if !Routine.isValidID(draft.id) {
+            return (draft.harness.isAgent ? "A skill name" : "An ID") + " is lowercase letters, digits, - and _."
+        }
+        return draft.problem(checkingID: false)
     }
 
     /// Keeps the prompt on the standard handoff until the user writes their own.

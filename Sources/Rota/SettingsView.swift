@@ -9,6 +9,8 @@ struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
+    /// Sparkle's own setting, mirrored so the footer follows the switch.
+    @State private var checksAutomatically = Updater.shared.automaticallyChecks
 
     var body: some View {
         @Bindable var settings = model.settings
@@ -16,14 +18,18 @@ struct GeneralSettings: View {
             InterfaceScaleSection()
             Section {
                 Toggle("Notify on normal completion", isOn: $settings.notifyOnSuccess)
+            } header: {
+                Text("Notifications")
             } footer: {
                 Text("Failed runs and missed slots notify. Slots skipped while a run is still going stay quiet.")
                     .foregroundStyle(Color.secondaryText)
             }
             Section {
                 TerminalPicker()
+            } header: {
+                Text("Sessions")
             } footer: {
-                Text("Open in Terminal and Continue in Terminal use it.")
+                Text("Open in Terminal and Continue in Terminal open sessions in this app.")
                     .foregroundStyle(Color.secondaryText)
             }
             Section {
@@ -39,15 +45,15 @@ struct GeneralSettings: View {
             }
             Section {
                 LabeledContent("Version", value: Updater.shared.version)
-                Toggle("Check for updates automatically", isOn: Binding(
-                    get: { Updater.shared.automaticallyChecks },
-                    set: { Updater.shared.automaticallyChecks = $0 }
-                ))
+                Toggle("Check for updates automatically", isOn: $checksAutomatically)
+                    .onChange(of: checksAutomatically) { _, on in Updater.shared.automaticallyChecks = on }
                 Button(interfaceTitle: "Check for Updates\u{2026}") { Updater.shared.checkForUpdates() }
             } header: {
                 Text("Updates")
             } footer: {
-                Text("Checks once a day and installs a new version when you choose to.")
+                Text(checksAutomatically
+                     ? "Rota checks once a day and installs a new version when you choose to."
+                     : "Rota checks only when you choose Check for Updates.")
                     .foregroundStyle(Color.secondaryText)
             }
         }
@@ -121,9 +127,9 @@ private struct ClaudeModeSection: View {
         } header: {
             Text("Claude Code")
         } footer: {
-            Text("As in a terminal: computer use where you turned it on in Claude Code, and Open in Terminal "
-                 + "shows the live session. Computer use acts as Rota, so macOS asks Rota for these two. "
-                 + "Folders Claude Code has not been trusted in run with claude -p.")
+            Text("Interactive runs work as in a terminal: computer use where you turned it on in Claude Code, "
+                 + "and Open in Terminal shows the live session. Computer use acts as Rota, so macOS asks Rota "
+                 + "for these two permissions. In a folder Claude Code does not trust yet, a run uses claude -p.")
                 .foregroundStyle(Color.secondaryText)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in

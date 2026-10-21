@@ -339,8 +339,8 @@ private struct AgentHeader: View {
         HStack(spacing: metrics.points(6)) {
             HarnessLogo(harness: record.harness)
             Text(ModelLabel.name(record: record, models: model.settings.models))
-            if record.reportedEffort != nil || record.effort != nil {
-                Text(ModelLabel.effort(record)).foregroundStyle(Color.secondaryText)
+            if let effort = ModelLabel.effort(record) {
+                Text(effort).foregroundStyle(Color.secondaryText)
             }
         }
         .font(model.chatText.small)
@@ -357,7 +357,7 @@ enum ModelLabel {
     }
 
     static func model(record: RunRecord, models: [Harness: [ModelOption]], fallback: String? = nil) -> String {
-        guard let id = record.reportedModel ?? fallback ?? record.model else { return "CLI default" }
+        guard let id = record.reportedModel ?? fallback ?? record.model else { return "Default model" }
         return title(id, harness: record.harness, models: models)
     }
 
@@ -370,8 +370,9 @@ enum ModelLabel {
         return id
     }
 
-    static func effort(_ record: RunRecord, fallback: String? = nil) -> String {
-        guard let effort = record.reportedEffort ?? fallback ?? record.effort else { return "Effort unavailable" }
+    /// Nil when no one reported it: the label leaves effort out rather than guess or say "unavailable".
+    static func effort(_ record: RunRecord, fallback: String? = nil) -> String? {
+        guard let effort = record.reportedEffort ?? fallback ?? record.effort else { return nil }
         return effort == "none" ? "No effort" : effort.capitalized
     }
 }

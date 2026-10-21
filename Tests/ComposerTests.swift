@@ -6,8 +6,8 @@ final class ComposerTests: XCTestCase {
     func testModelAndEffortUseAppliedSessionValues() {
         var record = RunRecord(routineID: "fixture", trigger: .manual, harness: .claude,
                                startedAt: Date(), outcome: .succeeded)
-        XCTAssertEqual(ModelLabel.model(record: record, models: [:]), "CLI default")
-        XCTAssertEqual(ModelLabel.effort(record), "Effort unavailable")
+        XCTAssertEqual(ModelLabel.model(record: record, models: [:]), "Default model")
+        XCTAssertNil(ModelLabel.effort(record), "An unknown effort is left out, never called Default")
         record.model = "alias"
         record.reportedModel = "resolved-model"
         record.reportedEffort = "medium"
@@ -23,7 +23,7 @@ final class ComposerTests: XCTestCase {
     func testReportedEffortWinsOverRequestedLevelAndUnknownIsNotCalledDefault() {
         var record = RunRecord(routineID: "fixture", trigger: .manual, harness: .claude,
                                startedAt: Date(), outcome: .succeeded)
-        XCTAssertEqual(ModelLabel.effort(record), "Effort unavailable")
+        XCTAssertNil(ModelLabel.effort(record), "An unknown effort is left out, never called Default")
         record.effort = "high"
         XCTAssertEqual(ModelLabel.effort(record, fallback: "low"), "Low")
         record.reportedEffort = "low"

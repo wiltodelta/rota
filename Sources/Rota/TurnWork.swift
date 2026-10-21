@@ -21,30 +21,32 @@ struct WorkSection: View {
         VStack(alignment: .leading, spacing: metrics.points(6)) {
             HStack(spacing: metrics.points(10)) {
                 Hairline()
-                Button {
-                    expanded.toggle()
-                } label: {
-                    HStack(spacing: metrics.points(5)) {
-                        if live {
-                            TimelineView(.periodic(from: .now, by: 1)) { context in
-                                let seconds = since.map { context.date.timeIntervalSince($0) } ?? 0
-                                Text("Working for " + Elapsed.short(seconds))
-                                    .monospacedDigit()
-                                    .shimmering()
-                            }
-                        } else {
-                            Text(label)
-                            Image(systemName: "chevron.right")
-                                .interfaceFont(.caption2).fontWeight(.semibold)
-                                .rotationEffect(.degrees(expanded ? 90 : 0))
+                Group {
+                    if live {
+                        // A status while the turn works, not a disabled control: disabling dims the text.
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            let seconds = since.map { context.date.timeIntervalSince($0) } ?? 0
+                            Text("Working for " + Elapsed.short(seconds))
+                                .monospacedDigit()
+                                .shimmering()
                         }
+                    } else {
+                        Button {
+                            expanded.toggle()
+                        } label: {
+                            HStack(spacing: metrics.points(5)) {
+                                Text(label)
+                                Image(systemName: "chevron.right")
+                                    .interfaceFont(.caption2).fontWeight(.semibold)
+                                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(expanded ? "Hide the steps" : "Show the steps")
                     }
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .disabled(live)
                 .foregroundStyle(Color.secondaryText)
-                .help(expanded ? "Hide the steps" : "Show the steps")
                 .accessibilityIdentifier("workToggle")
                 Hairline()
             }

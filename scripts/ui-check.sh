@@ -419,8 +419,9 @@ PYTHON
 
     # A routine made the way a person makes one: the New Routine sheet.
     "$DRIVER" press newRoutine; sleep 1.5
-    # Add stays off with the reason beside it, by the rule the rota command and MCP refuse with.
-    [[ "$("$DRIVER" value sheetProblem)" == "Give the routine an id"* ]] && pass "new sheet says what is missing" \
+    # Add stays off with the reason beside it, by the rule the rota command and MCP refuse with,
+    # worded for the field: an agent routine's id is the skill it runs.
+    [[ "$("$DRIVER" value sheetProblem)" == "Enter the project skill"* ]] && pass "new sheet says what is missing" \
         || fail "new sheet says what is missing: $("$DRIVER" value sheetProblem)"
     "$DRIVER" set routineSkill "Bad Id"; sleep 0.5
     [[ "$("$DRIVER" value sheetProblem)" == *lowercase* ]] && pass "new sheet refuses a bad id" \

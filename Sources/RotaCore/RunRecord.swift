@@ -79,7 +79,11 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     /// Present for terminal-owned continuations, including interrupted ones.
     public var terminalState: TerminalState?
 
+    /// A finished turn that asked something is not done from the user's side.
+    public var awaitsReply: Bool { outcome == .succeeded && questions?.isEmpty == false }
+
     public var statusTitle: String {
+        if awaitsReply { return "Needs your reply" }
         guard outcome == .running, let terminalState else { return outcome.title }
         return terminalState == .working ? "Working in Terminal" : "Waiting in Terminal"
     }

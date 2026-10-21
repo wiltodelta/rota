@@ -127,9 +127,11 @@ struct ChatComposer: View {
                     Text(ModelLabel.model(record: record, models: model.settings.models,
                                           fallback: resolvedConfiguration?.model ?? legacyModel))
                         .truncationMode(.middle)
-                    Text("·")
-                    Text(resolvingConfiguration ? "Resolving…"
-                         : ModelLabel.effort(record, fallback: resolvedConfiguration?.effort)).fixedSize()
+                    if let effort = resolvingConfiguration ? "Resolving…"
+                        : ModelLabel.effort(record, fallback: resolvedConfiguration?.effort) {
+                        Text("·")
+                        Text(effort).fixedSize()
+                    }
                 }
                 .interfaceFont(.callout)
                 .foregroundStyle(Color.secondaryText)

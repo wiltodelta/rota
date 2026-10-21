@@ -348,6 +348,8 @@ flowchart LR
 - `Completed` means the harness ended normally, not that its business task succeeded.
   The persisted `succeeded` outcome remains compatible with earlier releases.
   Old `Succeeded after` notes display as `Completed after` without rewriting files.
+  A completed run with a pending agent question shows `Needs your reply` as its
+  status, with an orange status dot, so the sidebar and header never call it done.
   A Claude stream process exiting without a result is interrupted even at exit 0.
 - Whole Claude task-notification envelopes and the exact tool-interruption marker
   render as collapsible service notices, never human turns. This classification
@@ -478,6 +480,10 @@ Glass rules), and the main and settings windows as `NSWindow`s around
 back to `.accessory` when the last one closes. Window tabbing is off. The
 panel footer places Open Rota on the left and groups Settings with Quit on
 the right, per the requested Rota layout rather than the family default.
+Two more departures from `macos-apps.md` came from the 2026-10-21 UX audit: the
+footer actions are text only in the primary colour (one gear among three read as a
+different kind of action, and secondary gray read as captions), and the Updates
+footer follows the automatic-check switch instead of always promising a daily check.
 The content has an appearance-adaptive backing over the glass to maintain text
 contrast across backdrops. Settings forms scroll when the screen is shorter
 than their natural height, and the window frame stays inside the visible screen.
@@ -734,6 +740,24 @@ changes while `.command` files stay with Terminal, then the `.command` handler. 
 Layout rules learned while measuring the narrowest window (820 pt):
 
 - Sidebar routine rows share the menu panel's `NextRunFormat.subtitle`: agent and next run, running, or paused. The caption wraps to two lines in the narrow column and refreshes every 30 seconds.
+- Sidebar titles carry an explicit primary color and captions `secondaryText`: in an
+  inactive window SwiftUI dims an unstyled title to about 3:1, below its caption.
+  Captions and the attention mark turn primary and white only on the accent fill of
+  a selected row in the active window (`SidebarText`); `backgroundProminence` did not
+  report that fill. Section headers use `secondaryText` too (native measured 2.2:1).
+- The sidebar's ideal width is a fixed 280 pt. The split view applies it only when
+  the window opens, so a scaled ideal kept 360 pt after zooming back to 100%; rebuilding
+  the split view per zoom level put a 360 pt sidebar into the 820 pt window at 150%.
+- With no routines the detail is the one empty state, with Import Routines… and a
+  prominent New Routine…; the sidebar only says there are none. The New Routine form
+  starts with Runs on, which decides the models and whether the id field is a Skill
+  or an ID, and keeps the prompt above schedule and time limit so it is in view on
+  open. The sheet's messages use that field's name; the `rota` command and MCP keep "id".
+  The prompt editor names itself through `accessibilityLabeledPair` with its title:
+  an `accessibilityLabel` on the editor made AXPress on the sheet's Add report failure
+  although the routine was saved.
+- A running turn's "Working for" clock is a status text, not a disabled button:
+  disabling dimmed it to 3.3:1.
 - Sidebar and menu panel rows lead with `HarnessStatusIcon`, a 20 pt harness
   mark in a 24 pt slot with the existing status in its bottom trailing corner.
   Captions retain the harness name. Routine history uses the compact
@@ -829,8 +853,8 @@ the reported model and applied effort. Codex sends its explicit turn effort on
 before reporting it. These are configuration values, not per-turn execution telemetry.
 Older records may recover a model from a bounded tail of Rota's readable headers;
 Claude sessions missing an effort snapshot can resolve the continuation configuration
-through a read-only control query. Unknown effort is labeled `Effort unavailable`,
-never a fictitious default. No historical record is rewritten by this query.
+through a read-only control query. Unknown effort is left out of the label, never
+shown as a fictitious default; an unknown model reads `Default model`. No historical record is rewritten by this query.
 
 `ChatAttachmentStore` copies regular files into UUID subfolders beside the owned
 log, in `<log>.attachments`. Picker and URL drops share this path, off the UI actor;

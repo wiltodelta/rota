@@ -9,16 +9,31 @@ struct RoutineForm: View {
     @Binding var draft: Routine
     /// Set for a new routine, whose skill names it; an existing routine keeps its id.
     var skillTaken: Bool?
+    @Namespace private var promptLabel
 
     var body: some View {
         Form {
+            // First: the agent decides its models and whether the id field names a skill.
+            // A menu, not segments: four fixed-width segments overflow a narrow window.
+            InterfacePicker(title: "Runs on", selection: $draft.harness,
+                            choices: Harness.allCases.map { .item($0.title, $0) }, identifier: "routineHarness")
+            .onChange(of: draft.harness) {
+                // Model ids and efforts belong to one harness.
+                draft.model = nil
+                draft.effort = nil
+            }
+            if draft.harness.isAgent {
+                ModelPickers(draft: $draft)
+            }
             if let skillTaken {
                 // An agent routine is named after the project skill it runs; a command just needs an id.
                 TextField(draft.harness.isAgent ? "Skill" : "ID", text: $draft.id,
                           prompt: Text(draft.harness.isAgent ? "the project skill this routine runs" : "weekly-backup"))
                     .accessibilityIdentifier("routineSkill")
                 if skillTaken {
-                    Text("A routine with this id already exists.").foregroundStyle(Color.errorText)
+                    Text(draft.harness.isAgent ? "A routine with this skill already exists."
+                         : "A routine with this ID already exists.")
+                        .foregroundStyle(Color.errorText)
                 }
             }
             TextField("Name", text: $draft.name)
@@ -38,23 +53,15 @@ struct RoutineForm: View {
                     .foregroundStyle(Color.errorText)
                     .interfaceFont(.callout)
             }
-            ScheduleField(schedule: $draft.schedule)
-            // A menu, not segments: four fixed-width segments overflow a narrow window.
-            InterfacePicker(title: "Runs on", selection: $draft.harness,
-                            choices: Harness.allCases.map { .item($0.title, $0) }, identifier: "routineHarness")
-            .onChange(of: draft.harness) {
-                // Model ids and efforts belong to one harness.
-                draft.model = nil
-                draft.effort = nil
-            }
-            if draft.harness.isAgent {
-                ModelPickers(draft: $draft)
-            }
-            TimeLimitField(minutes: $draft.timeLimitMinutes)
+            // What it does before when: the sheet opens with the prompt in view.
             VStack(alignment: .leading, spacing: metrics.points(6)) {
                 Text(draft.harness.isAgent ? "Prompt" : "Command")
+                    .accessibilityLabeledPair(role: .label, id: "prompt", in: promptLabel)
+                // Paired with its title, as the other fields are; an accessibilityLabel on the
+                // editor's wrapper made AXPress on the sheet's Add report failure.
                 TextEditor(text: $draft.prompt)
                     .accessibilityIdentifier("routinePrompt")
+                    .accessibilityLabeledPair(role: .content, id: "prompt", in: promptLabel)
                     .interfaceFont(.body).monospaced()
                     .frame(minHeight: metrics.points(90))
                     .scrollContentBackground(.hidden)
@@ -62,6 +69,8 @@ struct RoutineForm: View {
                     .background(Color(nsColor: .textBackgroundColor),
                                 in: RoundedRectangle(cornerRadius: metrics.points(6)))
             }
+            ScheduleField(schedule: $draft.schedule)
+            TimeLimitField(minutes: $draft.timeLimitMinutes)
         }
         .formStyle(.grouped)
         .toggleStyle(InterfaceFormToggleStyle())

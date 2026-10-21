@@ -105,7 +105,8 @@ struct MenuBarContent: View {
                 }
             }
             .buttonStyle(.plain)
-            .foregroundStyle(Color.secondaryText)
+            // Primary, as menu items are: secondary gray made the actions read as captions.
+            .foregroundStyle(Color.primary)
             .interfaceFont(.callout)
             .padding(.horizontal, metrics.points(10))
             .padding(.vertical, metrics.points(4))
@@ -124,7 +125,8 @@ struct MenuBarContent: View {
 
     private var settingsButton: some View {
         Button { model.showSettings() } label: {
-            Label("Settings\u{2026}", systemImage: "gearshape").fixedSize().footerTarget()
+            // Text only, like its neighbors: one icon among three read as a different kind of action.
+            Text("Settings\u{2026}").fixedSize().footerTarget()
         }
     }
 
