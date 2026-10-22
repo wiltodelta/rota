@@ -133,13 +133,14 @@ extension Scheduler {
 }
 
 /// Words agent CLIs end on when their connection failed, not their work: what
-/// Node, URLSession, curl and the CLIs themselves write for a lost or missing network.
+/// Node, Go, URLSession, curl and the CLIs themselves write for a lost or missing network.
 public enum NetworkFailure {
     static let phrases = [
         "connection error", "econnreset", "econnrefused", "etimedout", "enotfound", "eai_again", "getaddrinfo",
         "network is unreachable", "network connection was lost", "could not resolve host", "stream disconnected",
         "error sending request", "fetch failed", "socket hang up", "appears to be offline", "connection reset",
-        "dns error", "failed to connect", "unable to connect"
+        "dns error", "failed to connect", "unable to connect",
+        "read: operation timed out", "no route to host", "dial tcp: lookup"
     ]
 
     public static func matches(_ text: String) -> Bool {

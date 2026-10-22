@@ -195,6 +195,40 @@ final class ResilienceTests: XCTestCase {
         XCTAssertEqual(launcher.specs.count, 1 + Scheduler.resumeLimit, "reruns stop at the limit")
     }
 
+    func testAntigravityReadTimeoutContinuesTheSameSessionAndStopsAtTheLimit() throws {
+        let routine = add(.antigravity)
+        startRun(routine)
+        let failure = "[error] API error (attempt 1): request failed: "
+            + "Post \"https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse\": "
+            + "read tcp [2001:db8::1]:61510->[2001:db8::2]:443: read: operation timed out"
+        // The network is already back and no sleep notification was observed.
+        // Recovery must recognize the CLI's actual error wording on its own.
+        for attempt in 1...Scheduler.resumeLimit {
+            try log(failure)
+            launcher.events.last?.finished(.failed(exitCode: 1))
+            XCTAssertEqual(launcher.specs.count, 1 + attempt)
+            XCTAssertEqual(launcher.specs.last?.mode, .antigravityStream)
+            XCTAssertEqual(launcher.specs.last?.resume, "thread-1")
+            XCTAssertEqual(launcher.specs.last?.prompt, Scheduler.resumeMessage)
+            XCTAssertEqual(scheduler.active[routine.id]?.resumes, attempt)
+        }
+        try log(failure)
+        launcher.events.last?.finished(.failed(exitCode: 1))
+        scheduler.networkBecameAvailable()
+        XCTAssertEqual(launcher.specs.count, 1 + Scheduler.resumeLimit)
+        XCTAssertEqual(scheduler.history.records(for: routine.id).first?.outcome, .failed(exitCode: 1))
+    }
+
+    func testAntigravityThatRecoversDuringItsTurnIsNotContinuedAgain() throws {
+        let routine = add(.antigravity)
+        startRun(routine)
+        try log("[error] read tcp [2001:db8::1]:61510->[2001:db8::2]:443: read: operation timed out")
+        launcher.events.last?.finished(.succeeded)
+        scheduler.networkBecameAvailable()
+        XCTAssertEqual(launcher.specs.count, 1)
+        XCTAssertEqual(scheduler.history.records(for: routine.id).first?.outcome, .succeeded)
+    }
+
     func testAFailureOnItsOwnWorkIsNotRetried() throws {
         let routine = add()
         startRun(routine)
@@ -207,6 +241,14 @@ final class ResilienceTests: XCTestCase {
         XCTAssertTrue(NetworkFailure.matches("API Error: Connection error."))
         XCTAssertTrue(NetworkFailure.matches("stream disconnected before completion: error sending request"))
         XCTAssertTrue(NetworkFailure.matches("TypeError: fetch failed"))
+        XCTAssertTrue(NetworkFailure.matches("read tcp [2001:db8::1]:61510->[2001:db8::2]:443: "
+            + "read: operation timed out"))
+        XCTAssertTrue(NetworkFailure.matches("read tcp [2001:db8::1]:62411->[2001:db8::2]:443: "
+            + "read: no route to host"))
+        XCTAssertTrue(NetworkFailure.matches("dial tcp: lookup play.googleapis.com: no such host"))
+        XCTAssertFalse(NetworkFailure.matches("The test operation timed out"))
+        XCTAssertFalse(NetworkFailure.matches("API error: quota exceeded"))
+        XCTAssertFalse(NetworkFailure.matches("API error: unauthorized"))
         XCTAssertFalse(NetworkFailure.matches("Error: tests failed"))
         XCTAssertNil(ServiceProbe.host(for: .shell))
         XCTAssertEqual(ServiceProbe.host(for: .claude)?.host, "api.anthropic.com")

@@ -423,6 +423,11 @@ flowchart LR
   still up (Rota crashed, Claude did not) is left alone, and shell commands are
   never rerun. On `willPowerOff` the app quits without its confirmation, so
   the system is not held up and the open runs are orphans for the next launch.
+  Go transport errors from Antigravity (`read: operation timed out`,
+  `no route to host`, `dial tcp: lookup`) qualify for the same recovery even
+  when the network is already back and Rota did not observe the sleep.
+  A successful run is not continued merely because its log contains an earlier
+  transport error; cancellation and routine time limits are also left alone.
 - A finished session is unread until `markRead`, which `SessionView` calls
   when it shows a finished session (`RunRecord.readAt`, `isUnread`); the
   sidebar, the panel and the Dock badge read `unreadCount`.
@@ -1014,6 +1019,13 @@ a run whose result said success. Every queued turn needs its own result: a
 missing follow-up result cannot reuse the first turn's success. Stop and time
 limits terminate the owned CLI
 and escalate to SIGKILL after three seconds if needed.
+
+Observed on 2026-10-21: agy retried a transport timeout successfully, then
+reported that historical error again at the end of later continuations,
+including after streaming a complete response. Rota keeps the failed outcome
+and applies the bounded network recovery above; response text alone cannot
+override the CLI's failure. The stale final error remains an upstream
+verification target, not proof of a new connection failure on each continuation.
 
 The model picker starts with `agy models`, then validates candidate family
 aliases with the read-only `agy -p /model --model <family> --output-format json`.
