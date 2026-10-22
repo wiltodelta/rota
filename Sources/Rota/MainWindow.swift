@@ -1,3 +1,4 @@
+import AppKit
 import RotaCore
 import SwiftUI
 
@@ -209,12 +210,12 @@ private struct RoutineRow: View {
 
     var body: some View {
         HStack(spacing: metrics.points(8)) {
-            HarnessStatusIcon(harness: routine.harness) {
+            HarnessStatusIcon(harness: routine.harness, foreground: SidebarText.primary(onAccent: onAccent)) {
                 StatusDot(routine: routine)
             }
             VStack(alignment: .leading, spacing: metrics.points(1)) {
                 // Explicit, so an inactive window does not dim the name below its caption.
-                Text(routine.name).lineLimit(1).foregroundStyle(Color.primary)
+                Text(routine.name).lineLimit(1).foregroundStyle(SidebarText.primary(onAccent: onAccent))
                 TimelineView(.periodic(from: .now, by: 30)) { _ in
                     Text(NextRunFormat.subtitle(routine, running: model.scheduler.active[routine.id] != nil))
                         .interfaceFont(.caption)
@@ -227,12 +228,42 @@ private struct RoutineRow: View {
     }
 }
 
-/// Sidebar captions stay secondary, except on the accent fill of a selected row
-/// in the active window, where secondary gray would vanish into the blue. An
-/// inactive window's selection is gray, so there they stay below the title.
+/// Selected labels choose a contrasting foreground without replacing native
+/// selection. macOS 27 sidebars use the control accent rather than AppKit's
+/// darker selected-content color. Both appearances and all accents are captured.
 enum SidebarText {
+    private static let selected = Color(nsColor: NSColor(name: nil) { appearance in
+        var color = NSColor.white
+        appearance.performAsCurrentDrawingAppearance {
+            let background: NSColor
+            if #available(macOS 27, *) {
+                background = .controlAccentColor
+            } else {
+                background = .selectedContentBackgroundColor
+            }
+            color = foreground(on: background)
+        }
+        return color
+    })
+
+    static func primary(onAccent: Bool) -> Color {
+        onAccent ? selected : Color.primary
+    }
+
     static func caption(onAccent: Bool) -> Color {
-        onAccent ? Color.primary : Color.secondaryText
+        onAccent ? selected : Color.secondaryText
+    }
+
+    static func foreground(on background: NSColor) -> NSColor {
+        guard let rgb = background.usingColorSpace(.sRGB) else { return .labelColor }
+        func linear(_ component: CGFloat) -> CGFloat {
+            component <= 0.04045 ? component / 12.92 : pow((component + 0.055) / 1.055, 2.4)
+        }
+        let luminance = 0.2126 * linear(rgb.redComponent) + 0.7152 * linear(rgb.greenComponent)
+            + 0.0722 * linear(rgb.blueComponent)
+        // Choose whichever gives the greater WCAG contrast ratio. At this
+        // crossover both black and white exceed 4.5:1 against an opaque fill.
+        return luminance > sqrt(0.05 * 1.05) - 0.05 ? .black : .white
     }
 }
 
@@ -274,7 +305,7 @@ private struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: metrics.points(8)) {
-            HarnessStatusIcon(harness: record.harness) {
+            HarnessStatusIcon(harness: record.harness, foreground: SidebarText.primary(onAccent: onAccent)) {
                 Group {
                     if record.outcome == .running, record.terminalState != .waiting {
                         RunActivityIndicator()
@@ -291,7 +322,7 @@ private struct SessionRow: View {
                 Text(verbatim: SessionPreview.text(for: record, snapshot: snapshot))
                     .fontWeight(record.isUnread ? .semibold : .regular)
                     // Explicit, so an inactive window does not dim the preview below its captions.
-                    .foregroundStyle(Color.primary)
+                    .foregroundStyle(SidebarText.primary(onAccent: onAccent))
                     .lineLimit(2)
                     .accessibilityIdentifier("sidebarPreview-" + record.id.uuidString)
                 Text(model.scheduler.routine(record.routineID)?.name ?? record.routineID)
@@ -307,8 +338,7 @@ private struct SessionRow: View {
             Spacer(minLength: 0)
             if record.attention != nil {
                 Image(systemName: "exclamationmark.bubble.fill")
-                    // Orange on the accent fill measured 1.24:1; white keeps the mark visible there.
-                    .foregroundStyle(onAccent ? Color.white : Color.orange)
+                    .foregroundStyle(onAccent ? SidebarText.primary(onAccent: true) : Color.orange)
                     .help(model.scheduler.canMessage(record) ? "Needs your reply" : "Needs your attention")
                     .accessibilityLabel(model.scheduler.canMessage(record)
                         ? "Needs your reply" : "Needs your attention")
@@ -338,7 +368,9 @@ private struct SessionRow: View {
         Circle()
             .fill(fill)
             // The selected row's accent fill hides a blue or green dot.
-            .overlay { if onAccent { Circle().strokeBorder(.white, lineWidth: 1.5) } }
+            .overlay {
+                if onAccent { Circle().strokeBorder(SidebarText.primary(onAccent: true), lineWidth: 1.5) }
+            }
             .frame(width: metrics.points(size), height: metrics.points(size))
     }
 

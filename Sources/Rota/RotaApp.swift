@@ -230,7 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         panel = MenuBarPanelController(rootView: MenuBarContent()
             .interfaceScale(model.interfaceScale).environment(model),
-                                       size: NSSize(width: 340, height: 300))
+                                       size: NSSize(width: 340, height: 300), contentBackgroundOpacity: 0)
         model.openMainWindow = { [weak self] in self?.showMainWindow() }
         model.openSettingsWindow = { [weak self] in self?.showSettingsWindow() }
         observeStatus()

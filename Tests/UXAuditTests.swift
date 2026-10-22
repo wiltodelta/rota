@@ -1,5 +1,6 @@
 @testable import Rota
 @testable import RotaCore
+import AppKit
 import SwiftUI
 import XCTest
 
@@ -34,6 +35,28 @@ final class UXAuditTests: XCTestCase {
 
     func testSidebarCaptionsStaySecondaryOutsideTheActiveSelection() {
         XCTAssertEqual(SidebarText.caption(onAccent: false), Color.secondaryText)
-        XCTAssertEqual(SidebarText.caption(onAccent: true), Color.primary)
+        XCTAssertEqual(SidebarText.caption(onAccent: true), SidebarText.primary(onAccent: true))
+    }
+
+    func testSelectedSidebarTextContrastsWithLightAndDarkAccents() {
+        // These are the actual selection fills captured on macOS 27, plus the
+        // light and dark extremes a user's accent can take.
+        for fill in [NSColor(srgbRed: 0, green: 122 / 255, blue: 1, alpha: 1),
+                     NSColor(srgbRed: 0, green: 112 / 255, blue: 245 / 255, alpha: 1),
+                     .white, .black] {
+            let foreground = SidebarText.foreground(on: fill)
+            let dark = min(luminance(foreground), luminance(fill))
+            let light = max(luminance(foreground), luminance(fill))
+            XCTAssertGreaterThanOrEqual((light + 0.05) / (dark + 0.05), 4.5)
+        }
+    }
+
+    private func luminance(_ color: NSColor) -> Double {
+        let rgb = color.usingColorSpace(.sRGB)!
+        func linear(_ value: Double) -> Double {
+            value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        return linear(rgb.redComponent) * 0.2126 + linear(rgb.greenComponent) * 0.7152
+            + linear(rgb.blueComponent) * 0.0722
     }
 }

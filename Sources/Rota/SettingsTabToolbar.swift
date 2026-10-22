@@ -113,11 +113,6 @@ class ScalableSettingsTabController: NSTabViewController {
 }
 
 final class SettingsTabItemView: NSView {
-    // Native link blue is too dark on the selected toolbar background in dark appearance.
-    private static let selectedCaptionColor = NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            ? NSColor(srgbRed: 122 / 255, green: 186 / 255, blue: 1, alpha: 1) : .linkColor
-    }
     let button: NSButton
     let caption: NSTextField
     let imageView = NSImageView()
@@ -151,7 +146,7 @@ final class SettingsTabItemView: NSView {
         self.factor = factor
         caption.font = .systemFont(ofSize: 13 * factor)
         imageView.image = symbol?.withSymbolConfiguration(.init(pointSize: 24 * factor, weight: .regular))
-        let color = selected ? Self.selectedCaptionColor : .labelColor.withAlphaComponent(0.66)
+        let color = selected ? NSColor.labelColor : .labelColor.withAlphaComponent(0.66)
         caption.textColor = color
         imageView.contentTintColor = color
         button.setAccessibilityValue(selected ? "Selected" : "")

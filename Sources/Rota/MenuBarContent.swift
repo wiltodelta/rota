@@ -112,8 +112,8 @@ struct MenuBarContent: View {
             .padding(.vertical, metrics.points(4))
         }
         .frame(width: 340)
-        // Keep text legible over every glass backdrop while retaining the glass rim.
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.95))
+        // One light backing preserves caption contrast while letting glass sample the backdrop.
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.75))
         .environment(\.appearsActive, true)
     }
 

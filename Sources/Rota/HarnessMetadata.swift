@@ -5,15 +5,17 @@ import SwiftUI
 struct HarnessStatusIcon<Status: View>: View {
     @Environment(\.interfaceScale) private var metrics
     let harness: Harness
+    let foreground: Color
     let status: Status
 
-    init(harness: Harness, @ViewBuilder status: () -> Status) {
+    init(harness: Harness, foreground: Color = .primary, @ViewBuilder status: () -> Status) {
         self.harness = harness
+        self.foreground = foreground
         self.status = status()
     }
 
     var body: some View {
-        HarnessLogo(harness: harness, size: 20, monochrome: true)
+        HarnessLogo(harness: harness, size: 20, monochrome: true, foreground: foreground)
             .frame(width: metrics.points(24), height: metrics.points(24))
             .overlay(alignment: .bottomTrailing) {
                 status
@@ -67,6 +69,7 @@ struct HarnessLogo: View {
     let harness: Harness
     var size: CGFloat = 14
     var monochrome = false
+    var foreground = Color.primary
 
     var body: some View {
         Group {
@@ -82,7 +85,7 @@ struct HarnessLogo: View {
             }
         }
         .foregroundStyle(harness == .claude && !monochrome ? Color(red: 0xD9 / 255, green: 0x77 / 255, blue: 0x57 / 255)
-                         : Color.primary)
+                         : foreground)
         .frame(width: metrics.points(size), height: metrics.points(size))
         .accessibilityHidden(true)
     }

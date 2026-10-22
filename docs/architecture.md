@@ -507,8 +507,11 @@ Two more departures from `macos-apps.md` came from the 2026-10-21 UX audit: the
 footer actions are text only in the primary colour (one gear among three read as a
 different kind of action, and secondary gray read as captions), and the Updates
 footer follows the automatic-check switch instead of always promising a daily check.
-The content has an appearance-adaptive backing over the glass to maintain text
-contrast across backdrops. Settings forms scroll when the screen is shorter
+Rota uses one appearance-adaptive content backing over the glass, with 75% opacity.
+The shared panel host accepts `contentBackgroundOpacity`; Rota sets it to zero
+so a second backing does not mask the material. Other callers retain the 96%
+default. Text contrast is checked on black, white, gray and colored backdrops.
+Settings forms scroll when the screen is shorter
 than their natural height, and the window frame stays inside the visible screen.
 Unsent composer drafts live in `AppModel.sessionDrafts`, keyed by session ID,
 until sent or the app quits. The chat's base fonts never fall below 10 pt before interface scaling. Reduce
@@ -634,16 +637,11 @@ Set its display mode to `iconOnly` after attaching it to the window too: attachm
 can restore `iconAndLabel` and duplicate the custom caption. The selected tab and
 native selection background survive zoom and pane changes. Unit fixtures measure
 all six scales; the UI check measures live growth, allowing for fixed native AX
-hit insets and system-font optical sizing. The selected caption uses the system
-link text color in light appearance and a lighter blue in dark appearance. Accent
-fill blue is too faint in light appearance; native link blue is too dark on the
-dark selection background. Each tab exposes one accessible
-button; its decorative image and caption are excluded from the wrapper's children.
-Final caption verification on 2026-10-18 measured 4.62:1 in light and 5.25:1 in
-dark at 100%, using the capture's embedded profile and calibrated gray swatches.
-After the dark caption color changed, all three Settings panes were rendered and
-measured again at 100% and 150%, in light before dark, including the last Agents
-action and footer after scrolling.
+hit insets and system-font optical sizing. Selected tab captions and symbols use
+`NSColor.labelColor`; other tabs retain the secondary label treatment. The native
+toolbar supplies the selection background, without a fixed blue foreground that
+can disagree with the user's accent. Each tab exposes one accessible button;
+its decorative image and caption are excluded from the wrapper's children.
 
 New views must use the shared scaled fonts and point dimensions for app content.
 The root modifier reads the observable scale inside its SwiftUI body. Reading it
@@ -765,9 +763,12 @@ Layout rules learned while measuring the narrowest window (820 pt):
 - Sidebar routine rows share the menu panel's `NextRunFormat.subtitle`: agent and next run, running, or paused. The caption wraps to two lines in the narrow column and refreshes every 30 seconds.
 - Sidebar titles carry an explicit primary color and captions `secondaryText`: in an
   inactive window SwiftUI dims an unstyled title to about 3:1, below its caption.
-  Captions and the attention mark turn primary and white only on the accent fill of
-  a selected row in the active window (`SidebarText`); `backgroundProminence` did not
-  report that fill. Section headers use `secondaryText` too (native measured 2.2:1).
+  Selected titles and captions use `SidebarText` to choose black or white for
+  the better contrast against the native fill. On macOS 27 the control accent
+  determines the foreground in both appearances; older systems use the selected
+  content background color. Monochrome harness marks, attention symbols and
+  selected-dot outlines share that foreground; the native highlight is unchanged. `backgroundProminence` did not report that fill. Section headers
+  use `secondaryText` too (native measured 2.2:1).
 - The sidebar's ideal width is a fixed 280 pt. The split view applies it only when
   the window opens, so a scaled ideal kept 360 pt after zooming back to 100%; rebuilding
   the split view per zoom level put a 360 pt sidebar into the 820 pt window at 150%.

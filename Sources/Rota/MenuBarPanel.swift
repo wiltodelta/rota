@@ -47,16 +47,15 @@ final class PanelHostController: NSViewController {
     private let fixedWidth: CGFloat
     private let cornerRadius: CGFloat = 12
 
-    init<Content: View>(rootView: Content, width: CGFloat) {
+    init<Content: View>(rootView: Content, width: CGFloat, contentBackgroundOpacity: Double = 0.96) {
         // Pin the width so only the height is dynamic; without a fixed width the
         // greedy `maxWidth: .infinity` content collapses to its minimum and the
         // panel comes out too narrow.
         fixedWidth = width
-        // A system-color content backing bounds contrast even on non-key
-        // warnings, where glass tint alone does not keep text readable.
+        // Each app bounds text contrast with the lightest backing its content needs.
         host = NSHostingController(rootView: AnyView(
             rootView.frame(width: width)
-                .background(Color(nsColor: .windowBackgroundColor).opacity(0.96))
+                .background(Color(nsColor: .windowBackgroundColor).opacity(contentBackgroundOpacity))
         ))
         super.init(nibName: nil, bundle: nil)
     }
@@ -154,17 +153,17 @@ public final class MenuBarPanelController {
 
     public var isShown: Bool { panel.isVisible }
 
-    public init<Content: View>(rootView: Content, size: NSSize) {
+    public init<Content: View>(rootView: Content, size: NSSize, contentBackgroundOpacity: Double = 0.96) {
         panel = MenuBarPanelWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        configure(rootView: rootView, size: size)
+        configure(rootView: rootView, size: size, contentBackgroundOpacity: contentBackgroundOpacity)
     }
 
-    private func configure<Content: View>(rootView: Content, size: NSSize) {
+    private func configure<Content: View>(rootView: Content, size: NSSize, contentBackgroundOpacity: Double) {
         panel.configureAsStatusPanel()
         panel.animationBehavior = .none
 
@@ -173,7 +172,8 @@ public final class MenuBarPanelController {
         // running timer, status text) — the same self-resizing the old popover had.
         // `startObservingResize()` re-pins the top edge under the menu bar.
         panel.setContentSize(size)
-        panel.contentViewController = PanelHostController(rootView: rootView, width: size.width)
+        panel.contentViewController = PanelHostController(rootView: rootView, width: size.width,
+                                                          contentBackgroundOpacity: contentBackgroundOpacity)
         panel.onCancel = { [weak self] in self?.close() }
     }
 
