@@ -25,6 +25,8 @@
   originals stay untouched. The chat follows the session unless you
   scroll up. Adjacent tool calls stay collapsed behind a count; expand them
   to read the full commands. Code blocks name their language and copy in one click.
+  Select any part of a message by dragging across its paragraphs and lists;
+  hover a message for a Copy button that copies the whole of it.
 - **Keep talking to a session, on every agent, while it works or after.** The
   field under the chat sends your message:
   - Claude Code runs interactively, as in a terminal, inside a detached

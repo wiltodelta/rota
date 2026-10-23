@@ -11,30 +11,41 @@ struct MarkdownText: View {
     var body: some View {
         let text = model.chatText
         VStack(alignment: .leading, spacing: metrics.points(6)) {
-            ForEach(Array(MarkdownBlock.parse(source).enumerated()), id: \.offset) { _, block in
-                switch block {
-                case .heading(let level, let content):
-                    MarkdownInlineView(source: content)
-                        .font(text.heading(level: level))
-                        .padding(.top, metrics.points(4))
-                case .listItem(let marker, let content, let indent):
-                    HStack(alignment: .firstTextBaseline, spacing: metrics.points(6)) {
-                        Text(marker).foregroundStyle(Color.secondaryText)
-                        MarkdownInlineView(source: content)
-                    }
-                    .font(text.body)
-                    .padding(.leading, CGFloat(indent) * 16)
-                case .code(let content, let language):
-                    CodeBlockView(code: content, language: language)
-                case .table(let table):
-                    MarkdownTableView(table: table, text: text)
-                case .paragraph(let content):
-                    MarkdownInlineView(source: content).font(text.body)
+            ForEach(Array(MarkdownProse.parts(MarkdownBlock.parse(source)).enumerated()), id: \.offset) { _, part in
+                switch part {
+                case .prose(let blocks):
+                    ProseText(text: MarkdownProse.attributed(blocks, text: text, metrics: metrics))
+                case .block(let block):
+                    blockView(block, text: text)
                 }
             }
         }
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Code, tables and blocks that show an image, which the prose view cannot hold.
+    @ViewBuilder
+    private func blockView(_ block: MarkdownBlock, text: ChatTextSettings) -> some View {
+        switch block {
+        case .heading(let level, let content):
+            MarkdownInlineView(source: content)
+                .font(text.heading(level: level))
+                .padding(.top, metrics.points(4))
+        case .listItem(let marker, let content, let indent):
+            HStack(alignment: .firstTextBaseline, spacing: metrics.points(6)) {
+                Text(marker).foregroundStyle(Color.secondaryText)
+                MarkdownInlineView(source: content)
+            }
+            .font(text.body)
+            .padding(.leading, CGFloat(indent) * 16)
+        case .code(let content, let language):
+            CodeBlockView(code: content, language: language)
+        case .table(let table):
+            MarkdownTableView(table: table, text: text)
+        case .paragraph(let content):
+            MarkdownInlineView(source: content).font(text.body)
+        }
     }
 }
 
@@ -45,27 +56,13 @@ struct CodeBlockView: View {
     @Environment(AppModel.self) private var model
     let code: String
     let language: String?
-    @State private var copied = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(language ?? "Plain text")
                 Spacer()
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(code, forType: .string)
-                    copied = true
-                    Task {
-                        try? await Task.sleep(for: .seconds(1.5))
-                        copied = false
-                    }
-                } label: {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                }
-                .buttonStyle(.borderless)
-                .help(copied ? "Copied" : "Copy Code")
-                .accessibilityLabel(copied ? "Copied" : "Copy Code")
+                CopyButton(text: code, help: "Copy Code")
             }
             .font(model.chatText.small)
             .foregroundStyle(Color.secondaryText)

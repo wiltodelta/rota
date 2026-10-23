@@ -460,6 +460,15 @@ final class TranscriptTurnTests: XCTestCase {
         XCTAssertEqual(turns[1].answer.map(\.text), ["You're welcome."])
     }
 
+    func testAnAnswerSplitAtBlankLinesReadsAsOneMessage() {
+        let log = "[you] Report\n## Review\nAll good.\n\n- one\n- two\n\nDone."
+        let turn = TranscriptTurn.group(Transcript.parse(log))[0]
+        XCTAssertEqual(turn.answer.count, 3)
+        XCTAssertEqual(turn.answerMessages.map(\.text), ["## Review\nAll good.\n\n- one\n- two\n\nDone."])
+        let shell = TranscriptTurn.group(Transcript.parse("[you] ls\na\n\nb", shell: true))[0]
+        XCTAssertEqual(shell.answerMessages.map(\.kind), shell.answer.map(\.kind))
+    }
+
     func testAShellRunIsItsOutput() {
         let log = "[you] echo hi\nhi\n[result: succeeded after 1 s]"
         let turns = TranscriptTurn.group(Transcript.parse(log, shell: true))

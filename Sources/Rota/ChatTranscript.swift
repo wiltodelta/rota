@@ -206,13 +206,15 @@ private struct TranscriptRow: View {
     @Environment(AppModel.self) private var model
     let item: TranscriptItem
     let record: RunRecord
+    @State private var hovering = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.points(8)) {
             switch item.kind {
             case .user: UserBubble(text: item.text)
             case .agent:
-                AgentHeader(record: record)
+                // The message as the agent wrote it, Markdown included.
+                AgentHeader(record: record, copy: item.text, hovering: hovering)
                 AnswerView(item: item)
             case .tool:
                 HStack(alignment: .firstTextBaseline, spacing: metrics.points(6)) {
@@ -237,6 +239,7 @@ private struct TranscriptRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onHover { hovering = $0 }
     }
 }
 
@@ -249,6 +252,7 @@ private struct TurnView: View {
     /// The session's only turn, whose length is the session's.
     let only: Bool
     let record: RunRecord
+    @State private var hovering = false
 
     private var live: Bool { isLast && running }
     private var finished: Bool { isLast && !running && record.endedAt != nil }
@@ -264,22 +268,27 @@ private struct TurnView: View {
             if let prompt = turn.prompt {
                 UserBubble(text: prompt.text)
             }
-            if !turn.work.isEmpty || !turn.answer.isEmpty || live {
-                AgentHeader(record: record)
-                    .padding(.top, metrics.points(4))
+            // The agent's part alone shows its Copy button; the prompt has its own.
+            VStack(alignment: .leading, spacing: metrics.points(12)) {
+                if !turn.work.isEmpty || !turn.answer.isEmpty || live {
+                    AgentHeader(record: record, copy: turn.answerMessages.map(\.text).joined(separator: "\n\n"),
+                                hovering: hovering)
+                        .padding(.top, metrics.points(4))
+                }
+                if !turn.work.isEmpty || live {
+                    WorkSection(items: turn.work, live: live, since: model.scheduler.runStartedAt(record),
+                                label: workLabel)
+                }
+                if let plan = turn.plan {
+                    PlanCard(steps: PlanStep.parse(plan.text))
+                }
+                ForEach(turn.answerMessages) { AnswerView(item: $0) }
+                ForEach(turn.notes.filter { $0 != closingNote }) { NoteView(item: $0) }
+                if finished {
+                    TurnFooter(record: record, status: closingNote?.text)
+                }
             }
-            if !turn.work.isEmpty || live {
-                WorkSection(items: turn.work, live: live, since: model.scheduler.runStartedAt(record),
-                            label: workLabel)
-            }
-            if let plan = turn.plan {
-                PlanCard(steps: PlanStep.parse(plan.text))
-            }
-            ForEach(turn.answer) { AnswerView(item: $0) }
-            ForEach(turn.notes.filter { $0 != closingNote }) { NoteView(item: $0) }
-            if finished {
-                TurnFooter(record: record, status: closingNote?.text)
-            }
+            .onHover { hovering = $0 }
         }
     }
 
@@ -299,12 +308,22 @@ private struct UserBubble: View {
     @Environment(AppModel.self) private var model
     let text: String
 
+    @State private var hovering = false
+
     var body: some View {
-        HStack {
+        HStack(alignment: .bottom, spacing: metrics.points(6)) {
             Spacer(minLength: 80)
             let message = ChatMessage.decode(text)
+            let receipt = QuestionReceipt.decode(message.text)
+            if !message.text.isEmpty {
+                CopyButton(text: receipt?.summary ?? message.text, help: "Copy Message")
+                    .font(model.chatText.small)
+                    .foregroundStyle(Color.secondaryText)
+                    .opacity(hovering ? 1 : 0)
+                    .padding(.bottom, metrics.points(9))
+            }
             VStack(alignment: .leading, spacing: metrics.points(8)) {
-                if let receipt = QuestionReceipt.decode(message.text) {
+                if let receipt {
                     Text(receipt.summary).textSelection(.enabled)
                     DisclosureGroup("Answered Question") {
                         ForEach(Array(receipt.questions.enumerated()), id: \.offset) { _, field in
@@ -327,54 +346,37 @@ private struct UserBubble: View {
                     RoundedRectangle(cornerRadius: metrics.points(16)).strokeBorder(Color.primary.opacity(0.06))
                 }
         }
+        .onHover { hovering = $0 }
     }
 }
 
 /// The session's harness, resolved model and applied effort.
+/// With a Copy button at the row's end for the message under it, shown while `hovering`.
 private struct AgentHeader: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
+    let copy: String
+    let hovering: Bool
 
     var body: some View {
         HStack(spacing: metrics.points(6)) {
-            HarnessLogo(harness: record.harness)
-            Text(ModelLabel.name(record: record, models: model.settings.models))
-            if let effort = ModelLabel.effort(record) {
-                Text(effort).foregroundStyle(Color.secondaryText)
+            HStack(spacing: metrics.points(6)) {
+                HarnessLogo(harness: record.harness)
+                Text(ModelLabel.name(record: record, models: model.settings.models))
+                if let effort = ModelLabel.effort(record) {
+                    Text(effort).foregroundStyle(Color.secondaryText)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            if !copy.isEmpty {
+                Spacer(minLength: 0)
+                CopyButton(text: copy, help: "Copy Message")
+                    .foregroundStyle(Color.secondaryText)
+                    .opacity(hovering ? 1 : 0)
             }
         }
         .font(model.chatText.small)
-        .accessibilityElement(children: .combine)
-    }
-}
-
-/// The harness, and the model when the routine picked one, by the title its CLI lists.
-enum ModelLabel {
-    static func name(record: RunRecord, models: [Harness: [ModelOption]]) -> String {
-        guard let id = record.reportedModel ?? record.model else { return record.harness.title }
-        let title = title(id, harness: record.harness, models: models)
-        return "\(record.harness.title)  \(title)"
-    }
-
-    static func model(record: RunRecord, models: [Harness: [ModelOption]], fallback: String? = nil) -> String {
-        guard let id = record.reportedModel ?? fallback ?? record.model else { return "Default model" }
-        return title(id, harness: record.harness, models: models)
-    }
-
-    private static func title(_ id: String, harness: Harness, models: [Harness: [ModelOption]]) -> String {
-        if let option = models[harness]?.first(where: { $0.matches(id) }) { return option.title }
-        if harness == .claude,
-           let match = id.wholeMatch(of: /^claude-(opus|sonnet|haiku|fable)-(\d+)-(\d+)(?:-\d{8})?$/) {
-            return "\(match.1.capitalized) \(match.2).\(match.3)"
-        }
-        return id
-    }
-
-    /// Nil when no one reported it: the label leaves effort out rather than guess or say "unavailable".
-    static func effort(_ record: RunRecord, fallback: String? = nil) -> String? {
-        guard let effort = record.reportedEffort ?? fallback ?? record.effort else { return nil }
-        return effort == "none" ? "No effort" : effort.capitalized
     }
 }
 
@@ -414,6 +416,7 @@ private struct NoteView: View {
                 Text(item.text)
                     .font(model.chatText.small)
                     .foregroundStyle(Color.secondaryText)
+                    .textSelection(.enabled)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .layoutPriority(1)

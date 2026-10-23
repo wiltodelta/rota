@@ -128,6 +128,20 @@ public struct TranscriptTurn: Equatable, Identifiable, Sendable {
     public var plan: TranscriptItem?
 
     public var id: Int { prompt?.id ?? work.first?.id ?? answer.first?.id ?? notes.first?.id ?? -1 }
+
+    /// The answer as messages. A legacy log ends a message at each blank line, so
+    /// one answer arrives as paragraphs; rejoined, it reads and selects as one.
+    public var answerMessages: [TranscriptItem] {
+        var result: [TranscriptItem] = []
+        for item in answer {
+            if item.kind != .output, let last = result.last, last.kind != .output {
+                result[result.count - 1].text += "\n\n" + item.text
+            } else {
+                result.append(item)
+            }
+        }
+        return result
+    }
     public var toolCount: Int { work.filter { $0.kind == .tool }.count }
 
     /// Splits the items at each user message. Within a turn, everything up to the

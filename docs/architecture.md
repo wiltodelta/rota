@@ -393,6 +393,18 @@ flowchart LR
   scroll horizontally inside the message without widening the transcript.
   Content-proportional widths are regression-tested and measured in the running
   app at 100% and 150%, in both appearances at 820 by 520 pt.
+- Selection: SwiftUI `Text` ends a selection at its own edge and ignores
+  paragraph styles, so `MarkdownProse` joins a message's consecutive headings,
+  paragraphs and list items into one attributed string in one non-editable
+  `NSTextView` (`ProseText`). A drag or Select All crosses those blocks, lists
+  keep their hanging indent, and Copy gives plain text with list markers.
+  Code blocks, tables and image blocks stay separate views. The view measures
+  itself at SwiftUI's proposed width and never tracks its frame width, which
+  layout resets mid-measurement. A legacy log ends a message at each blank line,
+  so `TranscriptTurn.answerMessages` rejoins an answer's paragraphs. Selection
+  cannot cross from one message to the next; hovering a message shows a Copy
+  button (beside a prompt, at the end of the agent's header row) that copies
+  its source text, Markdown included.
   Focused verification on 2026-10-18 used synthetic Russian cells in the signed
   development app at 820 pt width, including the 520 pt minimum height, 80%,
   100% and 150% zoom and a 28 pt chat font. Light was checked before dark.
@@ -699,8 +711,8 @@ the run, and stops development-owned MCP inspection children before quitting
 their parent. The default terminal coverage includes iTerm2 when installed;
 `ROTA_UI_TERMINAL=terminal` explicitly uses Terminal for both appearances when
 another terminal's shell startup is blocked. This override is printed and does
-not verify iTerm2. A synthetic historical message exercises the shipping Markdown table
-inside the chat at normal and maximum zoom, including horizontal scrolling.
+not verify iTerm2. A synthetic historical message exercises headings, a wrapping
+nested list and the shipping Markdown table inside the chat at normal and maximum zoom, including horizontal scrolling.
 Agent access checks wait for asynchronous CLI discovery before requiring its
 Add or Remove buttons; a busy indicator is not the final action to measure.
 Release verification on 2026-10-18 completed the full UI scenario in light before
