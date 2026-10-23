@@ -82,6 +82,74 @@ final class SchedulerTests: XCTestCase {
         return routine
     }
 
+    func testHistoryRefreshReusesDecodedRecords() throws {
+        let routine = addDailyRoutine(enabled: false)
+        scheduler.run(routine, trigger: .manual)
+        launcher.completions[0](.succeeded)
+        var reads = 0
+        scheduler.readHistory = { history, id in
+            reads += 1
+            return history.records(for: id)
+        }
+        let records = scheduler.allRecords()
+        XCTAssertEqual(records.count, 1)
+        for _ in 0..<20 {
+            XCTAssertEqual(scheduler.allRecords(), records)
+            XCTAssertEqual(scheduler.records(for: routine.id), records)
+            XCTAssertEqual(scheduler.unreadCount, 1)
+        }
+        XCTAssertEqual(reads, 1, "Repeated UI reads must not decode history again")
+    }
+
+    func testHistorySnapshotTracksChangesAndDeletion() throws {
+        let routine = addDailyRoutine(enabled: false)
+        XCTAssertTrue(scheduler.allRecords().isEmpty)
+        scheduler.run(routine, trigger: .manual)
+        let running = try XCTUnwrap(scheduler.allRecords().first)
+        XCTAssertEqual(running.outcome, .running)
+        XCTAssertEqual(scheduler.records(for: routine.id), [running])
+        launcher.completions[0](.succeeded)
+        let finished = try XCTUnwrap(scheduler.allRecords().first)
+        XCTAssertEqual(finished.outcome, .succeeded)
+        XCTAssertEqual(scheduler.unreadCount, 1)
+        scheduler.markRead(finished)
+        XCTAssertEqual(scheduler.unreadCount, 0)
+        _ = scheduler.setAttention("Review the result", on: try XCTUnwrap(scheduler.allRecords().first))
+        XCTAssertEqual(scheduler.attentionCount, 1)
+        XCTAssertTrue(scheduler.deleteSession(finished))
+        XCTAssertTrue(scheduler.allRecords().isEmpty)
+        XCTAssertTrue(scheduler.records(for: routine.id).isEmpty)
+        scheduler.run(routine, trigger: .manual)
+        XCTAssertEqual(scheduler.allRecords().count, 1)
+        XCTAssertTrue(scheduler.delete(routine.id))
+        XCTAssertTrue(scheduler.allRecords().isEmpty)
+    }
+
+    func testHistorySnapshotTracksRoutineMembership() throws {
+        let routine = addDailyRoutine(enabled: false)
+        scheduler.run(routine, trigger: .manual)
+        launcher.completions[0](.succeeded)
+        XCTAssertEqual(scheduler.allRecords().count, 1)
+        scheduler.routines = []
+        XCTAssertTrue(scheduler.allRecords().isEmpty)
+        scheduler.routines = [routine]
+        XCTAssertEqual(scheduler.allRecords().count, 1)
+    }
+
+    func testHistorySnapshotRefreshesAfterOrphanRecovery() throws {
+        var routine = addDailyRoutine(enabled: false)
+        routine.harness = .shell
+        scheduler.save(routine)
+        let record = RunRecord(routineID: routine.id, trigger: .manual, harness: .shell,
+                               startedAt: clock, outcome: .running)
+        scheduler.saveRecord(record)
+        XCTAssertEqual(scheduler.allRecords().first?.outcome, .running)
+        scheduler.isOnline = { false }
+        scheduler.start()
+        XCTAssertEqual(scheduler.allRecords().first?.outcome, .interrupted)
+        XCTAssertEqual(scheduler.records(for: routine.id).first?.outcome, .interrupted)
+    }
+
     func testSynchronousCompletionDoesNotRestoreRunningState() throws {
         let routine = addDailyRoutine()
         launcher.finishDuringLaunch = .succeeded
@@ -347,6 +415,23 @@ final class SchedulerTests: XCTestCase {
         XCTAssertEqual(scheduler.routine("report")?.nextFire, makeDate(hour: 10, minute: 0))
         scheduler.setEnabled(false, for: "report")
         XCTAssertNil(scheduler.routine("report")?.nextFire)
+    }
+
+    func testDeletionAvailabilityUsesDisplayHistoryButDeletionRechecksStorage() throws {
+        let routine = addDailyRoutine(enabled: false)
+        let record = RunRecord(routineID: routine.id, trigger: .manual, harness: .codex,
+                               startedAt: clock, endedAt: clock, outcome: .succeeded)
+        scheduler.saveRecord(record)
+        XCTAssertEqual(scheduler.records(for: routine.id), [record])
+        // Change the producer's storage without invalidating the displayed snapshot.
+        XCTAssertTrue(try scheduler.history.remove(record.id, for: routine.id))
+        XCTAssertTrue(scheduler.history.records(for: routine.id).isEmpty)
+        for _ in 0..<20 {
+            XCTAssertTrue(scheduler.canDelete(record), "Drawing a row must reuse the display snapshot")
+        }
+        XCTAssertFalse(scheduler.deleteSession(record), "The action must recheck storage")
+        scheduler.historyVersion += 1
+        XCTAssertFalse(scheduler.canDelete(record), "Invalidation must refresh availability")
     }
 
     func testSessionDeletionRechecksActiveStateAndCancelsPendingResume() throws {

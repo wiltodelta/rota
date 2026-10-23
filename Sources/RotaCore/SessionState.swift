@@ -4,8 +4,23 @@ extension Scheduler {
     /// Every routine's sessions, newest first. Skipped slots stay in each
     /// routine's own history: they have nothing to open.
     public func allRecords() -> [RunRecord] {
-        routines.flatMap { history.records(for: $0.id) }.filter { !$0.isSkip }
+        _ = historyVersion
+        _ = routines
+        if let cachedSessions { return cachedSessions }
+        let sessions = routines.flatMap { records(for: $0.id) }.filter { !$0.isSkip }
             .sorted { $0.startedAt > $1.startedAt }
+        cachedSessions = sessions
+        return sessions
+    }
+
+    /// A display snapshot, reused until history changes. Mutation guards read
+    /// `history` directly so confirmation dialogs still recheck the stored record.
+    public func records(for routineID: String) -> [RunRecord] {
+        _ = historyVersion
+        if let records = cachedHistory[routineID] { return records }
+        let records = readHistory(history, routineID)
+        cachedHistory[routineID] = records
+        return records
     }
 
     public func isActive(_ record: RunRecord) -> Bool {

@@ -16,6 +16,9 @@ public struct TranscriptItem: Equatable, Identifiable, Sendable {
         case output
         /// The agent's plan, one step per line (`PlanStep.parse`).
         case plan
+
+        /// Calls and their output share one disclosure group and one page boundary.
+        public var canJoinToolGroup: Bool { self == .tool || self == .output }
     }
 
     public var id: Int

@@ -449,6 +449,25 @@ flowchart LR
   timestamp, so launches within one second cannot overwrite each other;
   existing records continue using their saved log paths. Runs left `running` by a previous launch become
   `interrupted` at start.
+- UI history reads use `Scheduler.records(for:)` and `allRecords()`: decoded
+  per-routine records and the sorted session list are reused between changes.
+  `historyVersion` invalidates both snapshots after record writes, deletion and
+  startup orphan recovery; routine changes invalidate the combined list.
+  `canDelete` also uses the display snapshot and checks the active run, so
+  building a sidebar row's context menu does not decode its routine's history
+  again. A native scrolling sample exposed this eager context-menu evaluation;
+  menu construction happens even without opening the menu. `deleteSession`
+  still reloads storage and checks surviving processes at confirmation time.
+  A regression test changes storage beneath a warm snapshot and verifies that
+  availability reuses the snapshot, the action rejects the missing record, and
+  invalidation refreshes availability. `RunHistory` remains uncached for mutation
+  guards, so deletion and replies still recheck stored state. `SessionView` uses the record supplied by
+  `MainWindow` and the active copy instead of reading a history file in `body`.
+  Cold reads and writes remain synchronous; this avoids repeated work during UI
+  updates but does not establish a frame-rate or scrolling latency improvement.
+  `ROTA_PERFORMANCE=1 swift test --filter HistoryPerformanceTests` measures
+  repeated reads on synthetic history; scheduler tests count reads and verify
+  invalidation rather than enforcing machine-dependent timing thresholds.
 - Manual session deletion uses `Scheduler.deleteSession`, which reloads the
   stored record and rejects active runs, including interactive Claude processes
   surviving an app restart. `RunHistory.remove` deletes the readable log and

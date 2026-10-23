@@ -36,7 +36,10 @@ struct JournalPage {
             }
             if record.type == "item" {
                 remaining -= 1
-                if remaining == 0 {
+                // The count is a target. Include the complete leading tool group
+                // and its preceding boundary so prepending cannot regroup visible rows.
+                let kind = TranscriptItem.Kind(rawValue: record.kind ?? "")
+                if remaining <= 0, kind?.canJoinToolGroup != true {
                     start = line.offset
                     break
                 }

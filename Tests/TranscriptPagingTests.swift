@@ -55,6 +55,26 @@ final class TranscriptPagingTests: XCTestCase {
         }
     }
 
+    func testOversizedToolGroupLoadsWholeFromTheStartOfTheJournal() throws {
+        for index in 0..<80 {
+            journal.record(.tool, "Synthetic call \(index)")
+            journal.record(.output, "Synthetic output \(index)")
+        }
+        journal.finish(.succeeded)
+        var reader = TranscriptReader(pageSize: 5)
+        let snapshot = reader.read(log: log, finished: true)
+        XCTAssertTrue(snapshot.structured)
+        XCTAssertNil(snapshot.problem)
+        XCTAssertFalse(snapshot.hasEarlier, "A tool group is indivisible even when it exceeds the page target")
+        XCTAssertEqual(snapshot.items.count, 161)
+        XCTAssertEqual(snapshot.items.first?.kind, .tool)
+        var full = TranscriptReader()
+        XCTAssertEqual(snapshot.items, full.read(log: log, finished: true).items)
+        let bytes = reader.bytesRead
+        XCTAssertEqual(reader.readEarlier(log: log, finished: true), snapshot)
+        XCTAssertEqual(reader.bytesRead, bytes)
+    }
+
     func testPagingPreservesLiveUnicodeAppendsAndCompletion() throws {
         for index in 0..<9 { journal.record(.user, "Question \(index)") }
         journal.text("Привет")

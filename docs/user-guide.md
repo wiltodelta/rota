@@ -172,8 +172,9 @@
   on its schedule from the start.
 - Chat shows messages and basic tool activity. Unsupported optional output is
   omitted; if chat history cannot be read, Rota shows a warning and uses the
-  readable log. Long chats open at the latest 50 entries; Load Earlier Messages
-  brings in previous entries. See [Transcript format](transcript-format.md) for the
+  readable log. Long chats initially load about 50 entries; tool calls and their
+  output stay together even when the group is larger. Load Earlier Messages
+  brings in previous entries without splitting those groups. See [Transcript format](transcript-format.md) for the
   storage and compatibility contract.
 - The sidebar folds away with the button beside the title, View > Hide
   Sidebar or Control-Command-S, and stays as you left it.

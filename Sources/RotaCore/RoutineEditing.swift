@@ -57,9 +57,12 @@ extension Scheduler {
         return true
     }
 
+    /// Availability is drawn for every list row. Reuse the display snapshot;
+    /// the action below reloads storage before removing anything.
     public func canDelete(_ record: RunRecord) -> Bool {
-        guard let stored = current(record.id, routineID: record.routineID) else { return false }
-        return stored.outcome != .running && !isActive(stored)
+        guard !isActive(record),
+              let stored = records(for: record.routineID).first(where: { $0.id == record.id }) else { return false }
+        return stored.outcome != .running
     }
 
     /// The confirmation can outlive the record it showed, so check current state again.

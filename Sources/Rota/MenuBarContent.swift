@@ -214,10 +214,10 @@ struct StatusDot: View {
     }
 
     /// The latest run that is not a skip: a skipped slot says nothing about how the
-    /// routine is doing. Reads the routine's history file.
+    /// routine is doing. Uses the scheduler's history snapshot.
     static func lastRun(of routine: Routine, in scheduler: Scheduler) -> RunRecord? {
         _ = scheduler.historyVersion
-        return scheduler.history.records(for: routine.id).first { !$0.isSkip }
+        return scheduler.records(for: routine.id).first { !$0.isSkip }
     }
 
     private func color(_ last: RunRecord?) -> Color {

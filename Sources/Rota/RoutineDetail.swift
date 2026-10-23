@@ -10,7 +10,7 @@ struct RoutineDetail: View {
 
     private var records: [RunRecord] {
         _ = model.scheduler.historyVersion
-        return model.scheduler.history.records(for: routine.id)
+        return model.scheduler.records(for: routine.id)
     }
 
     var body: some View {

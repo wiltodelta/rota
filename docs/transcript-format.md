@@ -62,10 +62,15 @@ the agent's execution result. Readable-log I/O retains the existing writer's
 behavior; this change does not introduce a general storage-recovery service.
 
 Normalized history preserves complete entries instead of cutting at a byte
-offset. The UI opens the latest 50 entries by reading backwards in 32 KB blocks,
-then reads only appended bytes while polling. Load Earlier Messages prepends
-another 50 entries. A message and all its text chunks form one unit, so a
-single very large message still needs its entire content. Older records are
+offset. The UI targets the latest 50 entries by reading backwards in 32 KB blocks,
+then reads only appended bytes while polling. Load Earlier Messages targets
+another 50 entries. A page extends backwards through any leading tool calls
+and output to their preceding non-tool entry or the journal header. Calls and
+output share `TranscriptItem.Kind.canJoinToolGroup` with presentation, so a
+page cannot detach output or change already loaded group IDs when prepended.
+The count is a soft target: a large tool group is loaded whole. A message and
+all its text chunks also form one unit, so a single very large message still
+needs its entire content. Older records are
 validated when their page is loaded, not claimed to have been checked at open.
 The header is always validated. The producer completes a streamed entry before
 introducing the next entry; paging relies on that ordering. Continuation still
@@ -90,9 +95,10 @@ calls and their intervening output form a collapsed group labeled with the numbe
 of loaded calls, including a single call. Expanding reveals complete, selectable
 titles and output in order, with wrapping. Standalone output stays visible.
 Agent text, errors and other kinds end the group and stay visible. This is a view projection over the existing items, not a journal change.
-Expansion belongs to the session view and survives live appends and paging that
-extends the first group. A paged reading anchor maps an old tool ID to its new
-group header; toggling preserves the header offset instead of following the end.
+Expansion belongs to the session view and survives live appends. Paging preserves
+existing tool groups instead of extending their leading edge. The reading-anchor
+mapping remains defensive for regrouped snapshots; toggling preserves the header
+offset instead of following the end.
 The ordered presentation does not infer which prose is a final answer from
 the last tool call. Legacy logs
 retain their inferred turn layout. Markdown, typography, copy actions, and
@@ -103,7 +109,9 @@ string end marker with integer message targets can leave the latest-message
 action short of the end after lazy layout changes. At a page boundary the
 load button can be the first visible element, leaving no message target.
 Invisible native row markers capture the first fully visible message's
-actual offset. The reading anchor is saved during scrolling, before new data
+actual offset. Keep the ID scroll-position binding alongside the proxy and pixel
+correction: removing it in the synthetic prepend check lost the reading position.
+The reading anchor is saved during scrolling, before new data
 changes layout; capturing it only in the update callback can already see the
 moved row. A narrow `TranscriptViewport` bridge restores that offset after
 layout; an ID alone does not correct SwiftUI's changing lazy height estimates.
@@ -161,9 +169,21 @@ appearances. Keyboard activation was not established: AX focus stayed in the
 composer, so the guarded Space probe sent no key. `ToolGroupingTests` checks
 all non-tool boundaries, repeated calls, live append identity and prepended
 page mapping; a disposable mutation that grouped agent text fails those checks.
-Set `ROTA_TOOL_FIXTURE_DIR` while running its producer fixture test to export
-synthetic app data for this UI check. This verification uses synthetic history,
+Page-boundary regression tests use `RunJournal` output to require whole tool
+and output groups on the first page, unchanged existing rows after prepend,
+and a group larger than the page target at the start of a journal.
+Set `ROTA_PAGING_GROUP_FIXTURE_DIR` on the boundary test to export its synthetic
+app data. Set `ROTA_TOOL_FIXTURE_DIR` while running the presentation fixture
+test to export synthetic app data for the disclosure UI check. This verification uses synthetic history,
 not a live provider conversation.
+
+The page-boundary fix was also checked in the signed development bundle at
+820 by 680 points in both appearances, opening it through `ROTA_OPEN_PANEL=1`
+and Open Rota. A group with two calls and two outputs straddling the former
+cut stayed expanded after Load Earlier Messages; its header kept the same
+screen coordinate, and it could still collapse. Bounds checks passed. The
+captured frames and text recognition confirmed that both calls and outputs
+remained rendered, independently of their Accessibility bounds.
 
 The completion footer follow-up was checked in the signed development app at
 820 by 600 points in both appearances using producer-generated synthetic data.

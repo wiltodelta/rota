@@ -29,10 +29,17 @@ public final class Scheduler {
     public static let failuresBeforePause = 5
     static let log = Logger(subsystem: "com.wiltodelta.rota", category: "scheduler")
 
-    public internal(set) var routines: [Routine] = []
+    public internal(set) var routines: [Routine] = [] {
+        didSet { cachedSessions = nil }
+    }
     public internal(set) var active: [String: RunRecord] = [:]
     /// Bumped whenever a run record changes, so views re-read history.
-    public internal(set) var historyVersion = 0
+    public internal(set) var historyVersion = 0 {
+        didSet {
+            cachedHistory.removeAll(keepingCapacity: true)
+            cachedSessions = nil
+        }
+    }
     public var lastError: String?
 
     @ObservationIgnored public var now: () -> Date = Date.init
@@ -63,6 +70,10 @@ public final class Scheduler {
     @ObservationIgnored public var commandPath: String?
     @ObservationIgnored let store: RoutineStore
     @ObservationIgnored public let history: RunHistory
+    /// Read seam for verifying that UI refreshes reuse decoded history.
+    @ObservationIgnored var readHistory: (RunHistory, String) -> [RunRecord] = { $0.records(for: $1) }
+    @ObservationIgnored var cachedHistory: [String: [RunRecord]] = [:]
+    @ObservationIgnored var cachedSessions: [RunRecord]?
     @ObservationIgnored let launcher: RoutineLaunching
     @ObservationIgnored var questionReplies: [UUID: [String: @Sendable (QuestionAnswer) -> Void]] = [:]
     @ObservationIgnored var hookAnswers: [String: QuestionAnswer] = [:]
@@ -95,6 +106,7 @@ public final class Scheduler {
                 pendingResumes[record.id] = record.routineID
             }
         }
+        historyVersion += 1
         tick()
         resumePending()
         let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in

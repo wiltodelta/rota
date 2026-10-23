@@ -112,6 +112,7 @@ struct ChatTranscript: View {
                 .frame(maxWidth: metrics.points(760))
                 .frame(maxWidth: .infinity)
             }
+            // The lazy stack needs this binding to retain the reading position on prepends.
             .scrollPosition(id: $visibleItem, anchor: .top)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .onScrollPhaseChange { _, phase, context in

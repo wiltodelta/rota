@@ -96,7 +96,7 @@ enum WorkRow: Identifiable {
         var calls: [TranscriptItem] = []
         for raw in items {
             let item = raw.presented
-            if item.kind == .tool || (item.kind == .output && !calls.isEmpty) {
+            if item.kind.canJoinToolGroup && (item.kind == .tool || !calls.isEmpty) {
                 calls.append(item)
                 continue
             }

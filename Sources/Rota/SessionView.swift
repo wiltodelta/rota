@@ -22,8 +22,8 @@ struct SessionView: View {
 
     /// The record as the scheduler has it now, with a reply request that came after the view opened.
     private var current: RunRecord {
-        _ = model.scheduler.historyVersion
-        return model.scheduler.current(record.id, routineID: record.routineID) ?? record
+        if let active = model.scheduler.active[record.routineID], active.id == record.id { return active }
+        return record
     }
 
     var body: some View {

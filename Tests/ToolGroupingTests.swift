@@ -28,6 +28,48 @@ final class ToolGroupingTests: XCTestCase {
         XCTAssertEqual(WorkRow.visibleID(for: 99, in: prepended), 99)
     }
 
+    func testPagingNeverReparentsVisibleOutputIntoAToolGroup() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let log = folder.appendingPathComponent("session.log")
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        let journal = RunJournal(output: try FileHandle(forWritingTo: log),
+                                 events: RunEvents(session: { _ in }, finished: { _ in }),
+                                 transcript: try TranscriptJournal(log: log, resuming: false, logSize: 0))
+        for index in 0..<60 { journal.record(.agent, "Earlier message \(index)") }
+        journal.record(.tool, "Read synthetic file")
+        journal.record(.output, "First tool output")
+        journal.record(.tool, "Inspect synthetic output")
+        journal.record(.output, "Second tool output")
+        for index in 0..<48 { journal.record(.agent, "Later message \(index)") }
+        journal.finish(.succeeded)
+        var reader = TranscriptReader(pageSize: 50)
+        let initial = reader.read(log: log, finished: true)
+        XCTAssertTrue(initial.structured)
+        XCTAssertNil(initial.problem)
+        XCTAssertTrue(initial.hasEarlier)
+        let rows = WorkRow.group(initial.items)
+        let group = try XCTUnwrap(rows.first { if case .tools = $0 { true } else { false } })
+        XCTAssertEqual(group.items.map(\.id), [60, 61, 62, 63], "The initial page must contain the whole group")
+        XCTAssertFalse(rows.contains { row in
+            if case .note(let item) = row { return item.kind == .output }
+            return false
+        }, "Paging must not detach output from its tool call")
+        let earlier = reader.readEarlier(log: log, finished: true)
+        XCTAssertTrue(earlier.structured)
+        XCTAssertNil(earlier.problem)
+        let loadedRows = WorkRow.group(earlier.items)
+        for row in rows {
+            XCTAssertEqual(WorkRow.visibleID(for: row.id, in: loadedRows), row.id)
+            XCTAssertEqual(loadedRows.first { $0.id == row.id }?.items, row.items,
+                           "Prepending a page must not regroup already visible content")
+        }
+        if let destination = ProcessInfo.processInfo.environment["ROTA_PAGING_GROUP_FIXTURE_DIR"] {
+            try TranscriptJournalTests.exportFixture(log: log, to: URL(fileURLWithPath: destination))
+        }
+    }
+
     func testProducerGeneratedToolHistory() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

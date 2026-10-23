@@ -188,7 +188,7 @@ final class AppModel {
 
     /// A routine's latest session, or the routine itself before its first run.
     func latest(of routineID: String) -> SidebarItem {
-        SidebarItem.latest(routineID: routineID, records: scheduler.history.records(for: routineID))
+        SidebarItem.latest(routineID: routineID, records: scheduler.records(for: routineID))
     }
 
     func showSettings() {
@@ -339,7 +339,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // VoiceOver reads the image-only button by this label, not the symbol's name.
         button.setAccessibilityLabel("Rota")
         button.setAccessibilityValue(running > 0 ? "\(running) running" : nil)
-        // One pass over the history, which allRecords reads from disk.
+        // One pass over the scheduler's cached history snapshot.
         let records = model.scheduler.allRecords()
         let unread = records.filter(\.isUnread).count
         let waiting = records.filter { $0.attention != nil }.count
