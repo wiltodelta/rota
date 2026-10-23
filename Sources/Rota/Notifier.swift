@@ -62,7 +62,7 @@ final class Notifier: NSObject, RunNotifying, UNUserNotificationCenterDelegate {
                                                   textInputButtonTitle: "Send", textInputPlaceholder: "Reply")
         center.setNotificationCategories([UNNotificationCategory(identifier: Self.replyCategory, actions: [reply],
                                                                  intentIdentifiers: [])])
-        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+        center.requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             if let error {
                 Self.log.error("Notification authorization failed: \(error.localizedDescription, privacy: .public)")
             } else {

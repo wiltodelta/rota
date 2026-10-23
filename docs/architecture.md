@@ -430,7 +430,13 @@ flowchart LR
   transport error; cancellation and routine time limits are also left alone.
 - A finished session is unread until `markRead`, which `SessionView` calls
   when it shows a finished session (`RunRecord.readAt`, `isUnread`); the
-  sidebar, the panel and the Dock badge read `unreadCount`.
+  sidebar and the panel show unread counts. The Dock badge counts only records
+  with `attention != nil`, including pending agent questions, and clears at zero.
+  `AppDelegate.observeStatus` tracks the history snapshot to keep it current.
+  Notification authorization includes badges so macOS can display the count.
+  Opening a window clears the cached badge before entering regular activation
+  policy and reapplies the current count after showing the window. A label set
+  while accessory can remain stored without appearing on the new Dock icon.
 - Quitting with runs going asks first (`applicationShouldTerminate`), then
   `stopAll` stops each the way Stop does and the app waits up to five seconds
   for them to end. Without that a Shell run's `screen` outlived Rota while its

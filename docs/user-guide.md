@@ -104,8 +104,9 @@
   the notification to open the session. This gives routines on every agent a
   Mac notification channel.
 - **An inbox.** A session that finished since you last opened it is unread:
-  bold in the list with a blue dot, counted on the Dock icon and in the menu
-  bar panel.
+  bold in the list with a blue dot and counted in the menu bar panel. The Dock
+  badge counts only sessions that need your reply or attention. It clears when
+  you answer or dismiss the last request, even if unread sessions remain.
 - **Interface scale.** Settings > General scales app content from 80% to 150%.
   View > Zoom In, Zoom Out and Actual Size (Command-Plus, Command-Minus,
   Command-0) adjust it immediately. Toolbar height, buttons, backgrounds, text

@@ -348,9 +348,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if unread > 0 { tip += ", \(unread) unread" }
         if let version = Updater.shared.pendingVersion { tip += ". Version \(version) is available" }
         button.toolTip = tip
-        // The Dock shows the icon only while a window is open; the badge counts sessions to look at.
-        let badge = records.filter { $0.isUnread || $0.attention != nil }.count
-        NSApp.dockTile.badgeLabel = badge > 0 ? "\(badge)" : nil
+        // The Dock shows the icon only while a window is open; count sessions needing a response.
+        NSApp.dockTile.badgeLabel = waiting > 0 ? "\(waiting)" : nil
     }
 
     @objc private func statusItemClicked() {
@@ -458,9 +457,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// A window comes forward reliably only from a regular app, so Rota takes a
     /// Dock icon while one is open and gives it up when the last one closes.
     private func present(_ window: NSWindow?) {
+        // Reapply the label when entering the Dock: AppKit can retain the value set while accessory
+        // without displaying it, and assigning the same value again does not redraw the badge.
+        if NSApp.activationPolicy() != .regular { NSApp.dockTile.badgeLabel = nil }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
+        updateStatusItem()
     }
 
     func windowWillClose(_ notification: Notification) {
