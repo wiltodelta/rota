@@ -799,8 +799,13 @@ Layout rules learned while measuring the narrowest window (820 pt):
   content background color. Monochrome harness marks, attention symbols and
   selected-dot outlines share that foreground; the native highlight is unchanged. `backgroundProminence` did not report that fill. Section headers
   use `secondaryText` too (native measured 2.2:1).
-- The sidebar's ideal width is a fixed 280 pt. The split view applies it only when
-  the window opens, so a scaled ideal kept 360 pt after zooming back to 100%; rebuilding
+- The sidebar restores its last visible width from `sidebarWidth` in UserDefaults,
+  defaulting to 280 pt. Geometry changes save visible widths at or above the column's
+  minimum; hiding the sidebar does not replace that preference with collapsed geometry.
+  The launch ideal stays stable in view state while later geometry updates save the
+  next launch's preference.
+  The ideal stays in points rather than scaling with zoom: the split view applies it
+  when the window opens, so a scaled ideal kept 360 pt after zooming back to 100%; rebuilding
   the split view per zoom level put a 360 pt sidebar into the 820 pt window at 150%.
 - With no routines the detail is the one empty state, with Import Routines… and a
   prominent New Routine…; the sidebar only says there are none. The New Routine form

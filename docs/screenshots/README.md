@@ -11,13 +11,18 @@ scripts/capture-screenshots.sh
 ```
 
 The recipe builds the app, compiles the existing Accessibility driver and the
-ScreenCaptureKit capture helper, writes the fixtures into a temporary data
+native window capture helper, writes the fixtures into a temporary data
 folder, and captures light and dark appearances without changing the system
 appearance. Agent executable overrides prevent model-catalog initialization;
 normal installed-CLI discovery may still read `--version`. It restores the
 development app's defaults and quits its own app process on exit. Close an
 existing repository development build first; the
 script refuses to take it over.
+
+ScreenCaptureKit composites can omit sidebar text fragments after resizing,
+even when the native window capture contains all the text. The helper uses
+`screencapture -l` with its own opaque backdrop behind the window, then adds the
+same backdrop margin in sRGB. It never repairs or replaces interface pixels.
 
 Accessibility and Screen Recording must already be allowed for the invoking
 terminal. The shared `macaudit.py` helper provides the unlocked-session check
@@ -37,7 +42,7 @@ folder. Keep the PNGs and their recipe together when updating them.
 
 Each capture must pass the existing Accessibility layout gate at its stated
 size. The images include a 32 pt margin and use the display's backing scale.
-`capture-window.swift` composites only the target window and its opaque
+`capture-window.swift` captures only the target window over its opaque
 backdrop in sRGB, so other windows cannot leak through the glass. The capture
 helper does not paint or replace the app's interface.
 

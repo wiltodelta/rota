@@ -178,7 +178,8 @@
   brings in previous entries without splitting those groups. See [Transcript format](transcript-format.md) for the
   storage and compatibility contract.
 - The sidebar folds away with the button beside the title, View > Hide
-  Sidebar or Control-Command-S, and stays as you left it.
+  Sidebar or Control-Command-S. Its visibility and resized width are kept across
+  launches, so the divider returns to where you left it.
 - Menus: File > New Routine… (Command-N) and Import Routines…;
   Routine > Run Now (Command-R), Stop (Command-.) and Edit Routine…
   (Command-E), acting on the selected routine or the selected session's.

@@ -20,6 +20,8 @@ struct MainWindow: View {
     @Environment(AppModel.self) private var model
 
     @State private var sidebarWidth: CGFloat = 280
+    // Seed the ideal once; later measurements save the next launch's preference.
+    @State private var restoredSidebarWidth = UserDefaults.standard.object(forKey: "sidebarWidth") as? Double ?? 280
 
     private var records: [RunRecord] {
         _ = model.scheduler.historyVersion
@@ -45,10 +47,14 @@ struct MainWindow: View {
             set: { model.sidebarVisible = $0 != .detailOnly }
         )) {
             MainSidebar(records: records)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { sidebarWidth = $0 }
-            // A fixed ideal: the split view applies it only at launch, so a scaled one stuck
-            // at 360 pt after zooming back to 100%, and at 150% it would overflow 820 pt.
-            .navigationSplitViewColumnWidth(min: min(metrics.points(240), 280), ideal: 280,
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                sidebarWidth = width
+                if model.sidebarVisible, width >= min(metrics.points(240), 280) {
+                    UserDefaults.standard.set(Double(width), forKey: "sidebarWidth")
+                }
+            }
+            // Restore the last visible width in points; scaling the ideal makes it drift on zoom changes.
+            .navigationSplitViewColumnWidth(min: min(metrics.points(240), 280), ideal: CGFloat(restoredSidebarWidth),
                                             max: metrics.points(360))
             .overlay {
                 // The detail explains a first routine and offers both ways to add one.

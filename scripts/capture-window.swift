@@ -15,11 +15,42 @@ let dark = arguments[2] == "dark"
 let color = NSColor(srgbRed: dark ? 0.09 : 0.86, green: dark ? 0.10 : 0.88,
                     blue: dark ? 0.12 : 0.91, alpha: 1)
 
+// ScreenCaptureKit's filtered composite can omit text fragments after resizing.
+// The native window capture preserves them; flatten its corners over the same backdrop.
+func captureWindow(_ id: UInt32, frame: CGRect) throws -> CGImage {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("rota-capture-\(UUID()).png")
+    defer { try? FileManager.default.removeItem(at: file) }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+    process.arguments = ["-o", "-x", "-l", String(id), file.path]
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0,
+          let source = CGImageSourceCreateWithURL(file as CFURL, nil),
+          let captured = CGImageSourceCreateImageAtIndex(source, 0, nil)
+    else { throw CocoaError(.fileReadUnknown) }
+    let scale = CGFloat(captured.width) / frame.width
+    guard abs(CGFloat(captured.height) / frame.height - scale) < 0.01 else {
+        throw CocoaError(.fileReadUnknown)
+    }
+    let margin = Int((32 * scale).rounded())
+    let width = captured.width + 2 * margin
+    let height = captured.height + 2 * margin
+    guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { throw CocoaError(.fileReadUnknown) }
+    context.setFillColor(color.cgColor)
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    context.draw(captured, in: CGRect(x: margin, y: margin, width: captured.width, height: captured.height))
+    guard let image = context.makeImage() else { throw CocoaError(.fileReadUnknown) }
+    return image
+}
+
 Task { @MainActor in
     do {
         let initial = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let target = initial.windows.first(where: { $0.windowID == windowID }),
-              let display = initial.displays.first(where: { $0.displayID == CGMainDisplayID() }),
               let screen = NSScreen.screens.first else { throw CocoaError(.fileReadUnknown) }
         let rect = target.frame.insetBy(dx: -32, dy: -32)
         let backdrop = NSWindow(contentRect: NSRect(x: rect.minX,
@@ -33,18 +64,9 @@ Task { @MainActor in
         try await Task.sleep(for: .milliseconds(400))
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let current = content.windows.first(where: { $0.windowID == windowID }),
-              current.frame == target.frame,
-              let background = content.windows.first(where: { $0.windowID == UInt32(backdrop.windowNumber) })
+              current.frame == target.frame
         else { throw CocoaError(.fileReadUnknown) }
-        let config = SCStreamConfiguration()
-        config.sourceRect = rect
-        config.width = Int(rect.width * screen.backingScaleFactor)
-        config.height = Int(rect.height * screen.backingScaleFactor)
-        config.showsCursor = false
-        config.colorSpaceName = CGColorSpace.sRGB
-        config.backgroundColor = color.cgColor
-        let filter = SCContentFilter(display: display, including: [background, current])
-        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        let image = try captureWindow(windowID, frame: current.frame)
         let output = URL(fileURLWithPath: arguments[3])
         guard let writer = CGImageDestinationCreateWithURL(output as CFURL,
                                                            UTType.png.identifier as CFString, 1, nil)
