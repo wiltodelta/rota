@@ -8,7 +8,8 @@ one native macOS app. Choose the harness and model for each routine, and
 change them when another agent fits the job better.
 
 [Download Rota](https://github.com/wiltodelta/rota/releases/latest) ·
-[Get started](#get-started) · [User guide](docs/user-guide.md)
+[Get started](#get-started) · [User guide](docs/user-guide.md) ·
+[Website](https://wiltodelta.com/projects/rota/)
 
 [![Build Rota App](https://github.com/wiltodelta/rota/actions/workflows/build.yml/badge.svg)](https://github.com/wiltodelta/rota/actions/workflows/build.yml)
 
@@ -216,3 +217,5 @@ rm -rf ~/Library/Application\ Support/Rota ~/Library/Logs/Rota ~/Library/Caches/
 ## License
 
 [Apache License 2.0](LICENSE).
+
+Made by [Victor Kuznetsov](https://wiltodelta.com/).
