@@ -646,6 +646,10 @@ Multi-line labels stay in an explicit leading-aligned stack so the whole label
 block, rather than its first line, aligns with the control.
 Native button labels
 also receive an explicit scaled font. Menu items keep the system font.
+Sidebar routine names and session previews apply `interfaceFont(.body)` directly
+to their `Text`: the font inherited from the row wrapper does not reliably reach
+the primary label in a native sidebar list. Verify the rendered font family and
+size when checking zoom, not only the row's geometry.
 Chat typography multiplies its base dimensions by both the chat text scale and
 the same observable interface scale without rewriting either preference. No layer, bitmap or view
 transform enlarges an already rendered interface. Every hosted root, including

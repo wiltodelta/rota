@@ -223,7 +223,8 @@ private struct RoutineRow: View {
             }
             VStack(alignment: .leading, spacing: metrics.points(1)) {
                 // Explicit, so an inactive window does not dim the name below its caption.
-                Text(routine.name).lineLimit(1).foregroundStyle(SidebarText.primary(onAccent: onAccent))
+                Text(routine.name).interfaceFont(.body)
+                    .lineLimit(1).foregroundStyle(SidebarText.primary(onAccent: onAccent))
                 TimelineView(.periodic(from: .now, by: 30)) { _ in
                     Text(NextRunFormat.subtitle(routine, running: model.scheduler.active[routine.id] != nil))
                         .interfaceFont(.caption)
@@ -328,6 +329,7 @@ private struct SessionRow: View {
             }
             VStack(alignment: .leading, spacing: metrics.points(1)) {
                 Text(verbatim: SessionPreview.text(for: record, snapshot: snapshot))
+                    .interfaceFont(.body)
                     .fontWeight(record.isUnread ? .semibold : .regular)
                     // Explicit, so an inactive window does not dim the preview below its captions.
                     .foregroundStyle(SidebarText.primary(onAccent: onAccent))
