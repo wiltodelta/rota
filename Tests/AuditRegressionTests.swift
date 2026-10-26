@@ -110,21 +110,88 @@ final class AuditRegressionTests: XCTestCase {
         journal.finish(.cancelled)
     }
 
-    func testClaudeExitWithoutAResultIsInterruptedEvenAtExitZero() throws {
+    /// A print-mode Claude run on a temporary log, driven by handing it stream-json lines.
+    private func claudeStreamRun(finished: @escaping (RunOutcome) -> Void = { _ in }) throws
+        -> (runner: ClaudeStreamRun, journal: RunJournal, log: URL) {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: folder) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
         let log = folder.appendingPathComponent("session.log")
         XCTAssertTrue(FileManager.default.createFile(atPath: log.path, contents: nil))
         let journal = RunJournal(output: try FileHandle(forWritingTo: log),
-                                 events: RunEvents(session: { _ in }, finished: { _ in }))
+                                 events: RunEvents(session: { _ in }, finished: finished))
         let spec = LaunchSpec(executable: "/bin/false", prompt: "Example", arguments: [],
                               workingDirectory: folder.path, environment: [:], mode: .claudeStream,
                               timeout: nil, log: log)
-        let runner = ClaudeStreamRun(spec: spec, journal: journal)
+        return (ClaudeStreamRun(spec: spec, journal: journal), journal, log)
+    }
+
+    func testClaudeExitWithoutAResultIsInterruptedEvenAtExitZero() throws {
+        let (runner, journal, log) = try claudeStreamRun()
         runner.exited(status: 0)
         XCTAssertTrue(journal.isFinished)
         XCTAssertTrue(try String(contentsOf: log, encoding: .utf8).contains("Interrupted after"))
+    }
+
+    func testClaudeResultWithBackgroundTasksRunningKeepsTheRunOpen() throws {
+        let (runner, journal, log) = try claudeStreamRun()
+        // The order claude -p 2.1.310 emitted on 2026-10-26 around a background command.
+        runner.handle(#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1"}]}"#)
+        runner.handle(#"{"type":"result","subtype":"success","result":"STARTED"}"#)
+        XCTAssertFalse(journal.isFinished, "Claude starts another turn when the task finishes")
+        runner.handle(#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#)
+        runner.handle(#"{"type":"result","subtype":"success","result":"DONE"}"#)
+        XCTAssertTrue(journal.isFinished)
+        let text = try String(contentsOf: log, encoding: .utf8)
+        XCTAssertTrue(text.contains("Waiting for 1 background task"), text)
+        XCTAssertTrue(text.contains("Completed after"), text)
+    }
+
+    /// The task finished while Claude wrote STARTED: its answer came in a turn after the result (live, 2026-10-26).
+    private func finishWhileAnswering(_ runner: ClaudeStreamRun) {
+        runner.handle(#"{"type":"system","subtype":"init","session_id":"s1"}"#)
+        runner.handle(#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1"}]}"#)
+        runner.handle(#"{"type":"system","subtype":"task_notification","task_id":"b1","status":"completed"}"#)
+        runner.handle(#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#)
+        runner.handle(#"{"type":"result","subtype":"success","result":"STARTED"}"#)
+    }
+
+    func testClaudeNotifiedTurnWaitsForTheTurnTheNotificationStarts() throws {
+        let (runner, journal, _) = try claudeStreamRun()
+        runner.settle = 3600
+        finishWhileAnswering(runner)
+        XCTAssertFalse(journal.isFinished)
+        runner.handle(#"{"type":"system","subtype":"init","session_id":"s1"}"#)
+        runner.handle(#"{"type":"result","subtype":"success","result":"DONE"}"#)
+        XCTAssertTrue(journal.isFinished)
+    }
+
+    func testClaudeNotifiedTurnEndsWhenNoTurnFollows() throws {
+        let ended = expectation(description: "finished")
+        let (runner, journal, _) = try claudeStreamRun { _ in ended.fulfill() }
+        runner.settle = 0
+        finishWhileAnswering(runner)
+        XCTAssertFalse(journal.isFinished)
+        wait(for: [ended], timeout: 5)
+    }
+
+    /// A tool result after the notification means a later request in the same turn carried it.
+    func testClaudeNotificationAnsweredInTheTurnEndsTheRunAtItsResult() throws {
+        let (runner, journal, _) = try claudeStreamRun()
+        runner.settle = 3600
+        runner.handle(#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1"}]}"#)
+        runner.handle(#"{"type":"system","subtype":"task_notification","task_id":"b1","status":"completed"}"#)
+        runner.handle(#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#)
+        runner.handle(#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}"#)
+        runner.handle(#"{"type":"result","subtype":"success","result":"DONE"}"#)
+        XCTAssertTrue(journal.isFinished)
+    }
+
+    func testClaudeFailedResultEndsTheRunDespiteBackgroundTasks() throws {
+        let (runner, journal, _) = try claudeStreamRun()
+        runner.handle(#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1"}]}"#)
+        runner.handle(#"{"type":"result","subtype":"error_during_execution","is_error":true}"#)
+        XCTAssertTrue(journal.isFinished)
     }
 
     func testDisconnectedTransportsCannotTerminateTheHostWithSIGPIPE() throws {

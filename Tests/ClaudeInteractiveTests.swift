@@ -33,6 +33,26 @@ final class ClaudeInteractiveTests: XCTestCase {
         XCTAssertEqual(ClaudeTranscript.read(Data("not json".utf8)), .other)
     }
 
+    /// Shapes as Claude Code 2.1.310 wrote them in interactive sessions in October 2026.
+    func testBackgroundTasksStartAndEnd() {
+        XCTAssertEqual(entry(["type": "user", "toolUseResult": ["backgroundTaskId": "b1", "stdout": ""],
+                              "message": ["content": [["type": "tool_result", "content": "running"]]]]),
+                       .background("b1", running: true))
+        XCTAssertEqual(entry(["type": "user", "toolUseResult": ["isAsync": true, "status": "async_launched",
+                                                                "agentId": "a1", "description": "Review"]]),
+                       .background("a1", running: true))
+        XCTAssertEqual(entry(["type": "user", "toolUseResult": [
+            "message": "Successfully stopped task: b1 (sleep 60)", "task_id": "b1", "task_type": "local_bash"]]),
+                       .background("b1", running: false))
+        let notice = "<task-notification>\n<task-id>a1</task-id>\n<task-id>a2</task-id>\n"
+            + "<status>completed</status>\n</task-notification>"
+        XCTAssertEqual(TranscriptService.taskIDs(notice), ["a1", "a2"])
+        XCTAssertEqual(entry(["type": "user", "origin": ["kind": "task-notification"],
+                              "message": ["content": notice]]), .service(notice))
+        XCTAssertEqual(entry(["type": "attachment", "attachment": ["type": "queued_command", "prompt": notice]]),
+                       .service(notice), "a notification queued mid-turn is not a typed message")
+    }
+
     func testCommandLine() {
         let new = ClaudeInteractiveRun.arguments(session: "s1", resume: false, settings: "/c/s.json",
                                                  model: ["--model", "haiku"], prompt: "-start with a dash")

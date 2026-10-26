@@ -97,6 +97,10 @@
   Device verification and forms Rota cannot
   render explain how to continue in the provider's app and never offer a false approval.
   Supported request types and verification coverage: [agent questions](agent-questions.md).
+- **Background work finishes inside the session.** When Claude Code ends a turn
+  while a background command or agent it started is still running, the session
+  shows "Waiting for N background tasks" and stays running; Claude's answer to
+  the finished task follows in the same session before it completes.
 - **Routines can notify you.** A routine (or its skill) runs
   `"$ROTA_CLI" notify "…"`, or an agent calls the `notify_user` tool, and Rota
   shows a Mac notification from that session. With `--needs-reply` the session

@@ -93,7 +93,7 @@ struct NativeTranscript {
         case .service(let text): return [.item(.status, text)]
         case .apiError(let text): return [.item(.error, text), .state(.waiting)]
         case .turnEnded: return [.state(.waiting)]
-        case .other: return []
+        case .background, .other: return []
         }
     }
 

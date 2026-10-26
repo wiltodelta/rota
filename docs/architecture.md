@@ -243,11 +243,13 @@ flowchart LR
   Print mode also installs the stdio permission host and handles native
   `can_use_tool` requests. Hook settings are ephemeral and do not change the
   user's CLI configuration.
-  The interactive Claude runner exits after a completed turn when no user
-  messages are queued; it does not check for outstanding background tool work.
-  An agent can therefore promise a later commit after a background gate, end
-  its turn, and leave that work unfinished while Rota records success. A future
-  completion contract must distinguish process completion from task completion.
+  Both Claude runners keep a run open while a background shell or agent it
+  started is running: Claude answers the task's notification in a turn of its
+  own, and ending at the earlier turn's end stopped the task. Until 2026-10-26
+  the interactive runner typed `/exit` at the first `turn_duration`, which
+  killed four review agents 15 seconds after a turn that promised to wait for
+  them. The wait covers Claude's own task list only: a process a command
+  detaches with `&` is not waited for.
 - `ProcessLauncher` runs every CLI through `zsh -lc 'exec "$0" "$@"'` from
   `baseEnvironment` (the account's own variables only), so a routine sees what
   a new Terminal window sees, whatever started Rota: started by `rota` inside
@@ -293,8 +295,18 @@ flowchart LR
   `--settings` hooks to host native questions. The prompt and later messages are on
   stdin; a message sent mid-turn joins that turn; the `result` event ends the
   run and closing stdin lets Claude exit and save the session; the `system`
-  `init` event carries the session id, and `--resume <id>` continues it. `-p`
-  asks no folder-trust question. The session lives in Rota's process.
+  `init` event starts each turn and carries the session id, and `--resume <id>`
+  continues it. `-p` asks no folder-trust question. The session lives in Rota's
+  process. `system`/`background_tasks_changed` lists the running background
+  shells and agents (`local_bash`, `local_agent`; a subagent's own tools are
+  not listed); a `result` while it is non-empty shows `Waiting for N background
+  tasks` and keeps stdin open, and the task's `task_notification` starts the
+  next turn. A task that finishes before the turn's last tool call is answered
+  in that turn, which a tool result after the notification shows; one that
+  finishes while Claude writes its last answer is answered in a new turn after
+  the `result`, so after a notification with no tool result since, the run
+  waits five seconds (`settle`) for a new `init` before closing stdin (claude
+  2.1.310, 2026-10-26).
 - `ClaudeInteractiveRun` is the default for Claude (Settings > Agents), because
   only an interactive session loads computer use (`ClaudeUserSettings`). It
   runs `claude --session-id <id> --settings <hooks> --permission-mode
@@ -304,9 +316,15 @@ flowchart LR
   read from where it ended: assistant entries have the stream-json shape, a
   message typed mid-turn appears as a `queued_command` attachment, and
   `system`/`turn_duration` ends a turn (`ClaudeTranscript`, shapes from Claude
-  Code 2.1.296 on 2026-10-11). Messages are typed in as a bracketed paste
+  Code 2.1.296 on 2026-10-11). A background task starts with a tool result
+  whose `toolUseResult` carries `backgroundTaskId` (shell) or
+  `status: async_launched` and `agentId` (agent), and ends with a
+  `<task-notification>` naming its `<task-id>`s, as a user entry or, mid-turn, a
+  `queued_command` attachment; `TaskStop` sends no notification, only a result
+  with `task_id` and `task_type`, a shape no other tool result had (2.1.310,
+  2026-10-26). The notification starts a turn, so it clears the ended turn. Messages are typed in as a bracketed paste
   (`screen -X stuff` passes `^`, `\`, `$` through as typed); once the last turn
-  ended with nothing typed since, the run types `/exit`. A `Notification` hook
+  ended with nothing typed since and no background task running, the run types `/exit`. A `Notification` hook
   (permission or app-access prompt) marks the session needs-reply through
   `$ROTA_CLI notify`. Claude shows a folder-trust dialog nobody could answer,
   so a folder without `hasTrustDialogAccepted` (itself or its repository) runs

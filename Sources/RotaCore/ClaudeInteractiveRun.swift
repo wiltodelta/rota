@@ -11,7 +11,9 @@ import os
 /// the stream-json shape `StreamJSONFormatter` reads, and a
 /// `system`/`turn_duration` entry marks the end of a turn. Messages are typed
 /// into the terminal as a bracketed paste, so a line break stays a line break.
-/// Once the last turn has ended with no message waiting, the run types `/exit`.
+/// Once the last turn has ended with no message waiting and no background task
+/// running, the run types `/exit`: Claude starts a turn of its own when a task
+/// it left running finishes, and leaving earlier would stop that task.
 /// "Open in Terminal" attaches to the screen session, where the user can answer
 /// whatever Claude asks there; a `Notification` hook marks the session
 /// needs-reply when Claude waits for that.
@@ -35,6 +37,8 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     /// Messages typed in and not yet seen in the transcript.
     private var unanswered = 0
     private var turnEnded = false
+    /// Background shells and agents started in this run and not yet reported finished.
+    private var background: Set<String> = []
     private var failed = false
     private var exiting = false
     private var stopReason: RunOutcome?
@@ -160,7 +164,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         if let status = exitStatus ?? (isAlive() ? nil : exitStatus ?? -1) {
             return finish(status: status)
         }
-        if turnEnded, unanswered == 0, !exiting, stopReason == nil {
+        if turnEnded, unanswered == 0, background.isEmpty, !exiting, stopReason == nil {
             exiting = true
             type("/exit")
             type("\r")
@@ -209,22 +213,41 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
             unanswered = max(0, unanswered - 1)
             journal.record(.user, text)
         case .assistant(let model, let items):
-            journal.configure(SessionConfiguration(model: model))
-            if !headerWritten, let model {
-                headerWritten = true
-                journal.line("[session started, \(model)]")
-            }
-            for item in items { journal.record(item.kind, item.text) }
+            assistant(model: model, items: items)
         case .service(let text):
-            journal.record(.status, text)
+            notice(text)
+        case .background(let id, let running):
+            if running { background.insert(id) } else { background.remove(id) }
         case .apiError(let text):
             failed = true
             journal.line("[error] \(text)")
         case .turnEnded:
-            turnEnded = true
+            endTurn()
         case .other:
             break
         }
+    }
+
+    private func endTurn() {
+        turnEnded = true
+        if !background.isEmpty { journal.record(.status, TranscriptService.waiting(background.count)) }
+    }
+
+    private func assistant(model: String?, items: [TranscriptItem]) {
+        journal.configure(SessionConfiguration(model: model))
+        if !headerWritten, let model {
+            headerWritten = true
+            journal.line("[session started, \(model)]")
+        }
+        for item in items { journal.record(item.kind, item.text) }
+    }
+
+    private func notice(_ text: String) {
+        let tasks = TranscriptService.taskIDs(text)
+        // A task notification is Claude's next prompt: a turn follows it.
+        if !tasks.isEmpty { turnEnded = false }
+        background.subtract(tasks)
+        journal.record(.status, text)
     }
 
     private var exitStatus: Int32? {
@@ -281,11 +304,15 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
 /// One entry of Claude's session transcript, as the interactive run reads it.
 /// Assistant entries have the stream-json shape `StreamJSONFormatter` reads; a
 /// message typed while Claude worked shows up as a `queued_command` attachment
-/// rather than a user entry; `system`/`turn_duration` closes a turn.
+/// rather than a user entry; `system`/`turn_duration` closes a turn. A
+/// background shell or agent starts with a tool result naming its id and ends
+/// with a task notification naming it, or with a `TaskStop` result, which sends none.
 enum ClaudeTranscript: Equatable {
     case user(String)
     case queued(String)
     case service(String)
+    /// A background task by id: started (`running`), or stopped by `TaskStop`.
+    case background(String, running: Bool)
     case assistant(model: String?, items: [TranscriptItem])
     case apiError(String)
     case turnEnded
@@ -295,12 +322,13 @@ enum ClaudeTranscript: Equatable {
         guard let entry = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let type = entry["type"] as? String else { return .other }
         switch type {
-        case "user": return userEntry(entry)
+        case "user": return backgroundTask(entry["toolUseResult"]) ?? userEntry(entry)
         case "attachment":
             guard let attachment = entry["attachment"] as? [String: Any],
                   attachment["type"] as? String == "queued_command",
                   let text = attachment["prompt"] as? String else { return .other }
-            return .queued(text)
+            // A notification arriving mid-turn is queued like a message, but nobody typed it.
+            return TranscriptService.title(text) == nil ? .queued(text) : .service(text)
         case "assistant":
             let message = entry["message"] as? [String: Any]
             if entry["isApiErrorMessage"] as? Bool == true {
@@ -315,6 +343,19 @@ enum ClaudeTranscript: Equatable {
         default:
             return .other
         }
+    }
+
+    private static func backgroundTask(_ result: Any?) -> ClaudeTranscript? {
+        guard let result = result as? [String: Any] else { return nil }
+        if let id = result["backgroundTaskId"] as? String { return .background(id, running: true) }
+        if result["status"] as? String == "async_launched", let id = result["agentId"] as? String {
+            return .background(id, running: true)
+        }
+        // Only a `TaskStop` result has this shape (14 of 14 in transcripts read on 2026-10-26).
+        if let id = result["task_id"] as? String, result["task_type"] is String {
+            return .background(id, running: false)
+        }
+        return nil
     }
 
     private static func userEntry(_ entry: [String: Any]) -> ClaudeTranscript {

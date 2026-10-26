@@ -327,6 +327,27 @@ final class LiveHarnessTests: XCTestCase {
         XCTAssertEqual(outcome, .succeeded, log)
     }
 
+    /// A turn that ends with a background task running does not end the run: Claude's next
+    /// turn, started by the task's notification, is part of it. Interactive mode needs
+    /// ROTA_INTERACTIVE_TEST_DIR, as above.
+    func testClaudeWaitsForItsBackgroundTasks() throws {
+        let prompt = "First call the Bash tool with the command `sleep 20; echo finished-bg` and run_in_background "
+            + "set to true. Once it returns, do not wait: end your turn with exactly STARTED. When you are "
+            + "notified that the command finished, reply with exactly DONE. Do not modify files."
+        var modes: [(LaunchMode, String?)] = [(.claudeStream, nil)]
+        if let directory = ProcessInfo.processInfo.environment["ROTA_INTERACTIVE_TEST_DIR"],
+           ClaudeUserSettings.read().trusts(directory) {
+            modes.append((.claudeInteractive, directory))
+        }
+        for (mode, directory) in modes {
+            let (outcome, log, _) = try run(.claude, prompt: prompt, message: nil, timeout: 180,
+                                            directory: directory, model: "haiku", mode: mode)
+            XCTAssertEqual(outcome, .succeeded, log)
+            let waiting = try XCTUnwrap(log.range(of: "Waiting for 1 background task"), log)
+            XCTAssertNotNil(log.range(of: "DONE", range: waiting.upperBound..<log.endIndex), log)
+        }
+    }
+
     func testClaudeCodexAndGrokReadAnAttachedFile() throws {
         let source = folder.appendingPathComponent("fixture.txt")
         for harness in [Harness.claude, .codex, .grok] {
