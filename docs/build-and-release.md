@@ -72,6 +72,12 @@ Rota without reading or quitting it.
 
 ## Verify a release
 
+Check an extracted release's launch outside the checkout as well as its signature.
+The CI command-line SwiftPM resource accessor differs from Xcode's local accessor:
+0.2.7 included the font bundle but crashed at launch because the accessor did not
+search `Contents/Resources`. Font registration resolves that packaged location
+explicitly. A local build or an archive listing alone does not verify this path.
+
 ```bash
 gh release download vX.Y.Z -R wiltodelta/rota -p "*.zip" -D /tmp/asset-check && \
   ditto -x -k /tmp/asset-check/*.zip /tmp/asset-check/app && \

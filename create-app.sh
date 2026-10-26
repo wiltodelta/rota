@@ -37,8 +37,8 @@ BIN_DIR="$(swift build -c release --arch arm64 --show-bin-path)"
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" "$APP_DIR/Contents/Frameworks"
 cp "$BIN_DIR/$BIN" "$APP_DIR/Contents/MacOS/$BIN"
-# SwiftPM's font resources, including their license notices. Bundle.module
-# locates this bundle beside the executable or in the app's resource directory.
+# SwiftPM's font resources, including their license notices. BundledFonts
+# resolves this bundle explicitly inside the app's resource directory.
 ditto "$BIN_DIR/Rota_Rota.bundle" "$APP_DIR/Contents/Resources/Rota_Rota.bundle"
 SDK_STAMP="$(vtool -show-build "$APP_DIR/Contents/MacOS/$BIN" | awk '/ sdk /{print $2}')"
 if ! [[ "$SDK_STAMP" =~ ^[0-9]+ ]] || (( ${SDK_STAMP%%.*} < 26 )); then

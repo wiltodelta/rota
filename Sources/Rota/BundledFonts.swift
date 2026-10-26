@@ -10,9 +10,21 @@ enum BundledFonts {
 
     static func register() { _ = registration }
 
+    static func resourceBundle(in application: Bundle = .main) -> Bundle? {
+        // SwiftPM's command-line build does not search Contents/Resources.
+        // Resolve packaged resources explicitly; use .module only for tests/CLI builds.
+        if application.bundleURL.pathExtension == "app" {
+            guard let url = application.resourceURL?.appendingPathComponent("Rota_Rota.bundle") else {
+                return nil
+            }
+            return Bundle(url: url)
+        }
+        return .module
+    }
+
     private static let registration: Void = {
         let log = Logger(subsystem: "com.wiltodelta.rota", category: "fonts")
-        guard let folder = Bundle.module.url(forResource: "Fonts", withExtension: nil),
+        guard let folder = resourceBundle()?.url(forResource: "Fonts", withExtension: nil),
               let files = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: nil) else {
             log.error("Bundled fonts are missing")
             return

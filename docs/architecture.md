@@ -570,7 +570,11 @@ font family, monospaced family and text scale in UserDefaults. Its font defaults
 IBM Plex Sans and JetBrains Mono. `BundledFonts` registers the bundled faces with
 Core Text at process scope before the settings resolve any fonts. SwiftPM copies
 `Resources/Fonts` into `Rota_Rota.bundle`; `create-app.sh` embeds that resource
-bundle, including the OFL notices, in the app. Explicit font preferences,
+bundle, including the OFL notices, in `Contents/Resources`. `BundledFonts`
+resolves it there explicitly for a packaged app and uses `Bundle.module` for
+tests and command-line builds. SwiftPM's command-line resource accessor does
+not search `Contents/Resources`; the Xcode build accessor does, which can mask
+a packaging defect during local testing. Explicit font preferences,
 including empty names selecting system fonts, keep their previous meaning.
 Font sources and update instructions are in `Sources/Rota/Resources/Fonts/README.md`.
 `chatTextScale` ranges from 0.7 to 2 and multiplies the interface scale. On first

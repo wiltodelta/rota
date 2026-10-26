@@ -5,6 +5,24 @@ import XCTest
 
 @MainActor
 final class ChatTextSettingsTests: XCTestCase {
+    func testPackagedFontsResolveInsideTheApplication() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let appURL = root.appendingPathComponent("Rota.app")
+        let resources = appURL.appendingPathComponent("Contents/Resources")
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        let info = ["CFBundleIdentifier": "example.rota-font-test", "CFBundlePackageType": "APPL"]
+        let data = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+        try data.write(to: appURL.appendingPathComponent("Contents/Info.plist"))
+        let source = try XCTUnwrap(BundledFonts.resourceBundle())
+        let packaged = resources.appendingPathComponent(source.bundleURL.lastPathComponent)
+        try FileManager.default.copyItem(at: source.bundleURL, to: packaged)
+        let application = try XCTUnwrap(Bundle(url: appURL))
+        let resolved = try XCTUnwrap(BundledFonts.resourceBundle(in: application))
+        XCTAssertEqual(resolved.bundleURL.standardizedFileURL, packaged.standardizedFileURL)
+        XCTAssertNotNil(resolved.url(forResource: "Fonts", withExtension: nil))
+    }
+
     func testBundledFontsRenderMarkdownWithRealBoldItalicAndCodeFaces() throws {
         let name = "rota-font-test-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
