@@ -587,8 +587,10 @@ H5–H6 regular. Prose and code blocks use native paragraph minimum line heights
 allowing a taller user-selected font to fit. SwiftUI message text, tables and
 the composer add matching line spacing. Paragraph gaps and list indents follow
 both scales; surrounding controls and container padding follow the interface
-scale. The two preferences persist independently, and View > Actual Size resets
-only the interface scale.
+scale. The two preferences persist independently, and View > Reset resets
+only the interface scale. View > Chat Zoom changes the chat multiplier in 5%
+steps within its existing bounds and resets it independently to 100%. Its
+Option-Command shortcuts leave the interface zoom unchanged.
 `InterfaceScaleSettings`
 stores one app-wide scale (80%, 90%, 100%, 110%, 125% or 150%). View menu zoom
 commands and Settings > General change that same value. AppKit inserts a separator
@@ -598,7 +600,7 @@ uses the action selector and preserves an existing separator after menu rebuilds
 This repair is incomplete in 0.1.15. A follow-up on 2026-10-18 reproduced a
 missing visible separator in the signed development bundle on macOS 27, in
 light appearance, after Zoom In (100% to 110%), Zoom Out (100% to 90%), Actual
-Size (125% to 100%), and entering or leaving Full Screen. Independent launches
+Size (now Reset, 125% to 100%), and entering or leaving Full Screen. Independent launches
 started with a visible separator before each zoom action. After the failure,
 the separator remained in the Accessibility tree, but its frame overlapped
 the Full Screen item: the gap below Actual Size fell from 11 pt to zero.

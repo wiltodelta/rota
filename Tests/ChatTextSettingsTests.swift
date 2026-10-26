@@ -119,6 +119,34 @@ final class ChatTextSettingsTests: XCTestCase {
         XCTAssertEqual(settings.appKitBody.pointSize, 16.8, accuracy: 0.001)
     }
 
+    func testChatZoomCommandsPersistClampAndLeaveInterfaceZoomAlone() throws {
+        let name = "rota-font-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let interface = InterfaceScaleSettings(defaults: defaults)
+        interface.factor = 1.5
+        let settings = ChatTextSettings(defaults: defaults, interfaceScale: interface)
+        settings.increase()
+        XCTAssertEqual(settings.scale, 1.05, accuracy: 0.00001)
+        XCTAssertEqual(ChatTextSettings(defaults: defaults).scale, 1.05, accuracy: 0.00001)
+        XCTAssertEqual(settings.appKitBody.pointSize, 22.05, accuracy: 0.001)
+        settings.decrease()
+        XCTAssertEqual(settings.scale, 1)
+        for _ in 0..<30 { settings.increase() }
+        XCTAssertEqual(settings.scale, 2)
+        XCTAssertFalse(settings.canIncrease)
+        XCTAssertTrue(settings.canDecrease)
+        for _ in 0..<30 { settings.decrease() }
+        XCTAssertEqual(settings.scale, 0.7)
+        XCTAssertFalse(settings.canDecrease)
+        XCTAssertTrue(settings.canIncrease)
+        settings.reset()
+        XCTAssertEqual(settings.scale, 1)
+        XCTAssertEqual(defaults.double(forKey: "chatTextScale"), 1)
+        XCTAssertEqual(interface.factor, 1.5)
+        XCTAssertEqual(settings.appKitBody.pointSize, 21)
+    }
+
     func testInvalidScalesCannotBreakTypographyAndLegacyBoundsRemainReadable() throws {
         let name = "rota-font-test-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))

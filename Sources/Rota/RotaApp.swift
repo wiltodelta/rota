@@ -41,8 +41,19 @@ struct RotaApp: App {
                 Button("Zoom Out") { AppModel.shared.interfaceScale.decrease() }
                     .disabled(!AppModel.shared.interfaceScale.canDecrease)
                     .keyboardShortcut("-")
-                Button("Actual Size") { AppModel.shared.interfaceScale.reset() }
+                Button("Reset") { AppModel.shared.interfaceScale.reset() }
                     .keyboardShortcut("0")
+                Divider()
+                Menu("Chat Zoom") {
+                    Button("Zoom In") { AppModel.shared.chatText.increase() }
+                        .disabled(!AppModel.shared.chatText.canIncrease)
+                        .keyboardShortcut("+", modifiers: [.command, .option])
+                    Button("Zoom Out") { AppModel.shared.chatText.decrease() }
+                        .disabled(!AppModel.shared.chatText.canDecrease)
+                        .keyboardShortcut("-", modifiers: [.command, .option])
+                    Button("Reset") { AppModel.shared.chatText.reset() }
+                        .keyboardShortcut("0", modifiers: [.command, .option])
+                }
                 Divider()
             }
             CommandGroup(replacing: .help) {

@@ -6,7 +6,7 @@ import XCTest
 final class MainMenuTests: XCTestCase {
     func testFullScreenHasOneSeparatorAfterMenuRebuilds() throws {
         let menu = NSMenu()
-        menu.addItem(withTitle: "Actual Size", action: nil, keyEquivalent: "0")
+        menu.addItem(withTitle: "Reset", action: nil, keyEquivalent: "0")
         let fullScreen = menu.addItem(withTitle: "Localized full screen",
                                       action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         XCTAssertEqual(menu.numberOfItems, 2)
@@ -30,7 +30,7 @@ final class MainMenuTests: XCTestCase {
         MainMenu.separateFullScreen(in: menu)
         XCTAssertEqual(menu.numberOfItems, 1)
         let other = NSMenu()
-        other.addItem(withTitle: "Actual Size", action: nil, keyEquivalent: "0")
+        other.addItem(withTitle: "Reset", action: nil, keyEquivalent: "0")
         MainMenu.separateFullScreen(in: other)
         XCTAssertEqual(other.numberOfItems, 1)
     }

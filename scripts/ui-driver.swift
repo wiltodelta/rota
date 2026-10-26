@@ -386,7 +386,10 @@ case "key":
         "return": (36, []), "option-return": (36, .maskAlternate),
         "shift-return": (36, .maskShift), "control-return": (36, .maskControl),
         "command-zero": (29, .maskCommand), "command-plus": (24, [.maskCommand, .maskShift]),
-        "command-minus": (27, .maskCommand), "command-w": (13, .maskCommand)
+        "command-minus": (27, .maskCommand), "command-w": (13, .maskCommand),
+        "option-command-plus": (24, [.maskCommand, .maskAlternate, .maskShift]),
+        "option-command-minus": (27, [.maskCommand, .maskAlternate]),
+        "option-command-zero": (29, [.maskCommand, .maskAlternate])
     ]
     guard arguments.count == 2, let (code, flags) = keys[arguments[1]] else { fail("unknown key") }
     app.activate()

@@ -53,6 +53,12 @@ final class ChatTextSettings {
         scale.isFinite ? min(max(scale, scales.lowerBound), scales.upperBound) : 1
     }
 
+    var canIncrease: Bool { scale < Self.scales.upperBound }
+    var canDecrease: Bool { scale > Self.scales.lowerBound }
+    func increase() { scale = (scale * 20 + 1).rounded() / 20 }
+    func decrease() { scale = (scale * 20 - 1).rounded() / 20 }
+    func reset() { scale = 1 }
+
     var body: Font { Font(appKitBody) }
     var code: Font { Font(appKitCode) }
     var small: Font { font(family, size: 11.5) }

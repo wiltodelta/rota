@@ -111,11 +111,14 @@
   you answer or dismiss the last request, even if unread sessions remain.
 - **Interface scale.** Settings > General scales app content from 80% to 150%.
   Rota uses bundled IBM Plex Sans for interface text.
-  View > Zoom In, Zoom Out and Actual Size (Command-Plus, Command-Minus,
+  View > Zoom In, Zoom Out and Reset (Command-Plus, Command-Minus,
   Command-0) adjust it immediately. Toolbar height, buttons, backgrounds, text
   and Settings tabs grow together. Text and icons render at their new size.
 - **Readable chat text.** Settings > Chat independently controls the chat's
   font, monospaced font for commands and output, and text scale (70% to 200%).
+  View > Chat Zoom offers Zoom In, Zoom Out and Reset (Option-Command-Plus,
+  Option-Command-Minus, Option-Command-0). Each step changes the chat scale by
+  five percentage points; Reset returns it to 100% without changing interface zoom.
   Text scale multiplies the interface scale: 110% interface and 120% text make
   chat text 132% of its base size. Headings, code, line heights and paragraph
   spacing grow together. At 100% for both scales, body text is 14 pt with a
