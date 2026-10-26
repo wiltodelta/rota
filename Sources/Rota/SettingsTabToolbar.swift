@@ -144,7 +144,7 @@ final class SettingsTabItemView: NSView {
 
     func update(factor: CGFloat, selected: Bool) {
         self.factor = factor
-        caption.font = .systemFont(ofSize: 13 * factor)
+        caption.font = InterfaceTypography.font(size: 13 * factor)
         imageView.image = symbol?.withSymbolConfiguration(.init(pointSize: 24 * factor, weight: .regular))
         let color = selected ? NSColor.labelColor : .labelColor.withAlphaComponent(0.66)
         caption.textColor = color
@@ -175,7 +175,7 @@ final class SettingsTabItemView: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        let font = caption.font ?? NSFont.systemFont(ofSize: 13)
+        let font = caption.font ?? InterfaceTypography.font(size: 13 * factor)
         let label = (caption.stringValue as NSString).size(withAttributes: [.font: font])
         return NSSize(width: max(label.width, 32 * factor) + 16 * factor,
                       height: 68 * factor)

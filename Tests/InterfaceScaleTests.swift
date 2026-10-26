@@ -17,10 +17,10 @@ final class InterfaceScaleTests: XCTestCase {
         scale.increase()
         scale.increase()
         XCTAssertEqual(scale.factor, 1.25)
-        XCTAssertEqual(chat.effectiveSize(chat.size), 22.5)
+        XCTAssertEqual(chat.appKitBody.pointSize, 22.5)
         XCTAssertEqual(InterfaceScaleSettings(defaults: defaults).factor, 1.25)
         scale.reset()
-        XCTAssertEqual(chat.effectiveSize(chat.size), 18)
+        XCTAssertEqual(chat.appKitBody.pointSize, 18)
         XCTAssertEqual(chat.family, "Fixture Font")
         XCTAssertEqual(defaults.double(forKey: "chatFontSize"), 18)
         XCTAssertEqual(InterfaceScaleSettings(defaults: defaults).factor, 1)
@@ -62,11 +62,43 @@ final class InterfaceScaleTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
         let button = try XCTUnwrap(popup(in: host))
         XCTAssertEqual(try XCTUnwrap(button.font).pointSize, NSFont.systemFontSize * 1.5)
+        XCTAssertEqual(button.font?.familyName, "IBM Plex Sans")
         XCTAssertTrue(button.item(at: 1)?.isSeparatorItem == true)
         button.selectItem(at: 2)
         XCTAssertEqual(button.indexOfSelectedItem, 2, "The fixture must actually select the non-default item")
         XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(button.action), to: button.target, from: button))
         XCTAssertEqual(selected, "model-2")
+    }
+
+    func testNativeTextInputInheritsTheInterfaceFaceAndKeepsMonospacedEditors() throws {
+        _ = NSApplication.shared
+        let name = "rota-scale-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let scale = InterfaceScaleSettings(defaults: defaults)
+        scale.factor = 1.25
+        let host = NSHostingView(rootView: VStack {
+            TextField("Name", text: .constant("Editable text"))
+            TextEditor(text: .constant("let value = 1"))
+                .interfaceFont(.body).monospaced()
+        }.interfaceScale(scale).frame(width: 520, height: 200))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 200),
+                              styleMask: [], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        func descendants(_ view: NSView) -> [NSView] {
+            [view] + view.subviews.flatMap(descendants)
+        }
+        let views = descendants(host)
+        let field = try XCTUnwrap(views.compactMap { $0 as? NSTextField }
+            .first { $0.stringValue == "Editable text" })
+        XCTAssertEqual(field.font?.familyName, "IBM Plex Sans")
+        XCTAssertEqual(try XCTUnwrap(field.font).pointSize, NSFont.systemFontSize * 1.25, accuracy: 0.01)
+        let editor = try XCTUnwrap(views.compactMap { $0 as? NSTextView }
+            .first { $0.string == "let value = 1" })
+        XCTAssertTrue(try XCTUnwrap(editor.font).isFixedPitch)
     }
 
     func testChangingScaleUpdatesAnExistingHostedControl() async throws {

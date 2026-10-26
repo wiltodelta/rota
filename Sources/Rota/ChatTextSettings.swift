@@ -2,12 +2,15 @@ import AppKit
 import SwiftUI
 
 /// The chat's text: one family for messages, a monospaced one for commands and
-/// output, and one base size both follow, multiplied by the app-wide scale.
+/// output, and one text scale, multiplied by the app-wide interface scale.
 @MainActor
 @Observable
 final class ChatTextSettings {
-    static let sizes: ClosedRange<Double> = 10...28
-    static let defaultSize: Double = 14
+    static let scales: ClosedRange<Double> = 0.7...2
+    static let baseSize: Double = 14
+    static let defaultFamily = BundledFonts.interfaceFamily
+    static let defaultCodeFamily = BundledFonts.monospacedFamily
+    private static let fontMetrics = NSLayoutManager()
 
     private let defaults: UserDefaults
     private let interfaceScale: InterfaceScaleSettings?
@@ -22,40 +25,62 @@ final class ChatTextSettings {
         didSet { defaults.set(codeFamily, forKey: "chatCodeFontFamily") }
     }
 
-    var size: Double {
+    var scale: Double {
         didSet {
-            let clamped = min(max(size, Self.sizes.lowerBound), Self.sizes.upperBound)
-            if clamped != size { size = clamped }
-            defaults.set(size, forKey: "chatFontSize")
+            let normalized = Self.normalized(scale)
+            if normalized != scale { scale = normalized }
+            defaults.set(scale, forKey: "chatTextScale")
         }
     }
 
     init(defaults: UserDefaults = .standard, interfaceScale: InterfaceScaleSettings? = nil) {
+        BundledFonts.register()
         self.interfaceScale = interfaceScale
         self.defaults = defaults
-        family = defaults.string(forKey: "chatFontFamily") ?? ""
-        codeFamily = defaults.string(forKey: "chatCodeFontFamily") ?? ""
-        let stored = defaults.double(forKey: "chatFontSize")
-        size = stored == 0 ? Self.defaultSize : min(max(stored, Self.sizes.lowerBound), Self.sizes.upperBound)
+        family = defaults.string(forKey: "chatFontFamily") ?? Self.defaultFamily
+        codeFamily = defaults.string(forKey: "chatCodeFontFamily") ?? Self.defaultCodeFamily
+        if defaults.object(forKey: "chatTextScale") != nil {
+            scale = Self.normalized(defaults.double(forKey: "chatTextScale"))
+        } else {
+            let stored = defaults.double(forKey: "chatFontSize")
+            let legacySize = stored.isFinite && stored > 0 ? min(max(stored, 10), 28) : Self.baseSize
+            scale = legacySize / Self.baseSize
+            defaults.set(scale, forKey: "chatTextScale")
+        }
     }
 
-    var body: Font { font(family, size: size) }
-    var code: Font { codeFont(size: size * 0.9) }
-    var small: Font { font(family, size: size * 0.82) }
+    private static func normalized(_ scale: Double) -> Double {
+        scale.isFinite ? min(max(scale, scales.lowerBound), scales.upperBound) : 1
+    }
 
-    /// A heading's size steps down from 1.35 times the body for `#` to the body size.
+    var body: Font { Font(appKitBody) }
+    var code: Font { Font(appKitCode) }
+    var small: Font { font(family, size: 11.5) }
+    var smallCode: Font { codeFont(size: 11.5) }
+
+    var bodyLineHeight: Double { effectiveSize(22) }
+    var codeLineHeight: Double { effectiveSize(20) }
+    var bodyLineSpacing: Double { max(0, bodyLineHeight - Self.fontMetrics.defaultLineHeight(for: appKitBody)) }
+
     func heading(level: Int) -> Font {
-        font(family, size: size * Self.headingScale(level)).weight(.semibold)
+        Font(appKitHeading(level: level))
     }
 
-    private static func headingScale(_ level: Int) -> Double {
-        [1.35, 1.2, 1.1, 1.0, 1.0, 1.0][min(max(level, 1), 6) - 1]
+    func headingLineHeight(level: Int) -> Double {
+        effectiveSize(Self.headingMetrics(level).lineHeight)
     }
-    var smallCode: Font { codeFont(size: size * 0.82) }
 
-    /// Clamp the base size before zooming; zoom must not overwrite the user's preference.
+    func headingLineSpacing(level: Int) -> Double {
+        max(0, headingLineHeight(level: level) - Self.fontMetrics.defaultLineHeight(for: appKitHeading(level: level)))
+    }
+
+    private static func headingMetrics(_ level: Int) -> (size: Double, lineHeight: Double) {
+        [(19, 27), (17, 25), (14.5, 22), (14, 22), (13.5, 21), (13.5, 21)][min(max(level, 1), 6) - 1]
+    }
+
+    /// Both zooms apply to typography, without changing either saved preference.
     func effectiveSize(_ size: Double) -> Double {
-        max(Self.sizes.lowerBound, size) * (interfaceScale?.factor ?? 1)
+        size * scale * (interfaceScale?.factor ?? 1)
     }
 
     private func font(_ family: String, size: Double) -> Font {
@@ -69,19 +94,20 @@ final class ChatTextSettings {
     }
 
     /// `body` and `heading(level:)` as AppKit fonts, for the selectable prose view.
-    var appKitBody: NSFont { appKitFont(size: size, bold: false) }
+    var appKitBody: NSFont { appKitFont(size: Self.baseSize, semibold: false) }
+    var appKitCode: NSFont { appKitCode(like: .systemFont(ofSize: effectiveSize(12.5))) }
 
     func appKitHeading(level: Int) -> NSFont {
-        appKitFont(size: size * Self.headingScale(level), bold: true)
+        appKitFont(size: Self.headingMetrics(level).size, semibold: level <= 4)
     }
 
-    private func appKitFont(size: Double, bold: Bool) -> NSFont {
+    private func appKitFont(size: Double, semibold: Bool) -> NSFont {
         let size = effectiveSize(size)
-        if !family.isEmpty, let font = NSFontManager.shared.font(withFamily: family, traits: bold ? .boldFontMask : [],
-                                                                 weight: bold ? 9 : 5, size: size) {
+        if !family.isEmpty, let font = NSFontManager.shared.font(withFamily: family, traits: [],
+                                                                 weight: semibold ? 8 : 5, size: size) {
             return font
         }
-        return .systemFont(ofSize: size, weight: bold ? .semibold : .regular)
+        return .systemFont(ofSize: size, weight: semibold ? .semibold : .regular)
     }
 
     /// A code span in running text: the code family at the surrounding size.

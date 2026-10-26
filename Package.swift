@@ -28,6 +28,7 @@ let package = Package(
             name: "Rota",
             dependencies: ["RotaCore", .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/Rota",
+            resources: [.copy("Resources/Fonts")],
             // Swift Build records the deployment target as the SDK version in
             // LC_BUILD_VERSION, and macOS then runs the app in its pre-Tahoe
             // compatibility look. Stamp a macOS 26 SDK version instead.

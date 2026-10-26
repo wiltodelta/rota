@@ -73,7 +73,7 @@ struct GeneralSettings: View {
     }
 }
 
-/// The Chat tab: the chat's fonts and size.
+/// The Chat tab: the chat's fonts and text scale.
 struct ChatSettings: View {
     var body: some View {
         Form { ChatTextSection() }.settingsPane()
@@ -386,7 +386,7 @@ private struct StatusLabelStyle: LabelStyle {
     }
 }
 
-/// Font, monospaced font and size of the chat, with a sample in them.
+/// Font families and the chat's own scale, with a sample in them.
 private struct ChatTextSection: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
@@ -401,24 +401,28 @@ private struct ChatTextSection: View {
             InterfacePicker(title: "Code font", selection: $text.codeFamily,
                             choices: fontChoices(monospaced, selected: text.codeFamily,
                                                  defaultTitle: "System monospaced"))
-            LabeledContent("Size") {
+            LabeledContent("Text scale") {
                 HStack {
-                    Slider(value: $text.size, in: ChatTextSettings.sizes, step: 1)
-                        .accessibilityIdentifier("chatTextSize")
-                    Text("\(Int(text.size)) pt")
+                    Slider(value: $text.scale, in: ChatTextSettings.scales, step: 0.05)
+                        .accessibilityIdentifier("chatTextScale")
+                    Text(text.scale.formatted(.percent.precision(.fractionLength(0))))
                         .monospacedDigit()
                         .foregroundStyle(Color.secondaryText)
                         .frame(width: metrics.points(44), alignment: .trailing)
-                        .accessibilityIdentifier("chatTextSizeValue")
+                        .accessibilityIdentifier("chatTextScaleValue")
                 }
             }
             .labeledContentStyle(InterfaceFormRowStyle())
             VStack(alignment: .leading, spacing: metrics.points(6)) {
                 Text("Clicks are down 8% week over week.").font(text.body)
+                    .lineSpacing(text.bodyLineSpacing)
                 Text("$ git log --oneline -5").font(text.code).foregroundStyle(Color.secondaryText)
             }
             .padding(.vertical, metrics.points(4))
             .accessibilityLabel("Sample")
+            Text("Text scale multiplies the interface scale. 100% uses the default chat sizes.")
+                .interfaceFont(.caption)
+                .foregroundStyle(Color.secondaryText)
         }
         .task {
             families = ChatTextSettings.families

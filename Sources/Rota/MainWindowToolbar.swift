@@ -20,7 +20,7 @@ struct MainWindowToolbar: View {
             .help("\(sidebarWidth > 0 ? "Hide" : "Show") the sidebar (Control-Command-S)")
             .accessibilityIdentifier("toggleSidebar")
             Text(title)
-                .font(.system(size: metrics.points(15), weight: .semibold))
+                .font(Font(InterfaceTypography.font(size: metrics.points(15), semibold: true)))
                 .lineLimit(1).truncationMode(.tail)
                 .accessibilityIdentifier("mainWindowTitle")
                 .help(title)

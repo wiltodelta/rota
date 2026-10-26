@@ -566,7 +566,26 @@ At narrow widths the session header moves its utility actions onto a second row,
 keeping the labeled navigation action visible. Utility actions use accessible
 icons with help text when their full titles no longer fit. The routine header
 also moves its actions onto a second row instead of truncating their labels. `ChatTextSettings` holds the chat's
-font family, monospaced family and base size in UserDefaults. `InterfaceScaleSettings`
+font family, monospaced family and text scale in UserDefaults. Its font defaults are
+IBM Plex Sans and JetBrains Mono. `BundledFonts` registers the bundled faces with
+Core Text at process scope before the settings resolve any fonts. SwiftPM copies
+`Resources/Fonts` into `Rota_Rota.bundle`; `create-app.sh` embeds that resource
+bundle, including the OFL notices, in the app. Explicit font preferences,
+including empty names selecting system fonts, keep their previous meaning.
+Font sources and update instructions are in `Sources/Rota/Resources/Fonts/README.md`.
+`chatTextScale` ranges from 0.7 to 2 and multiplies the interface scale. On first
+load without that key, the legacy `chatFontSize` (clamped to its previous
+10–28 pt range) is divided by the 14 pt body base and saved without rounding.
+The old key is retained but is no longer read after migration. Body text uses
+14/22 pt (font/line height), code blocks 12.5/20 pt; headings H1–H6 use
+19/27, 17/25, 14.5/22, 14/22, 13.5/21 and 13.5/21 pt. H1–H4 use semibold,
+H5–H6 regular. Prose and code blocks use native paragraph minimum line heights,
+allowing a taller user-selected font to fit. SwiftUI message text, tables and
+the composer add matching line spacing. Paragraph gaps and list indents follow
+both scales; surrounding controls and container padding follow the interface
+scale. The two preferences persist independently, and View > Actual Size resets
+only the interface scale.
+`InterfaceScaleSettings`
 stores one app-wide scale (80%, 90%, 100%, 110%, 125% or 150%). View menu zoom
 commands and Settings > General change that same value. AppKit inserts a separator
 before the native `toggleFullScreen:` action after AppKit menu changes finish,
@@ -591,8 +610,14 @@ the rendered separator, item geometry and continued presence of Full Screen.
 The native menu lifecycle cause and a repair remain open. Dark appearance was
 not checked while the light-appearance reproduction remained broken.
 `InterfaceScale` in the
-SwiftUI environment scales layout dimensions; semantic font modifiers resolve
-system fonts at their final size. `InterfacePicker` uses an `NSPopUpButton` with
+SwiftUI environment scales layout dimensions. `InterfaceTypography` resolves
+bundled IBM Plex Sans at the system's semantic text sizes, including semibold
+headlines. The inherited SwiftUI font, explicit text styles, main-window title,
+native popup values and Settings tab captions share that family. Registration
+through `BundledFonts` also works when a native control is created before the
+chat settings. SF Symbols and system-owned menus retain their system fonts;
+the routine's prompt and schedule editors retain their monospaced design.
+`InterfacePicker` uses an `NSPopUpButton` with
 an explicit final font, because SwiftUI's macOS Picker retains its default title
 font even when the surrounding environment font changes. Popup values align
 right beside their arrows; the native intrinsic width includes the longest menu
@@ -600,7 +625,7 @@ item, so default alignment leaves short values far from the arrow. Control rows
 in Settings and routine forms use `InterfaceFormRowStyle` to center their labels;
 pickers apply it themselves too. The default grouped form places labels above
 popup values and, at larger control sizes, above buttons and switches.
-The Chat size row uses it for the slider and its formatted value as well.
+The Chat text-scale row uses it for the slider and its formatted value as well.
 `InterfaceFormToggleStyle` keeps the native switch in that same centered row.
 Its explicit accessibility press action forwards to the toggle binding: the
 custom row otherwise keeps the checkbox role and value but exposes no action.
@@ -612,8 +637,8 @@ Multi-line labels stay in an explicit leading-aligned stack so the whole label
 block, rather than its first line, aligns with the control.
 Native button labels
 also receive an explicit scaled font. Menu items keep the system font.
-Chat fonts multiply their base size by the same
-observable scale without rewriting chat preferences. No layer, bitmap or view
+Chat typography multiplies its base dimensions by both the chat text scale and
+the same observable interface scale without rewriting either preference. No layer, bitmap or view
 transform enlarges an already rendered interface. Every hosted root, including
 Settings and the menu bar panel, receives the scale; sheets inherit it. Detail
 views can shrink below their old 520 pt minimum, sheets cap their width at 780 pt,

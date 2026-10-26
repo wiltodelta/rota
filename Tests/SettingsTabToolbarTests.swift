@@ -38,6 +38,7 @@ final class SettingsTabToolbarTests: XCTestCase {
             XCTAssertEqual(toolbar.displayMode, .iconOnly)
             let tab = try XCTUnwrap(toolbar.items.compactMap { $0.view as? SettingsTabItemView }.first)
             XCTAssertEqual(tab.caption.font?.pointSize ?? 0, 13 * factor, accuracy: 0.01)
+            XCTAssertEqual(tab.caption.font?.familyName, "IBM Plex Sans")
             XCTAssertEqual(tab.frame.height, 68 * factor, accuracy: 0.5)
             XCTAssertEqual(tab.button.frame.height, tab.frame.height, accuracy: 0.5)
             let views = toolbar.items.compactMap { $0.view as? SettingsTabItemView }

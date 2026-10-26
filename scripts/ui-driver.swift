@@ -5,7 +5,7 @@
 //   tree [depth]                 print roles, titles and identifiers of the windows
 //   menu <title>                invoke an app menu item by its title
 //   press <id-or-title>          press the first button with that identifier or title
-//   set <id> <text>              set a text field's value
+//   set <id> <value>             set a text field or numeric slider value
 //   value <id>                   print an element's value
 //   enabled <id>                 print whether a control is enabled
 //   visible <id-or-title>       require full visibility inside the window and scroll viewport
@@ -20,7 +20,7 @@
 //   focus <id>                   activate Rota and focus that element
 //   reveal <id-or-title>         scroll the nearest enclosing area to that element
 //   aligned <label> <control>    check that their vertical frame centers agree
-//   key <key>                   post Return or a zoom shortcut to Rota's process
+//   key <key>                   post Return, a zoom shortcut or Command-W to Rota's process
 //   scroll-wheel <window-or-content> <delta> <pixel|line>  send real scroll input over that viewport
 //   confirm-iterm <text>         answer iTerm2's "OK to run" for a script path containing text
 //   gate                         list elements whose frame leaves their window or their parent
@@ -121,10 +121,17 @@ case "press":
     let result = AXUIElementPerformAction(button, kAXPressAction as CFString)
     guard result == .success else { fail("press failed: \(result.rawValue)") }
 case "set":
-    guard arguments.count == 3 else { fail("set <id> <text>") }
+    guard arguments.count == 3 else { fail("set <id> <value>") }
     guard let field = find({ matches($0, arguments[1]) }) else { fail("no element \(arguments[1])") }
     AXUIElementSetAttributeValue(field, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-    let result = AXUIElementSetAttributeValue(field, kAXValueAttribute as CFString, arguments[2] as CFString)
+    let value: CFTypeRef
+    if (attribute(field, kAXRoleAttribute) as String?) == "AXSlider" {
+        guard let number = Double(arguments[2]) else { fail("slider value must be numeric") }
+        value = NSNumber(value: number)
+    } else {
+        value = arguments[2] as CFString
+    }
+    let result = AXUIElementSetAttributeValue(field, kAXValueAttribute as CFString, value)
     guard result == .success else { fail("set failed: \(result.rawValue)") }
 case "value":
     guard arguments.count == 2, let element = find({ matches($0, arguments[1]) }) else { fail("no element") }
@@ -379,7 +386,7 @@ case "key":
         "return": (36, []), "option-return": (36, .maskAlternate),
         "shift-return": (36, .maskShift), "control-return": (36, .maskControl),
         "command-zero": (29, .maskCommand), "command-plus": (24, [.maskCommand, .maskShift]),
-        "command-minus": (27, .maskCommand)
+        "command-minus": (27, .maskCommand), "command-w": (13, .maskCommand)
     ]
     guard arguments.count == 2, let (code, flags) = keys[arguments[1]] else { fail("unknown key") }
     app.activate()

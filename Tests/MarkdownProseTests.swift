@@ -39,7 +39,7 @@ final class MarkdownProseTests: XCTestCase {
             - item
               - nested
             """)
-        let text = MarkdownProse.attributed(blocks, text: settings, metrics: InterfaceScale())
+        let text = MarkdownProse.attributed(blocks, text: settings)
         XCTAssertEqual(text.string, "Title\nOne bold and link code\u{2028}continued.\n•\titem\n•\tnested")
 
         let bold = (text.string as NSString).range(of: "bold")

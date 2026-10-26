@@ -161,7 +161,7 @@ trust. Supported questions and explicit plan confirmations that reach Rota
 wait for your answer. The [execution policy](docs/user-guide.md#usage)
 describes each harness's configuration.
 
-Settings controls the terminal app, interface scale, chat fonts, and
+Settings controls the terminal app, interface scale, chat typography, and
 notifications. [Sparkle](https://sparkle-project.org) checks for updates
 daily; installation happens when you choose. **Check for Updates…** checks
 immediately.

@@ -115,7 +115,7 @@ private struct InterfacePopUp<Selection: Hashable>: NSViewRepresentable {
         }
         button.isEnabled = enabled
         let controlSize: NSControl.ControlSize = metrics.factor >= 1.25 ? .large : .regular
-        let font = NSFont.systemFont(ofSize: metrics.points(NSFont.systemFontSize))
+        let font = InterfaceTypography.font(size: metrics.points(NSFont.systemFontSize))
         let sizeChanged = button.controlSize != controlSize || button.font != font
         if button.controlSize != controlSize { button.controlSize = controlSize }
         if button.font != font { button.font = font }
@@ -141,7 +141,7 @@ private struct InterfacePopUp<Selection: Hashable>: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSPopUpButton, context: Context) -> CGSize? {
-        let font = nsView.font ?? .systemFont(ofSize: NSFont.systemFontSize)
+        let font = nsView.font ?? InterfaceTypography.font(size: metrics.points(NSFont.systemFontSize))
         let width = (nsView.title as NSString).size(withAttributes: [.font: font]).width + metrics.points(34)
         let fittingWidth = fitsSelectedTitle ? width.rounded(.up)
             : max(width.rounded(.up), nsView.intrinsicContentSize.width)

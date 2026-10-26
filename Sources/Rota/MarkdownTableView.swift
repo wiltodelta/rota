@@ -37,7 +37,7 @@ struct MarkdownTableView: View {
             for column in row.indices { lengths[column] = max(lengths[column], row[column].characters.count) }
         }
         return Self.columnWidths(contentLengths: lengths, availableWidth: availableWidth,
-                                 fontSize: text.effectiveSize(text.size), padding: metrics.points(20))
+                                 fontSize: text.effectiveSize(ChatTextSettings.baseSize), padding: metrics.points(20))
     }
 
     static func columnWidths(contentLengths: [Int], availableWidth: CGFloat,
@@ -68,6 +68,7 @@ struct MarkdownTableView: View {
                 let alignment = alignment(table.alignments[column])
                 Text(cells[column])
                     .font(header ? text.body.weight(.semibold) : text.body)
+                    .lineSpacing(text.bodyLineSpacing)
                     .multilineTextAlignment(alignment.text)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, metrics.points(10))

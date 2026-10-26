@@ -339,6 +339,7 @@ private struct UserBubble: View {
                 if !message.attachments.isEmpty { AttachmentChips(attachments: message.attachments) }
             }
                 .font(model.chatText.body)
+                .lineSpacing(model.chatText.bodyLineSpacing)
                 .padding(.horizontal, metrics.points(14))
                 .padding(.vertical, metrics.points(9))
                 .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: metrics.points(16)))

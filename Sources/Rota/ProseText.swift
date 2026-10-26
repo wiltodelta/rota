@@ -92,10 +92,9 @@ enum MarkdownProse {
         }
     }
 
-    /// Spacing and indents are the ones the stack of views used before.
-    static func attributed(_ blocks: [MarkdownBlock], text: ChatTextSettings,
-                           metrics: InterfaceScale) -> NSAttributedString {
-        let spacing = metrics.points(6)
+    /// Paragraphs and list indents follow the same two zooms as the text.
+    static func attributed(_ blocks: [MarkdownBlock], text: ChatTextSettings) -> NSAttributedString {
+        let spacing = text.effectiveSize(6)
         let result = NSMutableAttributedString()
         for (index, block) in blocks.enumerated() {
             let style = NSMutableParagraphStyle()
@@ -103,10 +102,11 @@ enum MarkdownProse {
             switch block {
             case .heading(let level, let content):
                 paragraph = inline(content, text: text, font: text.appKitHeading(level: level))
-                style.paragraphSpacingBefore = spacing + metrics.points(4)
+                style.minimumLineHeight = text.headingLineHeight(level: level)
+                style.paragraphSpacingBefore = spacing + text.effectiveSize(4)
             case .listItem(let marker, let content, let level):
                 let font = text.appKitBody
-                let start = CGFloat(level) * 16
+                let start = CGFloat(level) * text.effectiveSize(16)
                 // The marker's own width plus the gap the row's stack had, so wrapped lines hang under the text.
                 let textStart = start + (marker as NSString).size(withAttributes: [.font: font]).width + spacing
                 style.firstLineHeadIndent = start
@@ -131,9 +131,18 @@ enum MarkdownProse {
             }
             let range = NSRange(location: result.length, length: paragraph.length)
             result.append(paragraph)
+            if style.minimumLineHeight == 0 { style.minimumLineHeight = text.bodyLineHeight }
             result.addAttribute(.paragraphStyle, value: style, range: range)
         }
         return result
+    }
+
+    static func code(_ source: String, text: ChatTextSettings) -> NSAttributedString {
+        let style = NSMutableParagraphStyle()
+        style.minimumLineHeight = text.codeLineHeight
+        return NSAttributedString(string: source, attributes: [
+            .font: text.appKitCode, .foregroundColor: NSColor.labelColor, .paragraphStyle: style,
+        ])
     }
 
     /// Inline Markdown in AppKit attributes: emphasis, code spans, strikethrough and links.

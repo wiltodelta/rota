@@ -114,6 +114,7 @@ struct ChatComposer: View {
             }
             TextField(placeholder, text: input, axis: .vertical)
                 .font(model.chatText.body)
+                .lineSpacing(model.chatText.bodyLineSpacing)
                 .lineLimit(2...8)
                 .textFieldStyle(.plain)
                 .focused($focused)

@@ -637,8 +637,8 @@ PYTHON
     for tab in General Chat Agents; do
         [[ "$tab" == General ]] || { "$DRIVER" press "$tab"; sleep 2; }
         if [[ "$tab" == Chat ]]; then
-            check "$DRIVER" aligned Size chatTextSize
-            check "$DRIVER" aligned Size chatTextSizeValue
+            check "$DRIVER" aligned 'Text scale' chatTextScale
+            check "$DRIVER" aligned 'Text scale' chatTextScaleValue
         fi
         if [[ "$tab" == General ]]; then
             "$DRIVER" scroll-wheel General -3000 pixel

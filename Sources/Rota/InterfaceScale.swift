@@ -78,9 +78,20 @@ private struct InterfaceScaleModifier: ViewModifier {
     func body(content: Content) -> some View {
         let scale = InterfaceScale(factor: settings.factor)
         content.environment(\.interfaceScale, scale)
-            .font(.system(size: scale.points(NSFont.systemFontSize)))
+            .font(Font(InterfaceTypography.font(size: scale.points(NSFont.systemFontSize))))
             .environment(\.defaultMinListRowHeight, scale.points(22))
             .controlSize(scale.controlSize)
+    }
+}
+
+/// The bundled interface face at native text-style sizes. Chat has its own preferences.
+@MainActor
+enum InterfaceTypography {
+    static func font(size: CGFloat, semibold: Bool = false) -> NSFont {
+        BundledFonts.register()
+        return NSFontManager.shared.font(withFamily: BundledFonts.interfaceFamily, traits: [],
+                                         weight: semibold ? 8 : 5, size: size)
+            ?? .systemFont(ofSize: size, weight: semibold ? .semibold : .regular)
     }
 }
 
@@ -104,8 +115,9 @@ private struct InterfaceFontModifier: ViewModifier {
     let style: InterfaceTextStyle
 
     func body(content: Content) -> some View {
-        content.font(.system(size: scale.points(NSFont.preferredFont(forTextStyle: style.native).pointSize),
-                             weight: style == .headline ? .semibold : .regular))
+        content.font(Font(InterfaceTypography.font(
+            size: scale.points(NSFont.preferredFont(forTextStyle: style.native).pointSize),
+            semibold: style == .headline)))
     }
 }
 
