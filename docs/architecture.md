@@ -630,6 +630,8 @@ The Chat text-scale row uses it for the slider and its formatted value as well.
 Its label aligns the center between the first and last text baselines, adjusted
 by the interface font's cap height, with the switch. This centers visible text
 rather than its line box, including labels that wrap.
+Raster alignment tests include antialiased glyph edges when measuring text
+bounds; a strong-ink-only threshold can discard rows in small 1x text.
 Its explicit accessibility press action forwards to the toggle binding: the
 custom row otherwise keeps the checkbox role and value but exposes no action.
 The UI check enables and disables the routine's time limit to verify that action
