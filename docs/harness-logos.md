@@ -16,9 +16,11 @@ session marks use the run's harness snapshot. Chat and composer marks retain
 their 14 pt size.
 Metadata marks use the primary text color, including the native selection
 color. The chat keeps Claude's orange; small list marks stay monochrome for
-contrast on gray sidebar and panel backgrounds. Selected sidebar text uses a
-contrasting black or white foreground from `SidebarText`; selected monochrome
-harness marks use that foreground too.
+contrast on gray sidebar and panel backgrounds. While the sidebar holds focus
+in the active window, selected text uses a contrasting black or white foreground
+from `SidebarText`; selected monochrome harness marks use that foreground too.
+When focus leaves the list, titles and marks return to the primary text color
+and captions to the secondary color on the gray selection.
 
 `RunActivityIndicator` rotates an asymmetric 8 pt arc once every 1.2 seconds
 using `TimelineView`, matching the composer's stop ring. The open arc makes

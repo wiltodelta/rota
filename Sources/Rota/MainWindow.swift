@@ -166,6 +166,7 @@ private struct MainSidebar: View {
     @Environment(\.appearsActive) private var appearsActive
     @Environment(AppModel.self) private var model
     @AppStorage("routinesExpanded") private var routinesExpanded = true
+    @FocusState private var sidebarFocused: Bool
 
     let records: [RunRecord]
 
@@ -175,7 +176,7 @@ private struct MainSidebar: View {
             Section(isExpanded: $routinesExpanded) {
                 ForEach(RoutineOrder.byNextRun(model.scheduler.routines)) { routine in
                     RoutineRow(routine: routine,
-                               onAccent: appearsActive && model.selection == .routine(routine.id))
+                               onAccent: appearsActive && sidebarFocused && model.selection == .routine(routine.id))
                         .interfaceFont(.body)
                         .tag(SidebarItem.routine(routine.id))
                 }
@@ -192,7 +193,7 @@ private struct MainSidebar: View {
                         .selectionDisabled()
                     ForEach(group.records) { record in
                         SessionRow(record: record,
-                                   onAccent: appearsActive && model.selection == .session(record.id))
+                                   onAccent: appearsActive && sidebarFocused && model.selection == .session(record.id))
                             .interfaceFont(.body).tag(SidebarItem.session(record.id))
                     }
                 }
@@ -203,6 +204,7 @@ private struct MainSidebar: View {
             }
         }
         .accessibilityIdentifier("routineSidebar")
+        .focused($sidebarFocused)
     }
 }
 
@@ -211,7 +213,7 @@ private struct RoutineRow: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let routine: Routine
-    /// Selected in the active window; passed in, so only the rows whose value flips redraw.
+    /// Selected in the focused list; passed in, so only the rows whose value flips redraw.
     let onAccent: Bool
 
     var body: some View {
@@ -304,7 +306,7 @@ private struct SessionRow: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
-    /// Selected in the active window, as for `RoutineRow`.
+    /// Selected in the focused list, as for `RoutineRow`.
     let onAccent: Bool
     @State private var snapshot: TranscriptSnapshot?
     @State private var reader = TranscriptSessionReader()

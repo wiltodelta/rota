@@ -835,8 +835,12 @@ Layout rules learned while measuring the narrowest window (820 pt):
 - Sidebar routine rows share the menu panel's `NextRunFormat.subtitle`: agent and next run, running, or paused. The caption wraps to two lines in the narrow column and refreshes every 30 seconds.
 - Sidebar titles carry an explicit primary color and captions `secondaryText`: in an
   inactive window SwiftUI dims an unstyled title to about 3:1, below its caption.
-  Selected titles and captions use `SidebarText` to choose black or white for
-  the better contrast against the native fill. On macOS 27 the control accent
+  While the list holds keyboard focus in the active window, selected titles and
+  captions use `SidebarText` to choose black or white for the better contrast
+  against the native fill. Moving focus to the composer restores primary and
+  secondary text colors against the gray selection. Window activity alone does
+  not track this transition; the list observes it through `@FocusState`.
+  On macOS 27 the control accent
   determines the foreground in both appearances; older systems use the selected
   content background color. Monochrome harness marks, attention symbols and
   selected-dot outlines share that foreground; the native highlight is unchanged. `backgroundProminence` did not report that fill. Section headers
