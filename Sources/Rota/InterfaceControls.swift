@@ -70,6 +70,8 @@ struct InterfaceFormToggleStyle: ToggleStyle {
             Toggle(configuration)
                 .labelsHidden()
                 .toggleStyle(.switch)
+                // Native switch geometry must not inherit the visible label's custom font metrics.
+                .font(.body)
                 // The custom row retains the checkbox role but loses the inferred press action.
                 .accessibilityAction { configuration.isOn.toggle() }
         } label: {
