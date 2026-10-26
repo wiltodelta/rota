@@ -630,8 +630,6 @@ The Chat text-scale row uses it for the slider and its formatted value as well.
 Its label aligns the center between the first and last text baselines, adjusted
 by the interface font's cap height, with the switch. This centers visible text
 rather than its line box, including labels that wrap.
-Switches retain at least the regular native control size, like popup values,
-while their labels continue to follow the interface scale.
 Its explicit accessibility press action forwards to the toggle binding: the
 custom row otherwise keeps the checkbox role and value but exposes no action.
 The UI check enables and disables the routine's time limit to verify that action

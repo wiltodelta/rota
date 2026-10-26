@@ -73,7 +73,6 @@ struct InterfaceFormToggleStyle: ToggleStyle {
             Toggle(configuration)
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .controlSize(metrics.controlSize == .small ? .regular : metrics.controlSize)
                 // The custom row retains the checkbox role but loses the inferred press action.
                 .accessibilityAction { configuration.isOn.toggle() }
         } label: {

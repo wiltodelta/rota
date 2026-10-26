@@ -55,14 +55,24 @@ final class ControlRowAlignmentTests: XCTestCase {
                 let end = isSwitch ? bitmap.pixelsWide : bitmap.pixelsWide - Int(60 * factor * backing)
                 let controlCenter = try center(in: bitmap, columns: bitmap.pixelsWide / 2..<end,
                                                appearance: appearance, switchTrack: isSwitch) / backing
+                var diagnostic = " backing=\(backing)"
+                if abs(labelCenter - controlCenter) > 0.75 {
+                    for threshold: CGFloat in [0.3, 0.5, 0.7, 0.9] {
+                        let measured = try center(in: bitmap, columns: 0..<bitmap.pixelsWide / 2,
+                                                  appearance: appearance, textThreshold: threshold) / backing
+                        diagnostic += " threshold=\(threshold):\(measured)"
+                    }
+                    let font = InterfaceTypography.font(size: NSFont.systemFontSize * factor)
+                    diagnostic += " font=\(font.fontName),size=\(font.pointSize),cap=\(font.capHeight)"
+                }
                 XCTAssertEqual(labelCenter, controlCenter, accuracy: 0.75,
-                               "Control row centers at \(factor), \(appearance.rawValue)")
+                               "Control row centers at \(factor), \(appearance.rawValue)\(diagnostic)")
             }
         }
     }
 
     private func center(in bitmap: NSBitmapImageRep, columns: Range<Int>, appearance: NSAppearance.Name,
-                        switchTrack: Bool = false) throws -> CGFloat {
+                        switchTrack: Bool = false, textThreshold: CGFloat = 0.3) throws -> CGFloat {
         var rows: [Int] = []
         for y in 0..<bitmap.pixelsHigh {
             for x in columns {
@@ -73,9 +83,9 @@ final class ControlRowAlignmentTests: XCTestCase {
                 } else if switchTrack {
                     ink = min(color.redComponent, color.greenComponent, color.blueComponent) > 0.7
                 } else if appearance == .aqua {
-                    ink = max(color.redComponent, color.greenComponent, color.blueComponent) < 0.3
+                    ink = max(color.redComponent, color.greenComponent, color.blueComponent) < textThreshold
                 } else {
-                    ink = min(color.redComponent, color.greenComponent, color.blueComponent) > 0.7
+                    ink = min(color.redComponent, color.greenComponent, color.blueComponent) > 1 - textThreshold
                 }
                 if ink {
                     rows.append(y)
