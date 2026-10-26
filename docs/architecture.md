@@ -250,6 +250,17 @@ flowchart LR
   killed four review agents 15 seconds after a turn that promised to wait for
   them. The wait covers Claude's own task list only: a process a command
   detaches with `&` is not waited for.
+- Feature coverage across harnesses: where a feature exists in some harnesses
+  only, each other harness's status and evidence go here.
+  Background tasks (2026-10-26): Grok Build runs background commands and
+  subagents (subagents in the background by default), and their completion
+  wakes the session for a new turn
+  (`~/.grok/docs/user-guide/20-background-tasks.md`, `16-subagents.md`). Its
+  ACP docs name no task event, so `GrokACPRun` ends at the prompt's response
+  and that later turn never reaches Rota. Open. The Codex app-server schema
+  has no background-task items or notifications, so a Codex run has nothing to
+  wait for. Antigravity: `agy --help` shows no background work; its stream is
+  not yet checked. Open. Shell runs end with their command.
 - `ProcessLauncher` runs every CLI through `zsh -lc 'exec "$0" "$@"'` from
   `baseEnvironment` (the account's own variables only), so a routine sees what
   a new Terminal window sees, whatever started Rota: started by `rota` inside
