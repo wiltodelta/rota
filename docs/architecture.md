@@ -627,8 +627,9 @@ pickers apply it themselves too. The default grouped form places labels above
 popup values and, at larger control sizes, above buttons and switches.
 The Chat text-scale row uses it for the slider and its formatted value as well.
 `InterfaceFormToggleStyle` keeps the native switch in that same centered row.
-The unlabeled switch uses native body-font metrics while its visible label
-inherits the interface face, keeping their layout independent.
+Its label aligns the center between the first and last text baselines, adjusted
+by the interface font's cap height, with the switch. This centers visible text
+rather than its line box, including labels that wrap.
 Its explicit accessibility press action forwards to the toggle binding: the
 custom row otherwise keeps the checkbox role and value but exposes no action.
 The UI check enables and disables the routine's time limit to verify that action

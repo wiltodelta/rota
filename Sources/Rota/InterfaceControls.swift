@@ -65,17 +65,21 @@ struct InterfaceFormRowStyle: LabeledContentStyle {
 }
 
 struct InterfaceFormToggleStyle: ToggleStyle {
+    @Environment(\.interfaceScale) private var metrics
+
     func makeBody(configuration: Configuration) -> some View {
-        LabeledContent {
+        let capHeight = InterfaceTypography.font(size: metrics.points(NSFont.systemFontSize)).capHeight
+        return LabeledContent {
             Toggle(configuration)
                 .labelsHidden()
                 .toggleStyle(.switch)
-                // Native switch geometry must not inherit the visible label's custom font metrics.
-                .font(.body)
                 // The custom row retains the checkbox role but loses the inferred press action.
                 .accessibilityAction { configuration.isOn.toggle() }
         } label: {
             configuration.label
+                .alignmentGuide(VerticalAlignment.center) { dimensions in
+                    (dimensions[.firstTextBaseline] + dimensions[.lastTextBaseline] - capHeight) / 2
+                }
         }
         .labeledContentStyle(InterfaceFormRowStyle())
     }
