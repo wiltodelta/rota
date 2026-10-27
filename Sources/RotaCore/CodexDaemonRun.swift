@@ -37,7 +37,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
 
     func send(_ message: String) {
         queue.async {
-            guard !self.journal.isFinished else { return }
+            guard !self.journal.isFinished else { return self.journal.undelivered(message) }
             self.pendingMessages.append(message)
             self.deliverPendingMessages()
         }

@@ -5,8 +5,12 @@ import os
 /// A Claude routine run the way Claude Desktop runs its sessions: `claude -p`
 /// with stream-json in both directions. The prompt and every later message go
 /// in as user messages on stdin, so a message sent while Claude works joins the
-/// current turn; the `result` event ends the turn and the run. A finished
-/// session continues with `--resume <session id>`.
+/// current turn; the `result` event ends the turn, and the run when no
+/// background task is left running: a finishing task starts Claude's next turn,
+/// which closing stdin would prevent. A task that finishes while Claude writes
+/// its last answer is answered in a turn of its own after the `result` too, so
+/// after a notification the run waits `settle` for that turn's `init`. A
+/// finished session continues with `--resume <session id>`.
 final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     static let log = Logger(subsystem: "com.wiltodelta.rota", category: "claude")
 
@@ -19,6 +23,12 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     private var buffer = Data()
     private var stopReason: RunOutcome?
     private var questions: [String: String] = [:]
+    /// Background shells and agents running, as `background_tasks_changed` last listed them.
+    private var background: Set<String> = []
+    /// A background task finished during this turn; Claude may answer it in a turn of its own.
+    private var notified = false
+    private var turns = 0
+    var settle: TimeInterval = 5
 
     init(spec: LaunchSpec, journal: RunJournal) {
         self.spec = spec
@@ -93,7 +103,7 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
 
     func send(_ message: String) {
         queue.async {
-            guard !self.journal.isFinished, let input = self.input else { return }
+            guard !self.journal.isFinished, let input = self.input else { return self.journal.undelivered(message) }
             self.journal.record(.user, message)
             do {
                 try input.write(contentsOf: Self.userMessage(message))
@@ -118,7 +128,7 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         }
     }
 
-    private func handle(_ line: String) {
+    func handle(_ line: String) {
         guard let data = line.data(using: .utf8),
               let event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let type = event["type"] as? String else {
@@ -130,18 +140,33 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         if handleControl(event) { return }
         switch type {
         case "system":
-            if event["subtype"] as? String == "init", let session = event["session_id"] as? String {
-                // The header names the model Claude picked, so a chosen one can be checked.
-                if let header = StreamJSONFormatter.format(line) { journal.line(header) }
-                journal.configure(SessionConfiguration(model: event["model"] as? String))
-                journal.session(session)
-                try? input?.write(contentsOf: ClaudeConfiguration.request("get_settings",
-                                                                          id: ClaudeConfiguration.settingsID))
-            }
+            system(event, line: line)
         case "result":
             turnEnded(event)
         default:
+            // A tool result after a notification means another request, which carries the notification.
+            if type == "user" { notified = false }
             for item in StreamJSONFormatter.items(data) { journal.record(item.kind, item.text) }
+        }
+    }
+
+    private func system(_ event: [String: Any], line: String) {
+        let subtype = event["subtype"] as? String
+        if subtype == "background_tasks_changed" {
+            // `ambient` tasks (watchers such as Monitor) are not activity, by the CLI's own schema.
+            let tasks = (event["tasks"] as? [[String: Any]] ?? []).filter { $0["ambient"] as? Bool != true }
+            background = Set(tasks.compactMap { $0["task_id"] as? String })
+        } else if subtype == "task_notification", let id = event["task_id"] as? String, background.contains(id) {
+            notified = true
+        } else if subtype == "init", let session = event["session_id"] as? String {
+            turns += 1
+            notified = false
+            // The header names the model Claude picked, so a chosen one can be checked.
+            if let header = StreamJSONFormatter.format(line) { journal.line(header) }
+            journal.configure(SessionConfiguration(model: event["model"] as? String))
+            journal.session(session)
+            try? input?.write(contentsOf: ClaudeConfiguration.request("get_settings",
+                                                                      id: ClaudeConfiguration.settingsID))
         }
     }
 
@@ -186,12 +211,29 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         }
     }
 
-    /// The turn is over: the run ends, and closing stdin lets Claude exit and save the session.
+    /// The turn is over. The run ends with it unless a background task still runs
+    /// or a notification may start one more turn; closing stdin lets Claude exit and save the session.
     private func turnEnded(_ event: [String: Any]) {
         let failed = event["is_error"] as? Bool == true || (event["subtype"] as? String)?.hasPrefix("error") == true
+        if !failed, stopReason == nil {
+            if !background.isEmpty { return journal.record(.status, TranscriptService.waiting(background.count)) }
+            if notified { return closeUnlessATurnStarts() }
+        }
         if failed, let reason = event["result"] as? String ?? event["subtype"] as? String {
             journal.line("[error] \(reason)")
         }
+        close(failed: failed)
+    }
+
+    private func closeUnlessATurnStarts() {
+        let turn = turns
+        queue.asyncAfter(deadline: .now() + settle) { [weak self] in
+            guard let self, self.turns == turn else { return }
+            self.close(failed: false)
+        }
+    }
+
+    private func close(failed: Bool) {
         journal.finish(stopReason ?? (failed ? .failed(exitCode: 1) : .succeeded))
         try? input?.close()
         input = nil

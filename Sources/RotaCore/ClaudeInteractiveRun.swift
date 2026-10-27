@@ -11,7 +11,9 @@ import os
 /// the stream-json shape `StreamJSONFormatter` reads, and a
 /// `system`/`turn_duration` entry marks the end of a turn. Messages are typed
 /// into the terminal as a bracketed paste, so a line break stays a line break.
-/// Once the last turn has ended with no message waiting, the run types `/exit`.
+/// Once the last turn has ended with no message waiting and no background task
+/// running, the run types `/exit`: Claude starts a turn of its own when a task
+/// it left running finishes, and leaving earlier would stop that task.
 /// "Open in Terminal" attaches to the screen session, where the user can answer
 /// whatever Claude asks there; a `Notification` hook marks the session
 /// needs-reply when Claude waits for that.
@@ -35,6 +37,8 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     /// Messages typed in and not yet seen in the transcript.
     private var unanswered = 0
     private var turnEnded = false
+    /// Background shells and agents started in this run and not yet reported finished.
+    private var background: Set<String> = []
     private var failed = false
     private var exiting = false
     private var stopReason: RunOutcome?
@@ -54,19 +58,16 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
 
     static func screenName(_ session: String) -> String { "rota-claude-" + session.prefix(8).lowercased() }
 
-    /// Whether a screen session of that name is still up.
-    static func alive(_ name: String) -> Bool {
-        let (_, output) = ProcessLauncher.capture(ScreenRun.screen, ["-ls", name], in: NSTemporaryDirectory(),
-                                                  loginShell: false)
-        return output.contains(".\(name)")
-    }
-
     static func start(_ spec: LaunchSpec, journal: RunJournal) throws -> ClaudeInteractiveRun {
         let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rota/screen")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let session = spec.resume ?? UUID().uuidString.lowercased()
         let run = ClaudeInteractiveRun(spec: spec, journal: journal, session: session, folder: folder)
+        if spec.adopt {
+            run.queue.async { run.adopt() }
+            return run
+        }
         let settings = try ClaudeRunSettings.hooks(in: folder)
         run.settingsFile = settings
         run.queue.async {
@@ -137,9 +138,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
 
     func send(_ message: String) {
         queue.async {
-            guard !self.journal.isFinished, !self.exiting else {
-                return self.journal.line("[rota: message not delivered: the session is ending]")
-            }
+            guard !self.journal.isFinished, !self.exiting else { return self.journal.undelivered(message) }
             self.unanswered += 1
             self.turnEnded = false
             self.type("\u{1B}[200~" + message + "\u{1B}[201~")
@@ -160,7 +159,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         if let status = exitStatus ?? (isAlive() ? nil : exitStatus ?? -1) {
             return finish(status: status)
         }
-        if turnEnded, unanswered == 0, !exiting, stopReason == nil {
+        if turnEnded, unanswered == 0, background.isEmpty, !exiting, stopReason == nil {
             exiting = true
             type("/exit")
             type("\r")
@@ -193,8 +192,50 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         }
     }
 
+    /// Takes over a session whose screen outlived Rota: what the transcript holds up to the
+    /// log's last write only rebuilds the run's state; everything after it reaches the chat.
+    private func adopt() {
+        guard let file = spec.terminalTranscript, let data = try? Data(contentsOf: file, options: .alwaysMapped) else {
+            return journal.finish(.interrupted)
+        }
+        transcript = file
+        promptPending = false
+        headerWritten = true
+        let since = (try? FileManager.default.attributesOfItem(atPath: spec.log.path)[.modificationDate]) as? Date
+        var start = data.startIndex
+        while let since, let newline = data[start...].firstIndex(of: UInt8(ascii: "\n")),
+              let entry = (try? JSONSerialization.jsonObject(with: data[start..<newline])) as? [String: Any],
+              let written = ClaudeTranscript.timestamp(entry), written <= since {
+            restore(ClaudeTranscript.read(entry: entry))
+            start = data.index(after: newline)
+        }
+        offset = UInt64(start - data.startIndex)
+        journal.session(session)
+        journal.record(.status, "Following the session Claude kept running while Rota was closed")
+        queue.async { self.poll() }
+    }
+
+    /// The state an entry leaves behind, without recording it again.
+    private func restore(_ entry: ClaudeTranscript) {
+        switch entry {
+        case .user, .queued: turnEnded = false
+        case .service(let text):
+            let tasks = TranscriptService.taskIDs(text)
+            // A task notification is Claude's next prompt: a turn follows it.
+            if !tasks.isEmpty { turnEnded = false }
+            background.subtract(tasks)
+        case .background(let id, let running):
+            if running { background.insert(id) } else { background.remove(id) }
+        case .turnEnded: turnEnded = true
+        case .assistant, .apiError, .other: break
+        }
+    }
+
+    /// The entry's state (as `restore`), then what reaches the chat.
     private func handle(entry data: Data) {
-        switch ClaudeTranscript.read(data) {
+        let entry = ClaudeTranscript.read(data)
+        restore(entry)
+        switch entry {
         case .user(let text):
             if promptPending, text.trimmingCharacters(in: .whitespacesAndNewlines)
                 == spec.prompt.trimmingCharacters(in: .whitespacesAndNewlines) {
@@ -203,28 +244,31 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
             }
             promptPending = false
             unanswered = max(0, unanswered - 1)
-            turnEnded = false
             journal.record(.user, text)
         case .queued(let text):
             unanswered = max(0, unanswered - 1)
             journal.record(.user, text)
         case .assistant(let model, let items):
-            journal.configure(SessionConfiguration(model: model))
-            if !headerWritten, let model {
-                headerWritten = true
-                journal.line("[session started, \(model)]")
-            }
-            for item in items { journal.record(item.kind, item.text) }
+            assistant(model: model, items: items)
         case .service(let text):
             journal.record(.status, text)
         case .apiError(let text):
             failed = true
             journal.line("[error] \(text)")
         case .turnEnded:
-            turnEnded = true
-        case .other:
+            if !background.isEmpty { journal.record(.status, TranscriptService.waiting(background.count)) }
+        case .background, .other:
             break
         }
+    }
+
+    private func assistant(model: String?, items: [TranscriptItem]) {
+        journal.configure(SessionConfiguration(model: model))
+        if !headerWritten, let model {
+            headerWritten = true
+            journal.line("[session started, \(model)]")
+        }
+        for item in items { journal.record(item.kind, item.text) }
     }
 
     private var exitStatus: Int32? {
@@ -232,17 +276,11 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         return Int32(text.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    private func isAlive() -> Bool { Self.alive(name) }
+    private func isAlive() -> Bool { ScreenRun.alive(name) }
 
-    private func type(_ text: String) {
-        _ = ProcessLauncher.capture(ScreenRun.screen, ["-S", name, "-p", "0", "-X", "stuff", text],
-                                    in: NSTemporaryDirectory(), loginShell: false)
-    }
+    private func type(_ text: String) { ScreenRun.command(name, ["-p", "0", "-X", "stuff", text]) }
 
-    private func quitScreen() {
-        _ = ProcessLauncher.capture(ScreenRun.screen, ["-S", name, "-X", "quit"], in: NSTemporaryDirectory(),
-                                    loginShell: false)
-    }
+    private func quitScreen() { ScreenRun.quit(name) }
 
     private func end(as reason: RunOutcome) {
         guard !journal.isFinished, stopReason == nil else { return }
@@ -281,26 +319,41 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
 /// One entry of Claude's session transcript, as the interactive run reads it.
 /// Assistant entries have the stream-json shape `StreamJSONFormatter` reads; a
 /// message typed while Claude worked shows up as a `queued_command` attachment
-/// rather than a user entry; `system`/`turn_duration` closes a turn.
+/// rather than a user entry; `system`/`turn_duration` closes a turn. A
+/// background shell or agent starts with a tool result naming its id and ends
+/// with a task notification naming it, or with a `TaskStop` result, which sends none.
 enum ClaudeTranscript: Equatable {
     case user(String)
     case queued(String)
     case service(String)
+    /// A background task by id: started (`running`), or stopped by `TaskStop`.
+    case background(String, running: Bool)
     case assistant(model: String?, items: [TranscriptItem])
     case apiError(String)
     case turnEnded
     case other
 
+    /// When Claude wrote the entry.
+    static func timestamp(_ entry: [String: Any]) -> Date? {
+        guard let text = entry["timestamp"] as? String else { return nil }
+        return try? Date(text, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+    }
+
     static func read(_ data: Data) -> ClaudeTranscript {
-        guard let entry = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let type = entry["type"] as? String else { return .other }
+        guard let entry = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return .other }
+        return read(entry: entry)
+    }
+
+    static func read(entry: [String: Any]) -> ClaudeTranscript {
+        guard let type = entry["type"] as? String else { return .other }
         switch type {
-        case "user": return userEntry(entry)
+        case "user": return backgroundTask(entry["toolUseResult"]) ?? userEntry(entry)
         case "attachment":
             guard let attachment = entry["attachment"] as? [String: Any],
                   attachment["type"] as? String == "queued_command",
                   let text = attachment["prompt"] as? String else { return .other }
-            return .queued(text)
+            // A notification arriving mid-turn is queued like a message, but nobody typed it.
+            return TranscriptService.title(text) == nil ? .queued(text) : .service(text)
         case "assistant":
             let message = entry["message"] as? [String: Any]
             if entry["isApiErrorMessage"] as? Bool == true {
@@ -315,6 +368,19 @@ enum ClaudeTranscript: Equatable {
         default:
             return .other
         }
+    }
+
+    private static func backgroundTask(_ result: Any?) -> ClaudeTranscript? {
+        guard let result = result as? [String: Any] else { return nil }
+        if let id = result["backgroundTaskId"] as? String { return .background(id, running: true) }
+        if result["status"] as? String == "async_launched", let id = result["agentId"] as? String {
+            return .background(id, running: true)
+        }
+        // Only a `TaskStop` result has this shape (14 of 14 in transcripts read on 2026-10-26).
+        if let id = result["task_id"] as? String, result["task_type"] is String {
+            return .background(id, running: false)
+        }
+        return nil
     }
 
     private static func userEntry(_ entry: [String: Any]) -> ClaudeTranscript {

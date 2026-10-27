@@ -77,7 +77,7 @@ final class TerminalRun: RunControl, @unchecked Sendable {
         if let status = exitStatus {
             return finish(stopReason ?? (status == 0 ? .succeeded : .failed(exitCode: status)))
         }
-        if !ClaudeInteractiveRun.alive(name) {
+        if !ScreenRun.alive(name) {
             if child?.exists == true {
                 end(as: .interrupted)
                 queue.asyncAfter(deadline: .now() + 1) { self.poll() }
@@ -119,8 +119,7 @@ final class TerminalRun: RunControl, @unchecked Sendable {
         guard stopReason == nil else { return }
         stopReason = outcome
         // Let the native TUI cancel its turn before disconnecting from its backend.
-        _ = ProcessLauncher.capture(ScreenRun.screen, ["-S", name, "-X", "stuff", "\u{03}"],
-                                    in: NSTemporaryDirectory(), loginShell: false)
+        ScreenRun.command(name, ["-X", "stuff", "\u{03}"])
         queue.asyncAfter(deadline: .now() + 3) { self.quitScreen() }
     }
 
@@ -129,8 +128,7 @@ final class TerminalRun: RunControl, @unchecked Sendable {
         captureChild()
         child?.signal(SIGTERM)
         queue.asyncAfter(deadline: .now() + 2) { self.child?.signal(SIGKILL) }
-        _ = ProcessLauncher.capture(ScreenRun.screen, ["-S", name, "-X", "quit"],
-                                    in: NSTemporaryDirectory(), loginShell: false)
+        ScreenRun.quit(name)
     }
 
     private func captureChild() {

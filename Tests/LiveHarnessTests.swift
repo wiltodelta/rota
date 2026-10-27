@@ -327,6 +327,92 @@ final class LiveHarnessTests: XCTestCase {
         XCTAssertEqual(outcome, .succeeded, log)
     }
 
+    /// A turn that ends with a background task running does not end the run: Claude's next
+    /// turn, started by the task's notification, is part of it. Interactive mode needs
+    /// ROTA_INTERACTIVE_TEST_DIR, as above.
+    func testClaudeWaitsForItsBackgroundTasks() throws {
+        let prompt = "First call the Bash tool with the command `sleep 20; echo finished-bg` and run_in_background "
+            + "set to true. Once it returns, do not wait: end your turn with exactly STARTED. When you are "
+            + "notified that the command finished, reply with exactly DONE. Do not modify files."
+        var modes: [(LaunchMode, String?)] = [(.claudeStream, nil)]
+        if let directory = ProcessInfo.processInfo.environment["ROTA_INTERACTIVE_TEST_DIR"],
+           ClaudeUserSettings.read().trusts(directory) {
+            modes.append((.claudeInteractive, directory))
+        }
+        for (mode, directory) in modes {
+            let (outcome, log, _) = try run(.claude, prompt: prompt, message: nil, timeout: 180,
+                                            directory: directory, model: "haiku", mode: mode)
+            XCTAssertEqual(outcome, .succeeded, log)
+            let waiting = try XCTUnwrap(log.range(of: "Waiting for 1 background task"), log)
+            XCTAssertNotNil(log.range(of: "DONE", range: waiting.upperBound..<log.endIndex), log)
+        }
+    }
+
+    /// Grok wakes its session when a background command finishes; that turn belongs to the run.
+    func testGrokWaitsForItsBackgroundTasks() throws {
+        let prompt = "Run the shell command `sleep 15; echo finished-bg` in the background (run_terminal_command "
+            + "with block_until_ms 0). Do not wait for it: end your turn now with exactly STARTED. When you are "
+            + "notified that it finished, reply with exactly DONE. Do not modify files."
+        let (outcome, log, _) = try run(.grok, prompt: prompt, message: nil, timeout: 240)
+        XCTAssertEqual(outcome, .succeeded, log)
+        // The task may finish before the prompt returns; the run then waits for the wake alone.
+        let started = try XCTUnwrap(log.range(of: "STARTED"), log)
+        XCTAssertNotNil(log.range(of: "DONE", range: started.upperBound..<log.endIndex), log)
+    }
+
+    /// An interactive Claude screen that outlived Rota is followed: only what Claude wrote after
+    /// the log's last write reaches the chat, and the run closes the session once its turn is over.
+    /// A `sleep` stands in for Claude, so this spends no quota; the close goes through `quitScreen`.
+    func testInteractiveClaudeSessionThatOutlivedRotaIsFollowedAndClosed() throws {
+        let session = UUID().uuidString.lowercased()
+        let name = ClaudeInteractiveRun.screenName(session)
+        let log = folder.appendingPathComponent("adopt.log")
+        try "[you] Example\nold answer\n".write(to: log, atomically: true, encoding: .utf8)
+        let written = Date().addingTimeInterval(-60)
+        try FileManager.default.setAttributes([.modificationDate: written], ofItemAtPath: log.path)
+        let stamp = { (offset: TimeInterval) -> String in
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return formatter.string(from: written.addingTimeInterval(offset))
+        }
+        let entries: [[String: Any]] = [
+            ["type": "assistant", "timestamp": stamp(-5), "message": ["model": "m", "content": [
+                ["type": "text", "text": "old answer"]]]],
+            ["type": "system", "subtype": "turn_duration", "timestamp": stamp(-4)],
+            ["type": "user", "timestamp": stamp(10), "message": ["content": "carry on"]],
+            ["type": "assistant", "timestamp": stamp(20), "message": ["model": "m", "content": [
+                ["type": "text", "text": "after restart"]]]],
+            ["type": "system", "subtype": "turn_duration", "timestamp": stamp(21)],
+        ]
+        let transcript = folder.appendingPathComponent("\(session).jsonl")
+        try entries.map { String(bytes: try JSONSerialization.data(withJSONObject: $0), encoding: .utf8) ?? "" }
+            .joined(separator: "\n").appending("\n").write(to: transcript, atomically: true, encoding: .utf8)
+        let (status, _) = ProcessLauncher.capture(ScreenRun.screen, ["-dmS", name, "/bin/sleep", "120"],
+                                                  in: folder.path, loginShell: false)
+        XCTAssertEqual(status, 0)
+        defer { _ = ProcessLauncher.capture(ScreenRun.screen, ["-S", name, "-X", "quit"], in: folder.path,
+                                            timeout: 5, loginShell: false) }
+        var spec = LaunchSpec(executable: Harness.claude.defaultExecutable(), prompt: "", arguments: [],
+                              workingDirectory: folder.path, environment: [:], mode: .claudeInteractive,
+                              timeout: nil, log: log, resume: session)
+        spec.adopt = true
+        spec.terminalTranscript = transcript
+        let ended = expectation(description: "run ended")
+        nonisolated(unsafe) var outcome: RunOutcome?
+        _ = try ProcessLauncher().launch(spec, events: RunEvents(session: { _ in }, finished: {
+            outcome = $0
+            ended.fulfill()
+        }))
+        wait(for: [ended], timeout: 60)
+        XCTAssertEqual(outcome, .succeeded)
+        XCTAssertFalse(ScreenRun.alive(name))
+        let text = try String(contentsOf: log, encoding: .utf8)
+        XCTAssertEqual(text.components(separatedBy: "old answer").count, 2, text)
+        XCTAssertTrue(text.contains("[you] carry on"), text)
+        XCTAssertTrue(text.contains("after restart"), text)
+        print("---- adopted log\n\(text)----")
+    }
+
     func testClaudeCodexAndGrokReadAnAttachedFile() throws {
         let source = folder.appendingPathComponent("fixture.txt")
         for harness in [Harness.claude, .codex, .grok] {

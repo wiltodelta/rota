@@ -27,8 +27,9 @@ enum AntigravityCatalog {
     }
 
     static func read(executable: String) -> [ModelOption] {
+        // `agy models` fetches from the service: 12 to 20 s on 2026-10-26, so 15 s emptied the picker.
         let (status, output) = ProcessLauncher.capture(executable, ["models"], in: NSTemporaryDirectory(),
-                                                       timeout: 15, errors: false)
+                                                       timeout: 45, errors: false)
         guard status == 0 else { return [] }
         let listed = rows(output)
         let candidates = listed.map(\.candidate).reduce(into: [String]()) {

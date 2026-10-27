@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// A shell routine run inside a detached `screen` session, so the user can
@@ -5,6 +6,38 @@ import Foundation
 /// command's exit status to a file, which the run polls for.
 final class ScreenRun: RunControl, @unchecked Sendable {
     static let screen = "/usr/bin/screen"
+    /// `screen -X` hung while Claude inside retried an unreachable API (2026-10-26); on a run's
+    /// queue that also held Stop and the time limit, so every command to a session is bounded.
+    static let commandTimeout: TimeInterval = 5
+
+    /// Sends `screen -S name <arguments>` within the deadline; returns the exit status.
+    @discardableResult
+    static func command(_ name: String, _ arguments: [String]) -> Int32 {
+        ProcessLauncher.capture(screen, ["-S", name] + arguments, in: NSTemporaryDirectory(),
+                                timeout: commandTimeout, loginShell: false).0
+    }
+
+    /// The pid of the session named exactly `name`, as `screen -ls` lists it.
+    static func pid(_ name: String) -> pid_t? {
+        pid(name, in: ProcessLauncher.capture(screen, ["-ls", name], in: NSTemporaryDirectory(),
+                                              loginShell: false).1)
+    }
+
+    static func pid(_ name: String, in list: String) -> pid_t? {
+        list.split(whereSeparator: \.isWhitespace).lazy.compactMap { field -> pid_t? in
+            let parts = field.split(separator: ".", maxSplits: 1)
+            guard parts.count == 2, parts[1] == name else { return nil }
+            return pid_t(parts[0])
+        }.first
+    }
+
+    static func alive(_ name: String) -> Bool { pid(name) != nil }
+
+    /// Quits session `name`; a wedged screen that ignores its own commands is ended by its pid.
+    static func quit(_ name: String) {
+        guard command(name, ["-X", "quit"]) != 0, let pid = pid(name) else { return }
+        kill(pid, SIGTERM)
+    }
 
     private let journal: RunJournal
     private let name: String
@@ -80,15 +113,12 @@ final class ScreenRun: RunControl, @unchecked Sendable {
         return Int32(text.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    private func isAlive() -> Bool {
-        let (_, output) = ProcessLauncher.capture(Self.screen, ["-ls", name], in: NSTemporaryDirectory())
-        return output.contains(".\(name)")
-    }
+    private func isAlive() -> Bool { Self.alive(name) }
 
     private func end(as reason: RunOutcome) {
         guard !journal.isFinished, stopReason == nil else { return }
         stopReason = reason
-        _ = ProcessLauncher.capture(Self.screen, ["-S", name, "-X", "quit"], in: NSTemporaryDirectory())
+        Self.quit(name)
     }
 
     private func finish(_ outcome: RunOutcome) {

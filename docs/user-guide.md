@@ -44,8 +44,8 @@
     current turn to finish; finished conversations continue by ID in Rota.
     Models are grouped by family, with a separate effort picker containing
     only the tiers its CLI reports for that model. Fixed-effort models disable
-    the effort picker. Native question forms and
-    synchronized terminal continuation are not available for Antigravity.
+    the effort picker. Antigravity's questionnaire is
+    answered as a later message, and it has no terminal continuation.
   - Shell commands run in a detached `screen` session; **Open in Terminal**
     attaches with `screen -r`, where you can type into the command or stop it.
   A continued session runs again and appends to the same chat. Finished Claude Code, Codex and Grok Build
@@ -97,6 +97,13 @@
   Device verification and forms Rota cannot
   render explain how to continue in the provider's app and never offer a false approval.
   Supported request types and verification coverage: [agent questions](agent-questions.md).
+- **Background work finishes inside the session.** When Claude Code or Grok
+  Build ends a turn while a background command or agent it started is still
+  running, the session shows "Waiting for N background tasks" and stays
+  running; the agent's answer to the finished task follows in the same session
+  before it completes. A message sent as a session ends continues it right
+  after, and an interactive Claude session that outlived a Rota restart is
+  followed again in its chat.
 - **Routines can notify you.** A routine (or its skill) runs
   `"$ROTA_CLI" notify "…"`, or an agent calls the `notify_user` tool, and Rota
   shows a Mac notification from that session. With `--needs-reply` the session
@@ -142,9 +149,6 @@
   do not expire.
   Agents must use `--needs-reply` or `needsReply: true` for requests requiring
   action; Rota does not infer urgency from notification text.
-- **Harness warnings.** Rota reads the routine's project skill and warns when
-  it uses a tool the chosen harness lacks: Claude in Chrome on Grok Build, for
-  example, or phone push anywhere but Claude Code.
 - **Import from Claude Desktop and Codex.** Reads the routines Claude Desktop
   schedules and the automations of the Codex app (read-only), with their
   schedules in words, and copies the ones you pick, turned off, so nothing runs

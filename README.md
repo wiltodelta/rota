@@ -54,8 +54,7 @@ context and configured tools available in that execution mode. Browser
 automation, computer use, and MCP support depend on the harness and your
 setup. For example, Claude Code's built-in computer use needs an interactive
 session, which Rota supports in trusted project folders. Its print-mode
-fallback cannot load that tool. Rota warns when a project skill names a tool
-the selected harness lacks.
+fallback cannot load that tool.
 
 The [user guide](docs/user-guide.md#features) explains the execution modes
 and differences between agents.

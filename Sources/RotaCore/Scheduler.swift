@@ -50,7 +50,7 @@ public final class Scheduler {
     /// Whether the Mac is online; while it is not, scheduled runs and resumes wait.
     @ObservationIgnored public var isOnline: () -> Bool = { true }
     /// Whether a screen session is still up; a seam so tests never run `screen`.
-    @ObservationIgnored public var sessionAlive: (String) -> Bool = { ClaudeInteractiveRun.alive($0) }
+    @ObservationIgnored public var sessionAlive: (String) -> Bool = { ScreenRun.alive($0) }
     /// Routines whose run was going when the Mac went to sleep.
     @ObservationIgnored var sleptThrough: Set<String> = []
     /// Sessions cut off by sleep, shutdown or a lost network, to continue once online: record id to routine id.
@@ -82,6 +82,8 @@ public final class Scheduler {
     @ObservationIgnored var launchIDs: [String: UUID] = [:]
     /// When each routine's current run started, a continued session included.
     @ObservationIgnored var runStarts: [String: Date] = [:]
+    /// Messages a run handed back as its session ended, by routine; the session continues with them.
+    @ObservationIgnored var lateMessages: [String: [String]] = [:]
     @ObservationIgnored private var timer: Timer?
 
     public init(location: StorageLocation, launcher: RoutineLaunching) {
@@ -101,6 +103,7 @@ public final class Scheduler {
         // Runs the last launch left open were cut off: the Mac shut down, or Rota stopped.
         for record in history.closeOrphans(routineIDs: routines.map(\.id), now: now()) {
             if stillRunning(record) {
+                if adoptSurviving(record) { continue }
                 survivingClaude[record.routineID] = record
             } else if resumable(record) {
                 pendingResumes[record.id] = record.routineID
@@ -300,6 +303,21 @@ public final class Scheduler {
         Self.log.info("\(routineID, privacy: .public) ended: \(outcome.title, privacy: .public)")
         if let routine = routine(routineID) { notifier?.runEnded(record, routine: routine) }
         pauseAfterRepeatedFailures(routineID)
+        if let messages = lateMessages.removeValue(forKey: routineID) {
+            continueLate(record, with: messages.joined(separator: "\n\n"))
+        }
+    }
+
+    /// A message the run could no longer take waits for the run's end, then continues its session.
+    func receiveLate(_ message: String, routineID: String, runID: UUID) {
+        if active[routineID]?.id == runID { return lateMessages[routineID, default: []].append(message) }
+        guard let record = current(runID, routineID: routineID), record.outcome != .running else { return }
+        continueLate(record, with: message)
+    }
+
+    private func continueLate(_ record: RunRecord, with message: String) {
+        guard !continueSession(record, with: message) else { return }
+        Self.log.error("\(record.routineID, privacy: .public): a late message could not continue the session")
     }
 
     /// Turns a routine off once its last scheduled runs all failed, instead of
