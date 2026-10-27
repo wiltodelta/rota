@@ -8,6 +8,11 @@ public enum QuestionHook {
         else { return }
         let environment = ProcessInfo.processInfo.environment
         guard let session = environment["ROTA_SESSION"] else { throw ControlError("Missing Rota session.") }
+        // Claude draws a permission dialog while this hook waits, and notifies about it:
+        // the interactive run must not show that dialog a second time.
+        let dialogs = environment["ROTA_SESSION_DIALOG"]
+        ClaudeDialog.appendQuestionMarker(open: true, to: dialogs)
+        defer { ClaudeDialog.appendQuestionMarker(open: false, to: dialogs) }
         let socket = ControlServer.standardSocket
         let question = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request.question))
         var answer = QuestionAnswer(action: "cancel")

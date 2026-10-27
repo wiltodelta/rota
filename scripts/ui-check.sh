@@ -299,6 +299,13 @@ root, session, kind = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 question = {"id": kind, "title": "Async note" if kind == "async-draft" else "Blocking approval",
             "detail": "", "fields": [], "allowsDecline": False,
             "actions": [{"id": "accept", "label": "Send Answer", "detail": ""}]}
+if kind == "terminal-dialog":
+    # Claude Code 2.1.311's permission dialog as an interactive run reads it off the screen.
+    question["title"] = "Claude needs your permission"
+    question["detail"] = "Do you want to proceed?\n\nBash\n{\n  \"command\" : \"touch notes.txt\"\n}"
+    question["actions"] = [{"id": label, "label": label, "detail": ""} for label in (
+        "Yes", "Yes, and always allow access to /tmp/work from this project",
+        "Yes, and switch to auto mode auto mode handles these prompts for you", "No")]
 if kind == "async-draft":
     question["replyViaMessage"] = True
     question["fields"] = [{"id": "note", "title": "Your note?", "detail": "", "kind": "text",
@@ -332,6 +339,11 @@ check_mixed_questions() {
     wait_value questionTitle "Async note" || fail "async question returns after the RPC answer"
     wait_value composer "Keep this draft" || fail "the async draft survives interruption"
     capture "UI check $appearance" "$appearance-mixed-restored-draft" 520
+    inject_question "$session" terminal-dialog
+    wait_value questionTitle "Claude needs your permission" || fail "a terminal dialog reaches the chat"
+    capture "UI check $appearance" "$appearance-terminal-dialog-question" 520
+    "$DRIVER" press cancelQuestion
+    wait_value questionTitle "Async note" || fail "async question returns after the dialog is canceled"
     "$APP/Contents/Helpers/rota" stop "$routine" >/dev/null
     for _ in {1..60}; do
         if [[ "$(session_value "$routine" cancelled)" == True* ]]; then stopped=1; break; fi

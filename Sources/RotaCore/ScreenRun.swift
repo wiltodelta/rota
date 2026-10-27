@@ -33,6 +33,9 @@ final class ScreenRun: RunControl, @unchecked Sendable {
 
     static func alive(_ name: String) -> Bool { pid(name) != nil }
 
+    /// Types `text` into the first window of session `name`, as keys.
+    static func type(_ name: String, _ text: String) { command(name, ["-p", "0", "-X", "stuff", text]) }
+
     /// Quits session `name`; a wedged screen that ignores its own commands is ended by its pid.
     static func quit(_ name: String) {
         guard command(name, ["-X", "quit"]) != 0, let pid = pid(name) else { return }

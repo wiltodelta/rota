@@ -2,13 +2,13 @@ import Foundation
 
 /// Ephemeral host integration shared by Claude's terminal and stream runners.
 enum ClaudeRunSettings {
-    /// Settings Rota adds to the user's for its runs: when Claude waits for the
-    /// user in its terminal (a permission or an app it asks to use), the
-    /// session is marked needs-reply through the `rota` command the run carries.
+    /// Settings Rota adds to the user's for its runs. When Claude opens a dialog in
+    /// its terminal that no other hook answers (an app it asks to use, a paused
+    /// session), the `Notification` hook appends Claude's payload to the file the
+    /// interactive run names in `ROTA_SESSION_DIALOG`, and the run shows the dialog
+    /// in the chat (`ClaudeDialog`). Print mode draws no dialogs and sets no file.
     static func hooks(in folder: URL) throws -> URL {
-        let command =
-            #"[ -n "$ROTA_CLI" ] && "$ROTA_CLI" notify --needs-reply "#
-            + #""Claude is waiting for you in its terminal. Open the session in Terminal to answer.""#
+        let command = #"if [ -n "$ROTA_SESSION_DIALOG" ]; then { cat; echo; } >> "$ROTA_SESSION_DIALOG"; fi"#
         let effortCommand =
             #"if [ -n "$CLAUDE_EFFORT" ] && [ -n "$ROTA_SESSION_EFFORT" ]; then "#
             + #"printf '%s' "$CLAUDE_EFFORT" > "$ROTA_SESSION_EFFORT"; fi"#
@@ -18,7 +18,7 @@ enum ClaudeRunSettings {
             "timeout": 604800
         ]]
         let settings: [String: Any] = ["hooks": [
-            "Notification": [["matcher": "permission_prompt|elicitation_dialog",
+            "Notification": [["matcher": ClaudeRunSettings.dialogNotifications,
                               "hooks": [["type": "command", "command": command]]]],
             "PreToolUse": effortHook + [["matcher": "AskUserQuestion|ExitPlanMode", "hooks": questionHook]],
             "PermissionRequest": [["hooks": questionHook]],
@@ -30,4 +30,7 @@ enum ClaudeRunSettings {
         return file
     }
 
+    /// The notification types Claude Code 2.1.311 sends when a dialog opens; a dialog
+    /// that names none sends `permission_prompt`. `idle_prompt` is only a finished turn.
+    static let dialogNotifications = "permission_prompt|elicitation_dialog|elicitation_url_dialog|agent_needs_input"
 }

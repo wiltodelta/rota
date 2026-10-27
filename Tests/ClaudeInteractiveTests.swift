@@ -77,16 +77,101 @@ final class ClaudeInteractiveTests: XCTestCase {
             """)
     }
 
-    func testHookMarksTheSessionThroughTheRunsCommand() throws {
+    func testDialogHookAppendsClaudesPayloadToTheRunsFile() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let file = try ClaudeRunSettings.hooks(in: folder)
         let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
         let notification = try XCTUnwrap((json["hooks"] as? [String: Any])?["Notification"] as? [[String: Any]])
-        XCTAssertEqual(notification.first?["matcher"] as? String, "permission_prompt|elicitation_dialog")
+        XCTAssertEqual(notification.first?["matcher"] as? String,
+                       "permission_prompt|elicitation_dialog|elicitation_url_dialog|agent_needs_input")
         let command = try XCTUnwrap((notification.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String)
-        XCTAssertTrue(command.contains(#""$ROTA_CLI" notify --needs-reply"#), command)
+        let payload = #"{"hook_event_name":"Notification","message":"Claude needs your permission"}"#
+        let dialogs = folder.appendingPathComponent("run.dialog")
+        func run(_ environment: [String: String]) throws -> Int32 {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", command]
+            process.environment = environment
+            let input = Pipe()
+            process.standardInput = input
+            try process.run()
+            try input.fileHandleForWriting.write(contentsOf: Data(payload.utf8))
+            try input.fileHandleForWriting.close()
+            process.waitUntilExit()
+            return process.terminationStatus
+        }
+        XCTAssertEqual(try run([:]), 0, "print mode sets no file, and the hook does nothing")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dialogs.path))
+        for _ in 0..<2 { XCTAssertEqual(try run(["ROTA_SESSION_DIALOG": dialogs.path]), 0) }
+        XCTAssertEqual(try String(contentsOf: dialogs, encoding: .utf8), payload + "\n" + payload + "\n")
+    }
+
+    /// Bytes as `screen` 4.00.03 hardcopied Claude Code 2.1.311's permission dialog on
+    /// 2026-10-27: `─` reads as NUL, `╌` as `L`, `❯` as `o`, `·` as 0x14; the path is neutral.
+    private func screen(_ lines: [String]) -> Data {
+        Data(lines.joined(separator: "\n").utf8.map { $0 == UInt8(ascii: "~") ? 0x14 : $0 }
+             + [0x0A] + [UInt8](repeating: 0, count: 80))
+    }
+
+    private let permissionDialog = [
+        "o Run touch probe-file.txt", "", " Bash command", " Create empty probe file",
+        String(repeating: "L", count: 80), " touch probe-file.txt", String(repeating: "L", count: 80),
+        " Do you want to proceed?", " o 1. Yes", "   2. Yes, and always allow access to",
+        "      /tmp/work from this project",
+        "   3. Yes, and switch to auto mode ~ auto mode handles these prompts for you", "   4. No", "",
+        " Esc to cancel ~ Tab to amend"]
+
+    func testDialogIsReadOffTheScreen() throws {
+        let dialog = try XCTUnwrap(ClaudeDialog.read(screen: screen(permissionDialog)))
+        XCTAssertEqual(dialog.prompt, ["Do you want to proceed?"])
+        XCTAssertEqual(dialog.options, ["Yes", "Yes, and always allow access to /tmp/work from this project",
+                                        "Yes, and switch to auto mode auto mode handles these prompts for you", "No"])
+        XCTAssertEqual(dialog.key(for: "No"), "4")
+        XCTAssertEqual(dialog.key(for: "cancel"), "\u{1B}")
+        XCTAssertNil(dialog.key(for: "Maybe"))
+        let question = ClaudeDialog.question(for: dialog, title: "Claude needs your permission", tool: "Bash\n{}")
+        XCTAssertEqual(question.detail, "Do you want to proceed?\n\nBash\n{}")
+        XCTAssertEqual(question.actions.map(\.id), dialog.options)
+        XCTAssertNoThrow(try question.validate(QuestionAnswer(action: "Yes")))
+    }
+
+    func testANumberedAnswerIsNotADialog() {
+        let answer = ["Steps:", "  1. Build", "  2. Test", "", "o ", "  ? for shortcuts"]
+        XCTAssertNil(ClaudeDialog.read(screen: screen(answer)), "no option is marked as selected")
+        let passed = permissionDialog + ["", "o Done.", "", "  1. Build", "  2. Test", "", "o ", "  status"]
+        XCTAssertNil(ClaudeDialog.read(screen: screen(passed)), "a dialog Claude has left scrolls up")
+        XCTAssertNil(ClaudeDialog.read(screen: screen(Array(permissionDialog.prefix(9)) + ["", "o ", "a", "b", "c"])),
+                     "one option is no choice")
+        XCTAssertNil(ClaudeDialog.read(screen: screen([" o 1. Yes", "   3. No"])), "options number from 1 in order")
+    }
+
+    func testDialogFileLines() throws {
+        XCTAssertEqual(ClaudeDialog.event(#"{"hook_event_name":"Notification","message":"Session paused"}"#),
+                       .shown(message: "Session paused"))
+        XCTAssertEqual(ClaudeDialog.event(#"{"hook_event_name":"Stop"}"#), nil)
+        XCTAssertEqual(ClaudeDialog.event("not json"), nil)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        ClaudeDialog.appendQuestionMarker(open: true, to: file.path)
+        ClaudeDialog.appendQuestionMarker(open: false, to: file.path)
+        ClaudeDialog.appendQuestionMarker(open: true, to: nil)
+        let lines = try String(contentsOf: file, encoding: .utf8).split(separator: "\n")
+        XCTAssertEqual(lines.map { ClaudeDialog.event($0) },
+                       [.question(pid: getpid(), open: true), .question(pid: getpid(), open: false)])
+    }
+
+    func testToolCallsStartAndEnd() {
+        let started = ClaudeTranscript.toolCalls(["type": "assistant", "message": ["content": [
+            ["type": "text", "text": "Opening."],
+            ["type": "tool_use", "id": "t1", "name": "mcp__computer-use__request_access",
+             "input": ["apps": ["Calculator"]]]]]])
+        XCTAssertEqual(started.started.map(\.name), ["mcp__computer-use__request_access"])
+        XCTAssertEqual(started.started.first?.input["apps"] as? [String], ["Calculator"])
+        XCTAssertEqual(ClaudeTranscript.toolCalls(["type": "user", "message": ["content": [
+            ["type": "tool_result", "tool_use_id": "t1", "content": "granted"]]]]).ended, ["t1"])
+        XCTAssertTrue(ClaudeTranscript.toolCalls(["type": "system"]).started.isEmpty)
     }
 
     func testTheTranscriptIsFoundInWhicheverProjectFolderHasIt() throws {

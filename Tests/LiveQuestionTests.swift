@@ -82,6 +82,93 @@ final class LiveQuestionTests: XCTestCase {
         try question(.claude, mode: .claudeInteractive, directory: directory)
     }
 
+    /// A dialog no hook answers reaches the chat and takes the chosen option's number.
+    /// Rota runs bypass permissions; the wrapper asks in `default` mode and drops the
+    /// `PermissionRequest` hook, so a real permission dialog waits on the screen alone.
+    func testClaudeInteractiveTerminalDialogReachesTheChat() throws {
+        try terminalDialog(keepHook: false)
+    }
+
+    /// Claude draws its permission dialog while the `PermissionRequest` hook waits for the
+    /// chat, and notifies about it: that dialog must not reach the chat a second time.
+    func testClaudeInteractivePermissionDialogIsAskedOnce() throws {
+        try terminalDialog(keepHook: true)
+    }
+
+    private func terminalDialog(keepHook: Bool) throws {
+        guard let directory = ProcessInfo.processInfo.environment["ROTA_INTERACTIVE_TEST_DIR"] else {
+            throw XCTSkip("Set ROTA_INTERACTIVE_TEST_DIR to a trusted test workspace")
+        }
+        try XCTSkipUnless(ClaudeUserSettings.read().trusts(directory))
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: cli), "Build Rota.app first")
+        let wrapper = try dialogWrapper(keepHook: keepHook)
+        let file = "rota-dialog-\(UUID().uuidString.prefix(8)).txt"
+        defer { try? FileManager.default.removeItem(atPath: directory + "/" + file) }
+        let server = try slowQuestionServer()
+        defer { server.stop() }
+        let finished = expectation(description: "the session ended")
+        nonisolated(unsafe) var dialogs: [AgentQuestion] = []
+        nonisolated(unsafe) var session: String?
+        let spec = LaunchSpec(
+            executable: wrapper.path,
+            prompt: "Run exactly this shell command with the Bash tool: touch \(file) . "
+                + "Run nothing else. If it is refused, reply REFUSED.",
+            arguments: [], workingDirectory: directory,
+            environment: ["ROTA_CLI": cli, "ROTA_SESSION": UUID().uuidString, "ROTA_DATA_DIR": folder.path],
+            mode: .claudeInteractive, timeout: 150, log: folder.appendingPathComponent("session.log"))
+        let events = RunEvents(
+            session: { session = $0 }, finished: { _ in finished.fulfill() },
+            question: { question, reply in
+                dialogs.append(question)
+                reply(QuestionAnswer(action: question.actions.last?.id ?? "cancel"))
+            })
+        let control = try ProcessLauncher().launch(spec, events: events)
+        defer { control.stop() }
+        wait(for: [finished], timeout: 180)
+        let log = try String(contentsOf: spec.log, encoding: .utf8)
+        if keepHook {
+            XCTAssertTrue(dialogs.isEmpty, "\(dialogs) \(log)")
+        } else {
+            XCTAssertEqual(dialogs.count, 1, log)
+            XCTAssertEqual(dialogs.first?.actions.last?.label, "No")
+            XCTAssertTrue(dialogs.first?.detail.contains("touch \(file)") == true, dialogs.first?.detail ?? "")
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory + "/" + file), log)
+        XCTAssertTrue(log.contains("REFUSED"), log)
+        print("Dialog test (hook kept: \(keepHook)): session \(session ?? "unknown"), cwd \(directory)")
+    }
+
+    /// `claude` in `default` mode, optionally without Rota's `PermissionRequest` hook.
+    private func dialogWrapper(keepHook: Bool) throws -> URL {
+        let wrapper = folder.appendingPathComponent("claude")
+        try """
+            #!/bin/zsh
+            args=()
+            for a in "$@"; do [[ $a == bypassPermissions ]] && a=default; args+=("$a"); done
+            \(keepHook ? "" : #"/usr/bin/plutil -remove hooks.PermissionRequest "${args[${args[(i)--settings]}+1]}""#)
+            exec \(Harness.claude.defaultExecutable()) "${args[@]}"
+            """.write(to: wrapper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+        return wrapper
+    }
+
+    /// A hook's question stays open long enough for Claude's notification, then is declined.
+    private func slowQuestionServer() throws -> ControlServer {
+        nonisolated(unsafe) var opened = Date.distantFuture
+        let server = ControlServer(socket: folder.appendingPathComponent("rota.sock")) { method, _ in
+            if method == "questions.create" {
+                opened = Date()
+                return .success(["question": "hook"])
+            }
+            if method == "questions.poll" {
+                return .success(Date().timeIntervalSince(opened) < 20 ? ["pending": true] : ["action": "decline"])
+            }
+            return .failure(ControlError("Unexpected method"))
+        }
+        try server.start()
+        return server
+    }
+
     func testCodexAsyncQuestionsReachTheHostAndAcceptALaterTurn() throws {
         let log = folder.appendingPathComponent("async.log")
         let firstFinished = expectation(description: "async question turn finished")

@@ -329,9 +329,27 @@ flowchart LR
   with `task_id` and `task_type`, a shape no other tool result had (2.1.310,
   2026-10-26). The notification starts a turn, so it clears the ended turn. Messages are typed in as a bracketed paste
   (`screen -X stuff` passes `^`, `\`, `$` through as typed); once the last turn
-  ended with nothing typed since and no background task running, the run types `/exit`. A `Notification` hook
-  (permission or app-access prompt) marks the session needs-reply through
-  `$ROTA_CLI notify`. Claude shows a folder-trust dialog nobody could answer,
+  ended with nothing typed since and no background task running, the run types `/exit`.
+  Dialogs Claude draws in the terminal reach the chat (`ClaudeDialog`). Claude
+  draws its permission dialog while the `PermissionRequest` hook waits, and
+  sends `permission_prompt` about six seconds later; a dialog no hook answers,
+  such as computer use's app access (`computer_use_approval`, opened by
+  `request_access` without any permission hook) or a paused session, sends
+  the same notification (claude 2.1.311, 2026-10-27). The `Notification` hook
+  appends Claude's payload to `$ROTA_SESSION_DIALOG`, where `rota question-hook`
+  also marks its own question open and closed. A notification while a question
+  hook waits is that request, already in the chat; once no hook waits, the run
+  reads the screen again for a dialog opened alongside. Otherwise the run hardcopies
+  the screen, reads the options numbered from 1 with one marked as selected,
+  and asks the chat; the tool call Claude is waiting on comes from the
+  transcript, because `screen` 4.00.03's hardcopy keeps only each character's
+  low byte. The answer types the option's number, which Claude takes at once,
+  then Return if an option that takes text is still shown; Cancel types Escape.
+  Nothing is typed unless the screen still shows the same options; a dialog
+  answered at the terminal closes its question. A dialog without readable
+  options can only be canceled from the chat. Until 2026-10-27 the hook marked
+  every such session "Open in Terminal", even when the chat already held the
+  permission question. Claude shows a folder-trust dialog nobody could answer,
   so a folder without `hasTrustDialogAccepted` (itself or its repository) runs
   in print mode with a note; Rota never answers that dialog or sets the flag.
   macOS attributes computer use to Rota (`responsible=com.wiltodelta.rota` in
@@ -1321,7 +1339,7 @@ service that may host somebody else's work.
 | Continue finished session | yes | yes | yes | yes | yes | n/a |
 | Stop and routine time limit | owned process tree | owned screen/tree | native turn confirmation | native prompt confirmation | owned process tree | owned screen/tree |
 | Native images | image blocks | file references | localImage | ACP image blocks | file references | n/a |
-| Questions | hooks/control | hooks | RPC/message | ACP | later message | n/a |
+| Questions | hooks/control | hooks, terminal dialogs | RPC/message | ACP | later message | n/a |
 | Reasoning/tool output | exposed blocks | native archive | exposed RPC items | ACP thought/tool content | native archive/stream | log |
 | Live answer text | partial events | transcript entries | deltas | chunks | deltas | log |
 | Retry progress | api_retry status | api_error status | willRetry status | live retry payload unverified | CLI owns retries | n/a |

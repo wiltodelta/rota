@@ -26,6 +26,7 @@ not a claim to recognize every future vendor extension.
 | Claude Code | `AskUserQuestion`, `ExitPlanMode` | Per-run `PreToolUse` hook, selected answers or plan decision | Suspended hook |
 | Claude Code | `PermissionRequest`, stream `can_use_tool` | Explicit allow/deny and original tool input | Hook or stream control request |
 | Claude Code | `Elicitation` | MCP action/content through a hook | Suspended hook |
+| Claude Code (interactive) | A terminal dialog no hook answers, announced by a `Notification` hook | The option's number typed into the `screen` session, Escape to cancel | Until answered or the dialog closes |
 | Grok | `_x.ai/ask_user_question`, `x.ai/ask_user_question` | `accepted` answers or `cancelled` | Pending ACP request |
 | Grok | `_x.ai/exit_plan_mode`, `x.ai/exit_plan_mode` | `approved` or `abandoned` | Pending ACP request |
 | Grok | `_x.ai/mcp/elicit`, `x.ai/mcp/elicit` | MCP content with Grok's `outcome` spelling | Pending ACP request |
@@ -94,11 +95,21 @@ JSON schema without inference, as part of the ordinary test suite. Interactive C
 also needs `ROTA_INTERACTIVE_TEST_DIR` set to an already trusted test workspace.
 Tests never create trust grants or change the agents' own configuration.
 
+With `ROTA_INTERACTIVE_TEST_DIR`, two live tests drive interactive Claude in
+`default` mode through a wrapper. One drops the `PermissionRequest` hook, so the
+permission dialog waits on the screen alone; it must reach the host once and
+take "No". The other keeps the hook waiting for 20 seconds; Claude's
+notification about the same dialog must not reach the host. Both passed on
+2026-10-27 with claude 2.1.311, and disabling the open-question check made the
+second fail. Computer use's own dialog was not induced: it did not load in a CLI
+started with Rota's login environment on that day.
+
 Live questionnaire checks do not cover every vendor approval, real MCP server,
 URL login or device-verification flow. Those variants have deterministic wire
 and lifecycle coverage, with the unsupported paths explicitly marked above.
 `scripts/ui-check.sh --questions-only` renders finished async choice/text forms,
-the device-verification refusal surface, and mixed async/blocking requests in
+the device-verification refusal surface, mixed async/blocking requests and a
+Claude terminal dialog with its four permission options in
 both appearances at 820 x 520 pt,
 measures their window and element bounds and never starts an agent. The full
 script includes the async form too. A full-script attempt on 2026-10-19 stopped

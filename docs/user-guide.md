@@ -32,7 +32,9 @@
   - Claude Code runs interactively, as in a terminal, inside a detached
     `screen` session: it gets computer use where you turned it on, a message
     is typed in and joins the current turn, and **Open in Terminal** shows the
-    live session. Afterwards the session continues with `--resume`. A folder
+    live session. A choice Claude asks for in its terminal, such as which apps
+    computer use may control, appears in the chat with Claude's own options.
+    Afterwards the session continues with `--resume`. A folder
     Claude Code has not been trusted in, or Settings > Agents with the switch
     off, runs `claude -p` with stream-json instead. Computer use acts as Rota,
     so Settings asks macOS to allow Rota Accessibility and Screen Recording.

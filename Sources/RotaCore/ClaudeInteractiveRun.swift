@@ -14,9 +14,10 @@ import os
 /// Once the last turn has ended with no message waiting and no background task
 /// running, the run types `/exit`: Claude starts a turn of its own when a task
 /// it left running finishes, and leaving earlier would stop that task.
-/// "Open in Terminal" attaches to the screen session, where the user can answer
-/// whatever Claude asks there; a `Notification` hook marks the session
-/// needs-reply when Claude waits for that.
+/// "Open in Terminal" attaches to the screen session. A dialog Claude draws there
+/// that no hook answers reaches the chat: its `Notification` hook names the
+/// dialog file, the run reads the options off the screen (`ClaudeDialog`) and
+/// types the chosen option's number.
 final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     static let log = Logger(subsystem: "com.wiltodelta.rota", category: "claude")
 
@@ -44,6 +45,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     private var stopReason: RunOutcome?
     private var stopping: [OwnedProcess] = []
     private var headerWritten = false
+    private let dialogs: ClaudeDialogBridge
 
     init(spec: LaunchSpec, journal: RunJournal, session: String, folder: URL) {
         self.spec = spec
@@ -53,6 +55,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         exitFile = folder.appendingPathComponent("\(name).exit")
         script = folder.appendingPathComponent("\(name).zsh")
         effortFile = folder.appendingPathComponent("\(name)-\(UUID().uuidString).effort")
+        dialogs = ClaudeDialogBridge(screen: name, session: session, folder: folder, journal: journal, queue: queue)
     }
 
     var attachCommand: [String]? { [ScreenRun.screen, "-r", name] }
@@ -108,6 +111,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         try Self.scriptText(executable: spec.executable, arguments: arguments, directory: spec.workingDirectory,
                             exitFile: exitFile).write(to: script, atomically: true, encoding: .utf8)
         try? FileManager.default.removeItem(at: exitFile)
+        dialogs.cleanUp()
         // A continued session appends to its transcript: read from where it ends now.
         if let existing = Self.transcriptFile(session) {
             transcript = existing
@@ -115,6 +119,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         }
         var environment = spec.environment
         environment["ROTA_SESSION_EFFORT"] = effortFile.path
+        environment["ROTA_SESSION_DIALOG"] = dialogs.file.path
         let process = ProcessLauncher.loginShellProcess(ScreenRun.screen, ["-dmS", name, "/bin/zsh", "-l", script.path],
                                                         in: spec.workingDirectory, environment: environment)
         try process.run()
@@ -157,6 +162,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         guard !journal.isFinished else { return }
         readEffort()
         readTranscript()
+        dialogs.poll()
         if !stopping.contains(where: { $0.exists }),
            let status = exitStatus ?? (isAlive() ? nil : exitStatus ?? -1) {
             return finish(status: status)
@@ -209,11 +215,13 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
               let entry = (try? JSONSerialization.jsonObject(with: data[start..<newline])) as? [String: Any],
               let written = ClaudeTranscript.timestamp(entry), written <= since {
             restore(ClaudeTranscript.read(entry: entry))
+            dialogs.track(entry, movesOn: false)
             start = data.index(after: newline)
         }
         offset = UInt64(start - data.startIndex)
         journal.session(session)
         journal.record(.status, "Following the session Claude kept running while Rota was closed")
+        dialogs.adopt()
         queue.async { self.poll() }
     }
 
@@ -236,8 +244,14 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
 
     /// The entry's state (as `restore`), then what reaches the chat.
     func handle(entry data: Data) {
-        let entry = ClaudeTranscript.read(data)
+        let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let entry = object.map(ClaudeTranscript.read(entry:)) ?? .other
         restore(entry)
+        if let object { dialogs.track(object, movesOn: entry.movesOn) }
+        record(entry, data: data)
+    }
+
+    private func record(_ entry: ClaudeTranscript, data: Data) {
         switch entry {
         case .user(let text):
             if promptPending, text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -282,7 +296,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
 
     private func isAlive() -> Bool { ScreenRun.alive(name) }
 
-    private func type(_ text: String) { ScreenRun.command(name, ["-p", "0", "-X", "stuff", text]) }
+    private func type(_ text: String) { ScreenRun.type(name, text) }
 
     private func quitScreen() { ScreenRun.quit(name) }
 
@@ -320,6 +334,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     }
 
     private func cleanUp() {
+        dialogs.cleanUp()
         for file in [exitFile, script, effortFile] + (settingsFile.map { [$0] } ?? []) {
             try? FileManager.default.removeItem(at: file)
         }
@@ -342,6 +357,39 @@ enum ClaudeTranscript: Equatable {
     case apiError(String)
     case turnEnded
     case other
+
+    /// A tool call an assistant entry starts, with the input Claude gave it.
+    struct ToolCall {
+        var id: String
+        var name: String
+        var input: [String: Any]
+    }
+
+    /// The tool calls `entry` starts (`tool_use` blocks) and the ids it answers (`tool_result` blocks).
+    static func toolCalls(_ entry: [String: Any]) -> (started: [ToolCall], ended: [String]) {
+        let blocks = (entry["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
+        switch entry["type"] as? String {
+        case "assistant":
+            return (blocks.compactMap { block in
+                guard block["type"] as? String == "tool_use", let id = block["id"] as? String,
+                      let name = block["name"] as? String else { return nil }
+                return ToolCall(id: id, name: name, input: block["input"] as? [String: Any] ?? [:])
+            }, [])
+        case "user":
+            return ([], blocks.filter { $0["type"] as? String == "tool_result" }
+                .compactMap { $0["tool_use_id"] as? String })
+        default:
+            return ([], [])
+        }
+    }
+
+    /// Whether Claude went on past a dialog: a message, an answer or the turn's end.
+    var movesOn: Bool {
+        switch self {
+        case .user, .queued, .assistant, .turnEnded: return true
+        case .service, .background, .apiError, .other: return false
+        }
+    }
 
     /// When Claude wrote the entry.
     static func timestamp(_ entry: [String: Any]) -> Date? {
