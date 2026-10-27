@@ -22,6 +22,8 @@ public struct LaunchSpec: Equatable, Sendable {
     /// A note the log opens with, such as why a Claude run is not interactive.
     public var notice: String?
     public var terminalTranscript: URL?
+    /// Follow the session's run that outlived Rota instead of starting one (interactive Claude).
+    public var adopt = false
 
     public init(executable: String, prompt: String, arguments: [String], workingDirectory: String,
                 environment: [String: String], mode: LaunchMode, timeout: TimeInterval?, log: URL,
@@ -71,13 +73,16 @@ public struct RunEvents {
     public var questionResolved: (String) -> Void
     public var terminalState: (TerminalState) -> Void
     public var terminalInput: () -> Void
+    /// A message the run could no longer take, because its session was ending.
+    public var undelivered: (String) -> Void
 
     public init(session: @escaping (String) -> Void, finished: @escaping (RunOutcome) -> Void,
                 configuration: @escaping (SessionConfiguration) -> Void = { _ in },
                 question: @escaping QuestionHandler = { _, reply in reply(.init(action: "cancel")) },
                 questionResolved: @escaping (String) -> Void = { _ in },
                 terminalState: @escaping (TerminalState) -> Void = { _ in },
-                terminalInput: @escaping () -> Void = {}) {
+                terminalInput: @escaping () -> Void = {},
+                undelivered: @escaping (String) -> Void = { _ in }) {
         self.session = session
         self.finished = finished
         self.configuration = configuration
@@ -85,6 +90,7 @@ public struct RunEvents {
         self.questionResolved = questionResolved
         self.terminalState = terminalState
         self.terminalInput = terminalInput
+        self.undelivered = undelivered
     }
 }
 
@@ -132,7 +138,7 @@ public final class ProcessLauncher: RoutineLaunching {
         output.seekToEndOfFile()
         Self.log.info("Starting \(spec.executable, privacy: .public) in \(spec.workingDirectory, privacy: .public)")
         let journal = Self.journal(for: spec, output: output, events: events)
-        if spec.mode.recordsInitialPrompt { journal.record(.user, spec.prompt) }
+        if spec.mode.recordsInitialPrompt, !spec.adopt { journal.record(.user, spec.prompt) }
         return try start(spec, journal: journal)
     }
 

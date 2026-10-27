@@ -17,6 +17,10 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     private var routineOutcome: RunOutcome?
     /// True while `session/load` replays history, which must not reach the log again.
     private var loading = false
+    /// Messages sent before the session exists, prompted once it is ready.
+    private var early: [String] = []
+    /// Grok's own work after the prompts return: background tasks and the turns their completion wakes.
+    private var activity = GrokActivity()
 
     private init(spec: LaunchSpec, journal: RunJournal) {
         self.spec = spec
@@ -35,13 +39,18 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
 
     func send(_ message: String) {
         queue.async {
-            guard let sessionID = self.sessionID, !self.journal.isFinished else { return }
+            guard !self.journal.isFinished else { return self.journal.undelivered(message) }
             self.journal.record(.user, message)
-            self.openPrompts += 1
-            let params: [String: Any] = ["sessionId": sessionID, "prompt": [["type": "text", "text": message]]]
-            self.peer?.request("session/prompt", params) { result in
-                self.promptEnded(result, isRoutine: false)
-            }
+            guard let sessionID = self.sessionID else { return self.early.append(message) }
+            self.prompt(message, in: sessionID)
+        }
+    }
+
+    private func prompt(_ message: String, in sessionID: String) {
+        openPrompts += 1
+        let params: [String: Any] = ["sessionId": sessionID, "prompt": [["type": "text", "text": message]]]
+        peer?.request("session/prompt", params) { result in
+            self.promptEnded(result, isRoutine: false)
         }
     }
 
@@ -170,6 +179,9 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         peer?.request("session/prompt", params) { [weak self] result in
             self?.promptEnded(result, isRoutine: true)
         }
+        // Grok queues each after the routine's prompt, as it does a message sent mid-turn.
+        for message in early { prompt(message, in: id) }
+        early = []
     }
 
     /// The routine's own prompt decides the outcome; the run ends when no prompt is left open.
@@ -186,13 +198,24 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
             outcome = stopReason ?? .failed(exitCode: 1)
         }
         if isRoutine { routineOutcome = outcome }
-        guard openPrompts <= 0, let routineOutcome else { return }
+        if openPrompts <= 0, outcome == .succeeded, stopReason == nil, activity.running > 0 {
+            journal.record(.status, TranscriptService.waiting(activity.running))
+        }
+        finishIfIdle()
+    }
+
+    /// The run ends once every prompt has returned and Grok has no work left that will wake the session.
+    private func finishIfIdle() {
+        guard openPrompts <= 0, let routineOutcome, !journal.isFinished else { return }
+        guard routineOutcome != .succeeded || stopReason != nil || activity.idle else { return }
         journal.finish(routineOutcome)
         disconnect()
     }
 
     private func handle(_ method: String, _ params: [String: Any]) {
-        guard method == "session/update", !loading, let update = params["update"] as? [String: Any] else { return }
+        guard !loading else { return }
+        if method != "session/update" { return track(method, params) }
+        guard let update = params["update"] as? [String: Any] else { return }
         switch update["sessionUpdate"] as? String {
         case "config_option_update":
             configure(update)
@@ -208,6 +231,15 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         default:
             break
         }
+    }
+
+    private func track(_ method: String, _ params: [String: Any]) {
+        guard let sessionID, activity.read(method, params, session: sessionID) else { return }
+        // A woken turn's text arrives as ordinary updates; its end closes that message.
+        if (params["update"] as? [String: Any])?["sessionUpdate"] as? String == "turn_completed" {
+            journal.endText()
+        }
+        finishIfIdle()
     }
 
     /// Permission requests (rare with --always-approve) get the first "allow"
@@ -238,5 +270,59 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     private func disconnect() {
         peer?.close()
         process?.terminate()
+    }
+}
+
+/// What a Grok session still has going after its prompts return, read from the
+/// leader's `_x.ai/` notifications (grok 1.0.70, live 2026-10-26):
+/// `queue/changed` names the running turn (`runningPromptId`) and the queued
+/// prompts, `background_tasks` lists every task with its status, a finished
+/// task or subagent says whether it `will_wake` the session, and
+/// `turn_completed` names the turn it ends by `prompt_id`. A woken turn runs
+/// under its own prompt id, with its text on the ordinary `session/update`.
+struct GrokActivity {
+    private var runningPrompt: String?
+    private var queued = false
+    private var tasks: Set<String> = []
+    private var subagents: Set<String> = []
+    private var wakePending = false
+
+    /// Background tasks and subagents still running.
+    var running: Int { tasks.count + subagents.count }
+
+    var idle: Bool { runningPrompt == nil && !queued && running == 0 && !wakePending }
+
+    /// Applies one notification of `session`; true when it was about this session's activity.
+    mutating func read(_ method: String, _ params: [String: Any], session: String) -> Bool {
+        guard method.hasPrefix("_x.ai/"), params["sessionId"] as? String == session else { return false }
+        if method == "_x.ai/queue/changed" {
+            runningPrompt = params["runningPromptId"] as? String
+            queued = !((params["entries"] as? [Any])?.isEmpty ?? true)
+            return true
+        }
+        guard let update = params["update"] as? [String: Any] else { return false }
+        return apply(update)
+    }
+
+    private mutating func apply(_ update: [String: Any]) -> Bool {
+        if update["will_wake"] as? Bool == true { wakePending = true }
+        switch update["sessionUpdate"] as? String {
+        case "background_tasks":
+            let list = update["tasks"] as? [[String: Any]] ?? []
+            tasks = Set(list.filter { $0["status"] as? String == "running" }.compactMap { $0["task_id"] as? String })
+        case "subagent_spawned":
+            if let id = update["subagent_id"] as? String { subagents.insert(id) }
+        case "subagent_finished":
+            if let id = update["subagent_id"] as? String { subagents.remove(id) }
+        case "turn_completed":
+            // The woken turn announces its wake after it starts, so its end settles the wake too.
+            if let prompt = update["prompt_id"] as? String, prompt == runningPrompt { runningPrompt = nil }
+            wakePending = false
+        case "task_completed":
+            break
+        default:
+            return false
+        }
+        return true
     }
 }

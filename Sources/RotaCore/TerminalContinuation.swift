@@ -36,18 +36,25 @@ extension Scheduler {
 
     @discardableResult
     func continueSession(_ record: RunRecord, with message: String) -> Bool {
-        guard !hasSurvivingClaude(record.routineID),
-              let routine = routine(record.routineID), let session = record.sessionID,
-              let logPath = record.logPath else { return false }
-        var record = record
-        record.outcome = .running
-        record.endedAt = nil
+        guard !hasSurvivingClaude(record.routineID), var (record, spec) = reopen(record, prompt: message) else {
+            return false
+        }
         record.reportedModel = nil
         record.reportedEffort = nil
         record.questions = record.questions?.filter { $0.replyViaMessage == true }
         record.terminalState = nil
-        return start(record, spec: spec(for: routine, record: record, harness: record.harness, prompt: message,
-                                 log: URL(fileURLWithPath: logPath), resume: session))
+        return start(record, spec: spec)
+    }
+
+    /// `record` running again, with the spec that resumes its session into its own log.
+    func reopen(_ record: RunRecord, prompt: String) -> (RunRecord, LaunchSpec)? {
+        guard let routine = routine(record.routineID), let session = record.sessionID,
+              let logPath = record.logPath else { return nil }
+        var record = record
+        record.outcome = .running
+        record.endedAt = nil
+        return (record, spec(for: routine, record: record, harness: record.harness, prompt: prompt,
+                             log: URL(fileURLWithPath: logPath), resume: session))
     }
 
 }

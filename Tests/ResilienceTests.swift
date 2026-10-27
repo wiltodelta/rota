@@ -46,6 +46,7 @@ final class ResilienceTests: XCTestCase {
         scheduler.executable = { "/bin/\($0.rawValue)" }
         scheduler.isOnline = { [unowned self] in online }
         scheduler.sessionAlive = { _ in alive }
+        scheduler.terminalTranscript = { _, _ in nil }
         scheduler.probe = { [unowned self] _, done in done(serviceAnswers) }
         return scheduler
     }
@@ -109,15 +110,26 @@ final class ResilienceTests: XCTestCase {
         XCTAssertEqual(scheduler.active[routine.id]?.resumes, 1)
     }
 
-    func testAClaudeSessionStillAliveInItsTerminalIsNotStartedTwice() {
+    func testAClaudeSessionStillAliveInItsTerminalIsFollowedNotStartedTwice() throws {
         let routine = add(.claude)
         startRun(routine)
         scheduler = makeScheduler(alive: true)
+        let transcript = URL(fileURLWithPath: "/synthetic/thread-1.jsonl")
+        scheduler.terminalTranscript = { _, _ in transcript }
         scheduler.start()
-        XCTAssertEqual(launcher.specs.count, 1)
-        XCTAssertEqual(scheduler.history.records(for: routine.id).first?.outcome, .interrupted)
+        XCTAssertEqual(launcher.specs.count, 2)
+        let follow = try XCTUnwrap(launcher.specs.last)
+        XCTAssertTrue(follow.adopt)
+        XCTAssertEqual(follow.mode, .claudeInteractive)
+        XCTAssertEqual(follow.resume, "thread-1")
+        XCTAssertEqual(follow.terminalTranscript, transcript)
+        XCTAssertEqual(scheduler.history.records(for: routine.id).first?.outcome, .running)
+        XCTAssertEqual(scheduler.history.records(for: routine.id).count, 1, "the same session, not a new one")
+        launcher.events[1].finished(.succeeded)
+        XCTAssertEqual(scheduler.history.records(for: routine.id).first?.outcome, .succeeded)
     }
 
+    /// Without a transcript to follow, the surviving screen still reserves its routine.
     func testSurvivingClaudeBlocksScheduledManualAndChatRunsUntilItExits() async throws {
         let routine = add(.claude, schedule: "* * * * *")
         startRun(routine)

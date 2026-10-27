@@ -53,6 +53,13 @@ final class ClaudeInteractiveTests: XCTestCase {
                        .service(notice), "a notification queued mid-turn is not a typed message")
     }
 
+    func testScreenPIDComesFromTheMatchingSessionOnly() {
+        let list = "There are screens on:\n\t63754.rota-claude-060c03c9\t(Detached)\n"
+            + "\t811.rota-claude-060c03c9x\t(Detached)\n2 Sockets in /tmp/.screen.\n"
+        XCTAssertEqual(ScreenRun.pid("rota-claude-060c03c9", in: list), 63754)
+        XCTAssertNil(ScreenRun.pid("rota-claude-ffffffff", in: list))
+    }
+
     func testCommandLine() {
         let new = ClaudeInteractiveRun.arguments(session: "s1", resume: false, settings: "/c/s.json",
                                                  model: ["--model", "haiku"], prompt: "-start with a dash")

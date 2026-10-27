@@ -83,7 +83,7 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
 
     func send(_ message: String) {
         queue.async {
-            guard !self.closing, !self.journal.isFinished else { return }
+            guard !self.closing, !self.journal.isFinished else { return self.journal.undelivered(message) }
             self.journal.record(.user, message)
             self.pending.append(message)
         }

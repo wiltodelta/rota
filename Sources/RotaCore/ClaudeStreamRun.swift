@@ -103,7 +103,7 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
 
     func send(_ message: String) {
         queue.async {
-            guard !self.journal.isFinished, let input = self.input else { return }
+            guard !self.journal.isFinished, let input = self.input else { return self.journal.undelivered(message) }
             self.journal.record(.user, message)
             do {
                 try input.write(contentsOf: Self.userMessage(message))
@@ -153,7 +153,8 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     private func system(_ event: [String: Any], line: String) {
         let subtype = event["subtype"] as? String
         if subtype == "background_tasks_changed" {
-            let tasks = event["tasks"] as? [[String: Any]] ?? []
+            // `ambient` tasks (watchers such as Monitor) are not activity, by the CLI's own schema.
+            let tasks = (event["tasks"] as? [[String: Any]] ?? []).filter { $0["ambient"] as? Bool != true }
             background = Set(tasks.compactMap { $0["task_id"] as? String })
         } else if subtype == "task_notification", let id = event["task_id"] as? String, background.contains(id) {
             notified = true

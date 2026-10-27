@@ -250,17 +250,6 @@ flowchart LR
   killed four review agents 15 seconds after a turn that promised to wait for
   them. The wait covers Claude's own task list only: a process a command
   detaches with `&` is not waited for.
-- Feature coverage across harnesses: where a feature exists in some harnesses
-  only, each other harness's status and evidence go here.
-  Background tasks (2026-10-26): Grok Build runs background commands and
-  subagents (subagents in the background by default), and their completion
-  wakes the session for a new turn
-  (`~/.grok/docs/user-guide/20-background-tasks.md`, `16-subagents.md`). Its
-  ACP docs name no task event, so `GrokACPRun` ends at the prompt's response
-  and that later turn never reaches Rota. Open. The Codex app-server schema
-  has no background-task items or notifications, so a Codex run has nothing to
-  wait for. Antigravity: `agy --help` shows no background work; its stream is
-  not yet checked. Open. Shell runs end with their command.
 - `ProcessLauncher` runs every CLI through `zsh -lc 'exec "$0" "$@"'` from
   `baseEnvironment` (the account's own variables only), so a routine sees what
   a new Terminal window sees, whatever started Rota: started by `rota` inside
@@ -310,7 +299,8 @@ flowchart LR
   continues it. `-p` asks no folder-trust question. The session lives in Rota's
   process. `system`/`background_tasks_changed` lists the running background
   shells and agents (`local_bash`, `local_agent`; a subagent's own tools are
-  not listed); a `result` while it is non-empty shows `Waiting for N background
+  not listed; `ambient` watchers such as Monitor are not activity and are
+  skipped); a `result` while it is non-empty shows `Waiting for N background
   tasks` and keeps stdin open, and the task's `task_notification` starts the
   next turn. A task that finishes before the turn's last tool call is answered
   in that turn, which a tool result after the notification shows; one that
@@ -360,7 +350,14 @@ flowchart LR
     has no leader mode for joining a live session, so messages go through
     Rota's field as further `session/prompt`s, which Grok answers after the
     current turn; the run ends when every prompt has returned, or the queued
-    answer would be lost with the connection.
+    answer would be lost with the connection, and Grok has no work left that
+    will wake the session (`GrokActivity`): the leader's `_x.ai/queue/changed`
+    names the running turn and the queue, `_x.ai/session_notification`
+    `background_tasks` lists tasks with their status, `_x.ai/task_completed`
+    and `subagent_finished` carry `will_wake`, and `turn_completed` names the
+    turn it ends by `prompt_id`. A woken turn runs under its own prompt id
+    (`task-completed-<task id>`) with its text on ordinary `session/update`s
+    (grok 1.0.70, live 2026-10-26).
   - `ScreenRun` writes a zsh script that runs the command with its output
     `tee`d to the log and writes `${pipestatus[1]}` to an exit file, starts it
     with `screen -dmS rota-<id>` (macOS ships screen 4.00, which has no
@@ -376,6 +373,11 @@ flowchart LR
   session id, appending to the same log: Claude `--resume <session id>`, Codex
   `thread/resume`, Grok `session/load` with its replayed updates ignored.
   Verified live 2026-10-09 by the `*Continues*` tests in `LiveHarnessTests`.
+  A runner whose session is ending (Claude typing `/exit` or past its result,
+  Antigravity after closing its input, any run already finished) hands a
+  message back through `RunEvents.undelivered`; the scheduler keeps it until
+  the run ends and then continues the session with it, so it is never dropped
+  while the composer reports it sent.
 - Runner adapters map supported output into a small Rota transcript contract.
   `RunJournal` serializes normalized JSONL and a readable log under one lock.
   `TranscriptReader` incrementally replays stable IDs, completed messages and
@@ -1248,13 +1250,25 @@ preferences restored after the check.
 
 ## Reliability boundaries
 
-A Claude screen that survives Rota's restart reserves its routine until it exits.
+A Claude screen that survives Rota's restart is followed again
+(`Scheduler.adoptSurviving`, `LaunchSpec.adopt`): its record runs again, and
+the interactive runner reads the transcript, rebuilding its state (turn ended,
+background tasks) from the entries up to the log's last write and recording
+only those after it, then closes the session as usual when Claude is done.
+The log's modification time stands in for how far the chat had read, so an
+entry Claude wrote between Rota's last poll and a later log write is not
+shown. Without a transcript to follow, the screen reserves its routine until
+it exits.
 The scheduler rechecks those reservations on ticks and before launching or
 continuing work. Scheduled slots skip while reserved; manual starts and chat
 continuations refuse. Open in Terminal attaches to that existing screen rather
 than starting another writer. Close the surviving screen before deleting its
-routine. The old record remains interrupted because Rota cannot reconstruct the
-output it missed while closed.
+routine.
+Rota's `screen -X` commands (`ScreenRun.command`, used by the Shell, Terminal
+and interactive Claude runs) have a five-second limit: one hung while Claude
+inside retried an unreachable API, which on the run's queue also held Stop and
+the time limit. A `quit` that fails ends the screen process by the pid
+`screen -ls` lists for exactly that session name.
 
 Codex queues user messages received before the turn/start reply and flushes them
 in order once both thread and turn ids are available. A turn that ends before
@@ -1266,3 +1280,93 @@ and signals an owned process group, never Rota's. A descendant holding stdout
 cannot extend the hard deadline; timeout returns a failure even if the immediate
 parent already exited successfully. Synthetic tests cover a TERM-ignoring helper
 and an exited parent with an inherited output pipe.
+
+## Feature coverage across harnesses
+
+Audited 2026-10-26 against claude 2.1.311, codex-cli 0.164.0, grok 1.0.70 and
+agy 1.4.7: code, `--help`, the Codex schema, Grok's user guide, the agy
+binary's strings, and counts over local session archives. "Yes" is handled;
+"partial" is handled with the gap named below; "n/a" means the harness has no
+such concept; "gap" means the harness exposes it and Rota does not use it.
+
+| Feature | Claude `-p` | Claude interactive | Codex | Grok Build | Antigravity | Shell |
+|---|---|---|---|---|---|---|
+| Model and effort choice | yes | yes | yes | partial (G6) | yes | n/a |
+| Message while running | joins turn | joins turn | joins turn | after turn | after turn | Terminal only |
+| Continue a finished session | yes | yes | yes | yes | yes | n/a |
+| Stop and time limit | yes | yes | partial (X3) | yes | yes | partial (S2) |
+| Native questions | partial (C3) | partial (C3) | yes | yes | as a later message | n/a |
+| Attachments | paths only (X1) | paths only (X1) | paths only (X1) | paths only (X1) | paths only (X1) | n/a |
+| Background tasks | yes | yes (C4) | n/a | yes | partial (A2) | n/a |
+| Terminal while running / after | n/a / yes | yes / yes | no / yes | no / yes | gap (A3) | yes / n/a |
+| A run surviving a Rota restart | n/a | yes | gap (X4) | gap (X4) | gap (X4) | gap (S1) |
+| Reasoning, tool output, live text | partial (X2) | partial (X2) | partial (X2) | partial (X2) | partial (X2) | log |
+| Retry progress | gap (X5) | gap (X5) | gap (X5) | gap (X5) | unknown | n/a |
+| `rota notify` and MCP in session | yes | yes | partial (X6) | partial (rules sentence) | yes | CLI only |
+| Import from the harness's app | yes | yes | yes | n/a (`/loop` is per session) | unknown (A4) | n/a |
+
+Claude:
+- Fixed 2026-10-26: a surviving interactive screen is followed again and
+  closed when done; `screen -X` commands are bounded (both under "Reliability
+  boundaries"); print mode no longer counts `ambient` tasks.
+- C3. Tool approval offers Allow Once only; the CLI also carries permission
+  suggestions. Print mode answers every non-`can_use_tool` control request
+  (`elicitation`, `request_user_dialog`) as a declined approval; whether the
+  `Elicitation` hook answers first is unverified.
+- C4. Watchers such as Monitor are `ambient` in the CLI's task schema ("not
+  activity ... hosts should exclude them"), so neither runner waits for them;
+  the interactive runner, which tracks shells and agents only, ends the
+  session and with it any Monitor at the turn's end.
+
+Codex: a finished child agent does not start a root turn (every
+`trigger_turn: true` record in about 1000 local rollouts was in a subagent
+thread), so a Codex run has no background work to wait for.
+
+Grok Build:
+- Background commands and subagents (background by default) wake the session
+  when they finish; the run waits for them (`GrokActivity`, under the Grok
+  runner above).
+- G6. Effort is checked against the session's options; the model is not, and
+  the effort list has no `minimal`.
+
+Antigravity:
+- Fixed 2026-10-26: `agy models` took 12 to 20 s, past the catalog's 15 s
+  limit, which emptied the model picker; the limit is now 45 s. The catalog
+  stays all or nothing, so one family failing still empties it.
+- A2. Commands go asynchronous after `WaitMsBeforeAsync`, and `agy` has
+  `manage_task`, `schedule` and `invoke_subagent`. In print mode `agy` itself
+  waits a grace period for them ("root agent idle; waiting up to %s for %d
+  background task(s)") and then terminates them ("terminating %d background
+  task(s) on exit"); whether a woken turn reaches Rota is unverified.
+- A3. Terminal continuation is excluded, but `agy --conversation <id>`
+  resumes interactively and Rota already parses its conversation log.
+- A4. The app has scheduled tasks (cron and delayed timers); where it stores
+  them is unknown. Browser tools exist in `agy` and are not listed under
+  "What a run can reach".
+
+Shell:
+- S1. A `screen` surviving a Rota crash is not tracked like Claude's, so the
+  next slot can start a second copy writing the same log (inferred from code).
+- S2. Stop quits the screen (bounded, then by pid), without the TERM and KILL
+  of the command's own process that `TerminalRun` has, so a child ignoring
+  HUP may survive (inferred).
+
+Across harnesses:
+- X1. Attachments are file paths in text; native image inputs (Claude image
+  blocks, Codex `localImage`, ACP image content) are unused.
+- X2. The transcript has no reasoning kind, so thinking is dropped everywhere.
+  Tool output is shown for Antigravity only. Text streams live for Grok and
+  Antigravity; Claude print mode (no `--include-partial-messages`) and Codex
+  (`item/agentMessage/delta` unused) show each message when it completes.
+- X3. Codex: Stop or the time limit between `turn/start` and its reply finds
+  no turn id, so the turn keeps running on the daemon (inferred).
+- X4. After a Rota restart, Codex, Grok and Antigravity runs are offered
+  Continue without checking whether the harness still runs that turn, and
+  output produced meanwhile is not pulled in (`thread/turns/list`,
+  `session/load` replays and Grok's `updates.jsonl` carry it).
+- X5. Retry progress is dropped: Claude `system/api_retry` and transcript
+  `api_error`, Codex `error` with `willRetry`, Grok `retry_state`. One API
+  error marks an interactive Claude run failed even when later turns succeed.
+- X6. Codex starts MCP servers in the shared daemon's environment, so MCP
+  `notify_user` gets no session id (inferred); the `rota notify` command works.
+

@@ -770,6 +770,28 @@ final class SchedulerTests: XCTestCase {
         XCTAssertEqual(scheduler.history.records(for: "report").first?.outcome, .succeeded)
     }
 
+    /// A message that reaches a run whose session is ending continues the session once the run ends.
+    func testLateMessageContinuesTheSessionAfterTheRun() throws {
+        let routine = addDailyRoutine()
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("thread-1")
+        launcher.events[0].undelivered("first late")
+        launcher.events[0].undelivered("second late")
+        XCTAssertEqual(launcher.specs.count, 1, "nothing starts while the run is still active")
+        launcher.completions[0](.succeeded)
+        let follow = try XCTUnwrap(launcher.specs.last)
+        XCTAssertEqual(launcher.specs.count, 2)
+        XCTAssertEqual(follow.resume, "thread-1")
+        XCTAssertEqual(follow.prompt, "first late\n\nsecond late")
+
+        // One handed back after the run already ended continues at once.
+        launcher.completions[1](.succeeded)
+        launcher.events[1].undelivered("after the end")
+        XCTAssertEqual(launcher.specs.count, 3)
+        XCTAssertEqual(launcher.specs.last?.prompt, "after the end")
+        XCTAssertEqual(scheduler.history.records(for: "report").count, 1, "the same session continues")
+    }
+
     func testSessionReportedDuringLaunchIsKept() throws {
         let routine = addDailyRoutine()
         launcher.sessionDuringLaunch = "early-1"

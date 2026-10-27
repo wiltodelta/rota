@@ -90,6 +90,11 @@ final class RunJournal: @unchecked Sendable {
         }
     }
 
+    /// Hands back a message that arrived as the session ended; the scheduler continues the session with it.
+    func undelivered(_ message: String) {
+        DispatchQueue.main.async { self.events.undelivered(message) }
+    }
+
     func terminalInput() {
         DispatchQueue.main.async { self.events.terminalInput() }
     }

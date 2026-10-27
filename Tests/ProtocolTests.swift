@@ -188,4 +188,46 @@ final class LiveRunPieceTests: XCTestCase {
     func testShellQuote() {
         XCTAssertEqual(shellQuote("it's"), #"'it'\''s'"#)
     }
+
+    /// The order grok 1.0.70 sent on 2026-10-26 around a background command that woke the session.
+    func testGrokActivityHoldsTheRunUntilTheWokenTurnEnds() {
+        var activity = GrokActivity()
+        func read(_ method: String, _ params: [String: Any]) {
+            XCTAssertTrue(activity.read(method, params.merging(["sessionId": "s1"]) { $1 }, session: "s1"), method)
+        }
+        func update(_ method: String, _ fields: [String: Any]) { read(method, ["update": fields]) }
+        read("_x.ai/queue/changed", ["entries": [], "runningPromptId": "p1"])
+        update("_x.ai/session_notification", ["sessionUpdate": "background_tasks",
+                                              "tasks": [["task_id": "t1", "status": "running"]]])
+        read("_x.ai/queue/changed", ["entries": []])
+        update("_x.ai/session_notification", ["sessionUpdate": "turn_completed", "prompt_id": "p1"])
+        XCTAssertFalse(activity.idle)
+        XCTAssertEqual(activity.running, 1)
+        read("_x.ai/queue/changed", ["entries": [], "runningPromptId": "task-completed-t1"])
+        update("_x.ai/task_completed", ["sessionUpdate": "task_completed", "will_wake": true])
+        update("_x.ai/session_notification", ["sessionUpdate": "background_tasks",
+                                              "tasks": [["task_id": "t1", "status": "completed"]]])
+        XCTAssertFalse(activity.idle, "the woken turn is still running")
+        update("_x.ai/session_notification", ["sessionUpdate": "turn_completed", "prompt_id": "task-completed-t1"])
+        XCTAssertTrue(activity.idle)
+    }
+
+    func testGrokActivityWaitsForAWakeAndIgnoresOtherSessions() {
+        var activity = GrokActivity()
+        XCTAssertFalse(activity.read("_x.ai/queue/changed", ["sessionId": "other", "runningPromptId": "x"],
+                                     session: "s1"))
+        XCTAssertFalse(activity.read("session/update", ["sessionId": "s1"], session: "s1"))
+        XCTAssertTrue(activity.idle)
+        _ = activity.read("_x.ai/subagent_finished", ["sessionId": "s1", "update": [
+            "sessionUpdate": "subagent_finished", "subagent_id": "a1", "will_wake": true]], session: "s1")
+        XCTAssertFalse(activity.idle, "a wake is announced before its turn is queued")
+        _ = activity.read("_x.ai/queue/changed", ["sessionId": "s1", "entries": [], "runningPromptId": "w"],
+                          session: "s1")
+        _ = activity.read("_x.ai/session_notification", ["sessionId": "s1", "update": [
+            "sessionUpdate": "turn_completed", "prompt_id": "w"]], session: "s1")
+        XCTAssertTrue(activity.idle)
+        _ = activity.read("_x.ai/session/update", ["sessionId": "s1", "update": [
+            "sessionUpdate": "subagent_spawned", "subagent_id": "a2"]], session: "s1")
+        XCTAssertEqual(activity.running, 1)
+    }
 }

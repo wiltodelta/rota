@@ -29,7 +29,7 @@ final class TerminalRunTests: XCTestCase {
         }))
         let name = try XCTUnwrap(control?.attachCommand?.last)
         wait(for: [done], timeout: 15)
-        XCTAssertFalse(ClaudeInteractiveRun.alive(name))
+        XCTAssertFalse(ScreenRun.alive(name))
         let pid = try XCTUnwrap(Int32(String(contentsOf: pidFile, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines)))
         XCTAssertEqual(kill(pid, 0), -1, "A TUI that ignores HUP must not outlive Stop")

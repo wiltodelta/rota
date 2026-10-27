@@ -36,6 +36,9 @@ extension Scheduler {
             }, terminalInput: { [weak self] in
                 guard isCurrent(), let self, let current = self.active[id], current.id == runID else { return }
                 self.dismissAttention(current)
+            }, undelivered: { [weak self] message in
+                // Not tied to the launch: it may arrive after the run has finished.
+                self?.receiveLate(message, routineID: id, runID: runID)
             })
     }
 

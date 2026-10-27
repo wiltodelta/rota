@@ -68,6 +68,18 @@ extension Scheduler {
         return sessionAlive(ClaudeInteractiveRun.screenName(session))
     }
 
+    /// Follows a surviving interactive Claude as the routine's active run again, so its
+    /// output reaches the chat and the run ends, and frees the routine, when Claude is done.
+    /// Without a transcript to follow it stays a reservation (`survivingClaude`).
+    func adoptSurviving(_ record: RunRecord) -> Bool {
+        guard let session = record.sessionID, let transcript = terminalTranscript(.claude, session),
+              var (record, spec) = reopen(record, prompt: "") else { return false }
+        spec.mode = .claudeInteractive
+        spec.adopt = true
+        spec.terminalTranscript = transcript
+        return start(record, spec: spec)
+    }
+
     /// A surviving screen owns this routine until it exits. UI reads the last checked state.
     public func isSurvivingClaude(_ record: RunRecord) -> Bool {
         survivingClaude[record.routineID]?.id == record.id

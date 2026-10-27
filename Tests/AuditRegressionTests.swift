@@ -187,6 +187,14 @@ final class AuditRegressionTests: XCTestCase {
         XCTAssertTrue(journal.isFinished)
     }
 
+    func testClaudeAmbientTasksDoNotHoldTheRun() throws {
+        let (runner, journal, _) = try claudeStreamRun()
+        runner.handle(#"{"type":"system","subtype":"background_tasks_changed","#
+            + #""tasks":[{"task_id":"m1","ambient":true}]}"#)
+        runner.handle(#"{"type":"result","subtype":"success","result":"Watching"}"#)
+        XCTAssertTrue(journal.isFinished)
+    }
+
     func testClaudeFailedResultEndsTheRunDespiteBackgroundTasks() throws {
         let (runner, journal, _) = try claudeStreamRun()
         runner.handle(#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1"}]}"#)
