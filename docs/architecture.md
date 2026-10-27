@@ -317,7 +317,8 @@ flowchart LR
   read from where it ended: assistant entries have the stream-json shape, a
   message typed mid-turn appears as a `queued_command` attachment, and
   `system`/`turn_duration` ends a turn (`ClaudeTranscript`, shapes from Claude
-  Code 2.1.296 on 2026-10-11). A background task starts with a tool result
+  Code 2.1.296 on 2026-10-11); its `entrypoint` names the runner that wrote
+  it (`cli` this one, `sdk-cli` `ClaudeStreamRun`). A background task starts with a tool result
   whose `toolUseResult` carries `backgroundTaskId` (shell) or
   `status: async_launched` and `agentId` (agent), and ends with a
   `<task-notification>` naming its `<task-id>`s, as a user entry or, mid-turn, a
@@ -357,7 +358,9 @@ flowchart LR
     and `subagent_finished` carry `will_wake`, and `turn_completed` names the
     turn it ends by `prompt_id`. A woken turn runs under its own prompt id
     (`task-completed-<task id>`) with its text on ordinary `session/update`s
-    (grok 1.0.70, live 2026-10-26).
+    (grok 1.0.70, live 2026-10-26). The persisted `updates.jsonl` names these
+    differently (all `_x.ai/session/update`), so its shapes do not show the
+    live method names.
   - `ScreenRun` writes a zsh script that runs the command with its output
     `tee`d to the log and writes `${pipestatus[1]}` to an exit file, starts it
     with `screen -dmS rota-<id>` (macOS ships screen 4.00, which has no
