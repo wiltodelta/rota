@@ -28,9 +28,6 @@ public struct ModelOption: Hashable, Identifiable, Sendable {
 /// without a prompt. Claude answers control initialization with resolved model
 /// IDs, display names and supported efforts, without starting a model turn.
 public enum ModelCatalog {
-    /// The `reasoning_effort` options of a Grok ACP session, 2026-10-09.
-    static let grokEfforts = ["low", "medium", "high", "xhigh"]
-
     /// Blocks while the CLI answers: call it off the main thread.
     public static func models(for harness: Harness, executable: String) -> [ModelOption] {
         guard FileManager.default.isExecutableFile(atPath: executable) else { return [] }
@@ -64,6 +61,7 @@ public enum ModelCatalog {
     }
 
     static func grokModels(executable: String) -> [ModelOption] {
+        if let models = GrokCatalog.read(executable: executable) { return models }
         let (status, output) = ProcessLauncher.capture(executable, ["models"], in: NSTemporaryDirectory(),
                                                        timeout: 10, errors: false)
         return status == 0 ? parseGrokModels(output) : []
@@ -76,7 +74,7 @@ public enum ModelCatalog {
             guard trimmed.hasPrefix("* ") || trimmed.hasPrefix("- ") else { return nil }
             let words = trimmed.dropFirst(2).split(separator: " ")
             guard let id = words.first.map(String.init) else { return nil }
-            return ModelOption(id: id, title: id, efforts: grokEfforts, isDefault: words.contains("(default)"))
+            return ModelOption(id: id, title: id, efforts: [], isDefault: words.contains("(default)"))
         }
     }
 

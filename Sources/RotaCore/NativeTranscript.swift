@@ -5,7 +5,7 @@ import Foundation
 struct NativeTranscript {
     enum Event: Equatable {
         case item(TranscriptItem.Kind, String)
-        case chunk(String)
+        case chunk(String, kind: TranscriptItem.Kind = .agent)
         case configuration(SessionConfiguration)
         case state(TerminalState)
     }
@@ -14,18 +14,45 @@ struct NativeTranscript {
     let harness: Harness
     private var offset: UInt64
     private var partial = Data()
+    private var antigravityDecoder = AntigravityTranscript()
+    private var primed = false
 
-    init(url: URL, harness: Harness) throws {
+    init(url: URL, harness: Harness, offset: UInt64? = nil) throws {
         self.url = url
         self.harness = harness
         let file = try FileHandle(forReadingFrom: url)
         defer { try? file.close() }
-        offset = try file.seekToEnd()
+        self.offset = try offset ?? file.seekToEnd()
     }
 
-    mutating func read() throws -> [Event] {
+    /// Revisions after a checkpoint may repeat a step already finalized before the host stopped.
+    private mutating func rememberAntigravity(_ file: FileHandle, through end: UInt64) throws {
+        try file.seek(toOffset: 0)
+        var remaining = end
+        var pending = Data()
+        while remaining > 0, let bytes = try file.read(upToCount: Int(min(remaining, 65_536))), !bytes.isEmpty {
+            remaining -= UInt64(bytes.count)
+            pending.append(bytes)
+            while let newline = pending.firstIndex(of: 10) {
+                let row = Data(pending[..<newline])
+                pending.removeSubrange(...newline)
+                if !row.isEmpty, let value = try JSONSerialization.jsonObject(with: row) as? [String: Any] {
+                    _ = antigravityDecoder.read(value)
+                }
+            }
+        }
+    }
+
+    var checkpoint: UInt64 { offset - UInt64(partial.count) }
+
+    mutating func read(receive: (([Event], String) -> Void)? = nil) throws -> [Event] {
         let file = try FileHandle(forReadingFrom: url)
         defer { try? file.close() }
+        // TerminalRun reads on its queue; do not scan an archive during its main-actor launch.
+        if harness == .antigravity, !primed {
+            try rememberAntigravity(file, through: offset)
+            primed = true
+        }
         guard try file.seekToEnd() >= offset else {
             throw CocoaError(.fileReadCorruptFile)
         }
@@ -35,17 +62,28 @@ struct NativeTranscript {
             offset += UInt64(data.count)
             partial.append(data)
             while let newline = partial.firstIndex(of: 10) {
+                let start = offset - UInt64(partial.count)
                 let line = Data(partial[..<newline])
                 partial.removeSubrange(...newline)
-                if !line.isEmpty { events += try Self.events(line, harness: harness) }
+                if !line.isEmpty {
+                    let decoded = try decode(line)
+                    if let receive { receive(decoded, url.lastPathComponent + "/\(start)") } else { events += decoded }
+                }
             }
         }
         return events
     }
 
+    private mutating func decode(_ data: Data) throws -> [Event] {
+        guard harness == .antigravity else { return try Self.events(data, harness: harness) }
+        guard let row = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
+        return antigravityDecoder.read(row)
+    }
+
     static func locate(_ harness: Harness, session: String) -> URL? {
         let home = FileManager.default.homeDirectoryForCurrentUser
         if harness == .claude { return ClaudeInteractiveRun.transcriptFile(session) }
+        if harness == .antigravity { return AntigravityQuestionArchive(session: session)?.file }
         guard harness == .codex || harness == .grok else { return nil }
         let root = home.appendingPathComponent(harness == .codex ? ".codex/sessions" : ".grok/sessions")
         guard let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil,
@@ -74,7 +112,8 @@ struct NativeTranscript {
         case .claude: return claude(data, entry: entry)
         case .codex: return codex(entry)
         case .grok: return grok(entry)
-        case .antigravity, .shell: return []
+        case .antigravity: return AntigravityTranscript.events(entry)
+        case .shell: return []
         }
     }
 
@@ -93,7 +132,7 @@ struct NativeTranscript {
         case .service(let text): return [.item(.status, text)]
         case .apiError(let text): return [.item(.error, text), .state(.waiting)]
         case .turnEnded: return [.state(.waiting)]
-        case .background, .other: return []
+        case .background, .other: return StreamJSONFormatter.items(data).map { .item($0.kind, $0.text) }
         }
     }
 
@@ -122,6 +161,12 @@ struct NativeTranscript {
 
     private static func codexItem(_ payload: [String: Any]) -> [Event] {
         switch payload["type"] as? String {
+        case "reasoning":
+            return (payload["summary"] as? [[String: Any]] ?? []).compactMap { block in
+                (block["text"] as? String).map { .item(.reasoning, $0) }
+            }
+        case "function_call_output", "custom_tool_call_output":
+            return (payload["output"] as? String).map { [.item(.output, $0)] } ?? []
         case "message" where payload["role"] as? String == "assistant":
             return text(payload).map { [.item(.agent, $0)] } ?? []
         case "function_call", "custom_tool_call":
@@ -137,7 +182,7 @@ struct NativeTranscript {
               let params = entry["params"] as? [String: Any],
               let update = params["update"] as? [String: Any] else { return [] }
         switch update["sessionUpdate"] as? String {
-        case "user_message_chunk", "agent_message_chunk":
+        case "user_message_chunk", "agent_message_chunk", "agent_thought_chunk":
             guard let content = update["content"] as? [String: Any], content["type"] as? String == "text",
                   let text = content["text"] as? String else { return [] }
             if update["sessionUpdate"] as? String == "user_message_chunk" {
@@ -145,7 +190,8 @@ struct NativeTranscript {
                 return [.configuration(.init(model: metadata?["modelId"] as? String)),
                         .item(.user, text), .state(.working)]
             }
-            return [.chunk(text)]
+            let thought = update["sessionUpdate"] as? String == "agent_thought_chunk"
+            return [.chunk(text, kind: thought ? .reasoning : .agent)]
         case "config_option_update":
             return [.configuration(.acp(update))]
         case "turn_completed": return [.state(.waiting)]
@@ -158,4 +204,5 @@ struct NativeTranscript {
         let parts = (message["content"] as? [[String: Any]])?.compactMap { $0["text"] as? String } ?? []
         return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
+
 }

@@ -62,7 +62,7 @@ final class AntigravityTests: XCTestCase {
         XCTAssertEqual(Harness.antigravity.defaultExecutable(home: URL(fileURLWithPath: "/Users/example")),
                        "/Users/example/.local/bin/agy")
         XCTAssertTrue(Harness.antigravity.takesMessages)
-        XCTAssertNil(Harness.antigravity.terminal(session: "a1", running: false))
+        XCTAssertEqual(Harness.antigravity.terminal(session: "a1", running: false)?.arguments, ["--conversation", "a1"])
         XCTAssertEqual(AgentAccess.addArguments(.antigravity, command: "/app/rota"),
                        ["mcp", "add", "rota", "/app/rota", "mcp"])
         XCTAssertEqual(AgentAccess.removeArguments(.antigravity), ["mcp", "remove", "rota"])

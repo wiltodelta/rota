@@ -278,6 +278,12 @@ extension Scheduler {
         if let ended = record.endedAt { json["endedAt"] = Self.timestamp.string(from: ended) }
         json["model"] = record.reportedModel ?? record.model
         json["effort"] = record.reportedEffort ?? record.effort
+        json["executablePath"] = record.executablePath
+        json["cliVersion"] = record.cliVersion
+        json["serverVersion"] = record.serverVersion
+        json["compatibilityNotice"] = record.compatibilityNotice
+        json["needsReconciliation"] = record.needsReconciliation == true
+        if let mode = record.launchMode { json["launchMode"] = mode.name }
         json["unread"] = record.isUnread
         json["canMessage"] = canMessage(record) && record.questions?.isEmpty != false
         json["canDelete"] = canDelete(record)

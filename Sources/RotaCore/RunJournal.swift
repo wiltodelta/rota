@@ -11,9 +11,20 @@ final class RunJournal: @unchecked Sendable {
     private var closed = false
     private var pendingText = ""
     private var pendingID: Int?
+    private var pendingKind = TranscriptItem.Kind.agent
+    private var pendingNativeID: String?
+    private var nativeItems: [String: String]
     private var transcript: TranscriptJournal?
     private let images: SessionImageStore?
     private var reportedConfiguration = SessionConfiguration()
+    private var sourceIDs: Set<String>
+    private let sourceKey = "rota-journal-" + UUID().uuidString
+
+    private final class SourceFrame {
+        let id: String
+        var index = 0
+        init(_ id: String) { self.id = id }
+    }
 
     init(output: FileHandle, events: RunEvents, transcript: TranscriptJournal? = nil,
          images: SessionImageStore? = nil) {
@@ -21,6 +32,29 @@ final class RunJournal: @unchecked Sendable {
         self.events = events
         self.transcript = transcript
         self.images = images
+        sourceIDs = transcript?.sourceIDs ?? []
+        nativeItems = transcript?.nativeItems ?? [:]
+        if let item = transcript?.unfinished {
+            pendingID = item.id
+            pendingText = item.text
+            pendingKind = item.kind
+            pendingNativeID = item.nativeID
+            if let id = item.nativeID { nativeItems[id] = nil }
+        }
+    }
+
+    /// The thread-local frame cannot leak into an asynchronous human answer callback.
+    func withSource(_ source: String, _ body: () -> Void) {
+        let old = Thread.current.threadDictionary[sourceKey]
+        Thread.current.threadDictionary[sourceKey] = SourceFrame(source)
+        defer { Thread.current.threadDictionary[sourceKey] = old }
+        body()
+    }
+
+    private func nextSource() -> String? {
+        guard let frame = Thread.current.threadDictionary[sourceKey] as? SourceFrame else { return nil }
+        defer { frame.index += 1 }
+        return frame.id + "/\(frame.index)"
     }
 
     var isFinished: Bool {
@@ -34,40 +68,54 @@ final class RunJournal: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard !closed else { return }
+        let source = nextSource()
+        if let source, !sourceIDs.insert(source).inserted { return }
         flushText()
         write(text)
         if let (kind, body) = Transcript.classify(text, shell: false) {
-            appendItem(kind, body)
+            appendItem(kind, body, sourceID: source)
         } else {
-            persist(TranscriptRecord(type: "checkpoint", required: false, logSize: output.offsetInFile))
+            persist(TranscriptRecord(type: "checkpoint", required: false,
+                                     logSize: output.offsetInFile, sourceID: source))
         }
     }
 
     /// The adapter chooses the kind before content reaches either storage format.
-    func record(_ kind: TranscriptItem.Kind, _ text: String) {
+    func record(_ kind: TranscriptItem.Kind, _ text: String, nativeID: String? = nil) {
         lock.lock()
         defer { lock.unlock() }
         guard !closed else { return }
+        if let nativeID, nativeItems[nativeID] != nil { return }
+        let source = nextSource()
+        if let source, !sourceIDs.insert(source).inserted { return }
         flushText()
         let item = TranscriptItem(id: 0, kind: kind, text: text).presented
         if item.kind == .agent { captureImages(item.text, itemID: transcript?.nextID) }
         write(Self.readable(item.kind, item.text))
-        appendItem(item.kind, item.text)
+        appendItem(item.kind, item.text, sourceID: source, nativeID: nativeID)
+        if let nativeID { nativeItems[nativeID] = text }
     }
 
     /// Partial text is visible immediately; the readable log gets one completed message.
-    func text(_ chunk: String) {
+    func text(_ chunk: String, kind: TranscriptItem.Kind = .agent, nativeID: String? = nil) {
         lock.lock()
         defer { lock.unlock() }
         guard !closed, !chunk.isEmpty else { return }
+        let source = nextSource()
+        if let source, !sourceIDs.insert(source).inserted { return }
+        if pendingKind != kind || pendingNativeID != nativeID { flushText() }
+        pendingKind = kind
+        pendingNativeID = nativeID
         pendingText += chunk
         if let pendingID {
-            persist(TranscriptRecord(type: "append", id: pendingID, text: chunk, logSize: output.offsetInFile))
+            persist(TranscriptRecord(type: "append", id: pendingID, text: chunk,
+                                     logSize: output.offsetInFile, sourceID: source))
         } else if let transcript {
             let id = transcript.allocateID()
             pendingID = id
-            persist(TranscriptRecord(type: "item", id: id, kind: "agent", text: chunk,
-                                     complete: false, logSize: output.offsetInFile))
+            persist(TranscriptRecord(type: "item", id: id, kind: kind.rawValue, text: chunk,
+                                     complete: false, logSize: output.offsetInFile,
+                                     sourceID: source, nativeID: nativeID))
         }
     }
 
@@ -75,6 +123,20 @@ final class RunJournal: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         flushText()
+    }
+
+    /// History can contain the full message whose prefix was streamed before the host stopped.
+    func reconcileText(_ text: String, kind: TranscriptItem.Kind, nativeID: String) {
+        let prior = lock.withLock { pendingNativeID == nativeID ? pendingText : nativeItems[nativeID] }
+        if let prior {
+            if text == prior { return endText() }
+            if text.hasPrefix(prior) {
+                self.text(String(text.dropFirst(prior.count)), kind: kind, nativeID: nativeID)
+                return endText()
+            }
+            return record(.status, "The provider revised a previously recorded message; see its native history.")
+        }
+        record(kind, text, nativeID: nativeID)
     }
 
     static func readable(_ kind: TranscriptItem.Kind, _ text: String) -> String {
@@ -86,7 +148,9 @@ final class RunJournal: @unchecked Sendable {
         case .plan:
             return ([PlanStep.prefix + PlanStep.header] + text.components(separatedBy: "\n")
                 .map { PlanStep.prefix + $0 }).joined(separator: "\n")
-        case .agent, .output: return text
+        case .agent: return text
+        case .reasoning, .output:
+            return text.components(separatedBy: "\n").map { "[\(kind.rawValue)] " + $0 }.joined(separator: "\n")
         }
     }
 
@@ -144,6 +208,14 @@ final class RunJournal: @unchecked Sendable {
         DispatchQueue.main.async { [next] in self.events.configuration(next) }
     }
 
+    func provenance(cli: String? = nil, server: String? = nil) {
+        DispatchQueue.main.async { self.events.provenance(cli, server) }
+    }
+
+    func requireReconciliation() {
+        DispatchQueue.main.async { self.events.reconciliationRequired() }
+    }
+
     /// Reports the outcome once and closes the log.
     func finish(_ outcome: RunOutcome) {
         lock.lock()
@@ -163,15 +235,17 @@ final class RunJournal: @unchecked Sendable {
         guard !pendingText.isEmpty else { return }
         let text = pendingText
         let itemID = pendingID
-        write(text.trimmingCharacters(in: .newlines))
+        write(Self.readable(pendingKind, text.trimmingCharacters(in: .newlines)))
         if let itemID {
             persist(TranscriptRecord(type: "complete", id: itemID, logSize: output.offsetInFile))
         }
         pendingID = nil
+        if let id = pendingNativeID { nativeItems[id] = text }
+        pendingNativeID = nil
         pendingText = ""
         // Archiving may add a warning. Complete the streamed entry first so
         // every page remains a sequence of independently replayable messages.
-        captureImages(text, itemID: itemID)
+        if pendingKind == .agent { captureImages(text, itemID: itemID) }
     }
 
     private func captureImages(_ text: String, itemID: Int?) {
@@ -184,10 +258,11 @@ final class RunJournal: @unchecked Sendable {
         }
     }
 
-    private func appendItem(_ kind: TranscriptItem.Kind, _ text: String) {
+    private func appendItem(_ kind: TranscriptItem.Kind, _ text: String,
+                            sourceID: String? = nil, nativeID: String? = nil) {
         guard let transcript else { return }
         persist(TranscriptRecord(type: "item", id: transcript.allocateID(), kind: kind.rawValue,
-                                 text: text, logSize: output.offsetInFile))
+                                 text: text, logSize: output.offsetInFile, sourceID: sourceID, nativeID: nativeID))
     }
 
     private func persist(_ record: TranscriptRecord) {

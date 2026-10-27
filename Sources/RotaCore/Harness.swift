@@ -1,7 +1,7 @@
 import Foundation
 
 /// How a run is started and watched. Each keeps the run open to the user while it works.
-public enum LaunchMode: Equatable, Sendable {
+public enum LaunchMode: Codable, Equatable, Sendable {
     /// `claude -p` with stream-json in and out; Rota writes into the session.
     case claudeStream
     /// An interactive `claude` in a detached `screen`; Rota reads its transcript and types into it.
@@ -90,12 +90,13 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
         case (.claude, false): return (nil, ["--resume", session])
         case (.codex, false): return (nil, ["resume", session])
         case (.grok, false): return (nil, ["--resume", session])
+        case (.antigravity, false): return (nil, ["--conversation", session])
         case (.shell, true): return (ScreenRun.screen, ["-r", session])
-        case (.claude, true), (.codex, true), (.grok, true), (.antigravity, _), (.shell, false): return nil
+        case (.claude, true), (.codex, true), (.grok, true), (.antigravity, true), (.shell, false): return nil
         }
     }
 
     /// Whether Rota's chat field can message the session: every agent can, running
     /// or finished; a shell command takes input only in its terminal.
-    public var takesMessages: Bool { self != .shell }
+    public var takesMessages: Bool { launchMode.capabilities.messages != .terminal }
 }

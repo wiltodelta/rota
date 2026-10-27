@@ -77,6 +77,8 @@ final class AntigravityCatalogTests: XCTestCase {
         XCTAssertNotEqual(script, broken)
         try broken.write(to: executable, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
-        XCTAssertTrue(ModelCatalog.models(for: .antigravity, executable: executable.path).isEmpty)
+        let partial = AntigravityCatalog.readResult(executable: executable.path)
+        XCTAssertEqual(partial.models.map(\.id), ["model-a"])
+        XCTAssertFalse(partial.complete)
     }
 }

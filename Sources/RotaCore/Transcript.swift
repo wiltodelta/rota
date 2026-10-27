@@ -7,6 +7,8 @@ public struct TranscriptItem: Equatable, Identifiable, Sendable {
         case user
         /// What the agent said.
         case agent
+        /// Reasoning explicitly exposed by the harness, separate from its answer.
+        case reasoning
         /// A tool the agent called.
         case tool
         /// Rota's own notes: the run ended, a message was not delivered.
@@ -25,6 +27,7 @@ public struct TranscriptItem: Equatable, Identifiable, Sendable {
     public var kind: Kind
     public var text: String
     public var isComplete = true
+    public var nativeID: String?
 }
 
 /// Reads a run log into chat entries. Runners write the log with line prefixes:
@@ -89,6 +92,8 @@ public enum Transcript {
             return (.status, readableDurations(String(body)))
         }
         if line.hasPrefix("[error] ") { return (.error, String(line.dropFirst(8))) }
+        if line.hasPrefix("[reasoning] ") { return (.reasoning, String(line.dropFirst(12))) }
+        if line.hasPrefix("[output] ") { return (.output, String(line.dropFirst(9))) }
         if line.hasPrefix(PlanStep.prefix) { return (.plan, String(line.dropFirst(PlanStep.prefix.count))) }
         if isHeader(line) { return nil }
         return (shell ? .output : .agent, line)
@@ -156,6 +161,7 @@ public struct TranscriptTurn: Equatable, Identifiable, Sendable {
                 switch item.kind {
                 case .status, .error: current.notes.append(item)
                 case .plan: current.plan = item
+                case .reasoning: current.work.append(item)
                 case .user: break
                 default:
                     if let lastTool, index <= lastTool {

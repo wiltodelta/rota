@@ -54,7 +54,8 @@ public final class Scheduler {
     /// Routines whose run was going when the Mac went to sleep.
     @ObservationIgnored var sleptThrough: Set<String> = []
     /// Sessions cut off by sleep, shutdown or a lost network, to continue once online: record id to routine id.
-    var survivingClaude: [String: RunRecord] = [:]
+    var survivingSessions: [String: RunRecord] = [:]
+    @ObservationIgnored var reconciliationRetry: [String: Date] = [:]
     @ObservationIgnored var pendingResumes: [UUID: String] = [:]
     /// Agent runs that failed on the network before they had a session, to run again: routine id to trigger.
     @ObservationIgnored var pendingReruns: [String: RunTrigger] = [:]
@@ -104,9 +105,10 @@ public final class Scheduler {
         for record in history.closeOrphans(routineIDs: routines.map(\.id), now: now()) {
             if stillRunning(record) {
                 if adoptSurviving(record) { continue }
-                survivingClaude[record.routineID] = record
-            } else if resumable(record) {
-                pendingResumes[record.id] = record.routineID
+                survivingSessions[record.routineID] = record
+            } else if record.sessionID != nil
+                || record.logPath.map({ RunLease.read(URL(fileURLWithPath: $0)) != nil }) == true {
+                reconcileNative(record)
             }
         }
         historyVersion += 1
@@ -122,7 +124,8 @@ public final class Scheduler {
     public func tick() {
         // Offline (just woken, no Wi-Fi yet), a due slot waits rather than failing; it runs once online.
         guard isOnline() else { return }
-        refreshSurvivingClaude()
+        refreshSurvivingSession()
+        reconcilePending()
         let current = now()
         var changed = false
         for index in routines.indices where routines[index].enabled {
@@ -139,7 +142,7 @@ public final class Scheduler {
             if current.timeIntervalSince(due) > Self.missedRunGrace {
                 record(skipped: "missed the \(due.formatted(date: .abbreviated, time: .shortened)) slot",
                        routine: routine, at: current)
-            } else if active[routine.id] != nil || survivingClaude[routine.id] != nil {
+            } else if active[routine.id] != nil || survivingSessions[routine.id] != nil {
                 record(skipped: "the previous run was still going", routine: routine, at: current, notify: false)
             } else {
                 // A minute late is the tick's own lag; later than that, the slot was missed.
@@ -153,8 +156,8 @@ public final class Scheduler {
 
     public func run(_ routine: Routine, trigger: RunTrigger) {
         guard active[routine.id] == nil else { return }
-        guard !hasSurvivingClaude(routine.id) else {
-            lastError = "This routine still has a Claude session running. Open it in Terminal before starting another."
+        guard !hasSurvivingSession(routine.id) else {
+            lastError = "This routine still has a native session running. Close it before starting another."
             return
         }
         var record = RunRecord(routineID: routine.id, trigger: trigger, harness: routine.harness,
@@ -196,8 +199,14 @@ public final class Scheduler {
     @discardableResult
     func start(_ record: RunRecord, spec: LaunchSpec) -> Bool {
         var record = record
+        record.launchMode = spec.mode
+        record.executablePath = spec.executable
+        record.cliVersion = nil
+        record.serverVersion = nil
+        record.needsReconciliation = nil
         let id = record.routineID
         let launchID = UUID()
+        record.executionID = launchID
         launchIDs[id] = launchID
         let events = events(for: record, launchID: launchID)
         do {
@@ -266,21 +275,6 @@ public final class Scheduler {
     public var terminalTranscript: @Sendable (Harness, String) -> URL? = NativeTranscript.locate
     var openingTerminals: Set<UUID> = []
 
-    /// The terminal command for `record`'s session, with the harness's executable filled in.
-    public func terminalCommand(for record: RunRecord) -> (executable: String, arguments: [String])? {
-        if isSurvivingClaude(record), let session = record.sessionID {
-            return (ScreenRun.screen, ["-r", ClaudeInteractiveRun.screenName(session)])
-        }
-        if isActive(record), let command = controls[record.routineID]?.attachCommand, let program = command.first {
-            return (program, Array(command.dropFirst()))
-        }
-        guard isActive(record) || active[record.routineID] == nil,
-              let session = record.sessionID,
-              let (program, arguments) = record.harness.terminal(session: session, running: isActive(record))
-        else { return nil }
-        return (program ?? executable(record.harness), arguments)
-    }
-
     func attachSession(_ session: String, to routineID: String) {
         guard var record = active[routineID] else { return }
         record.sessionID = session
@@ -299,7 +293,12 @@ public final class Scheduler {
         controls[routineID] = nil
         runStarts[routineID] = nil
         saveRecord(record)
-        recover(record, sleptThrough: self.sleptThrough.remove(routineID) != nil)
+        let slept = self.sleptThrough.remove(routineID) != nil
+        if record.needsReconciliation == true {
+            reserveUnverified(record)
+        } else {
+            recover(record, sleptThrough: slept)
+        }
         Self.log.info("\(routineID, privacy: .public) ended: \(outcome.title, privacy: .public)")
         if let routine = routine(routineID) { notifier?.runEnded(record, routine: routine) }
         pauseAfterRepeatedFailures(routineID)

@@ -75,6 +75,8 @@ public struct RunEvents {
     public var terminalInput: () -> Void
     /// A message the run could no longer take, because its session was ending.
     public var undelivered: (String) -> Void
+    public var provenance: (String?, String?) -> Void
+    public var reconciliationRequired: () -> Void
 
     public init(session: @escaping (String) -> Void, finished: @escaping (RunOutcome) -> Void,
                 configuration: @escaping (SessionConfiguration) -> Void = { _ in },
@@ -82,7 +84,9 @@ public struct RunEvents {
                 questionResolved: @escaping (String) -> Void = { _ in },
                 terminalState: @escaping (TerminalState) -> Void = { _ in },
                 terminalInput: @escaping () -> Void = {},
-                undelivered: @escaping (String) -> Void = { _ in }) {
+                undelivered: @escaping (String) -> Void = { _ in },
+                provenance: @escaping (String?, String?) -> Void = { _, _ in },
+                reconciliationRequired: @escaping () -> Void = {}) {
         self.session = session
         self.finished = finished
         self.configuration = configuration
@@ -91,6 +95,8 @@ public struct RunEvents {
         self.terminalState = terminalState
         self.terminalInput = terminalInput
         self.undelivered = undelivered
+        self.provenance = provenance
+        self.reconciliationRequired = reconciliationRequired
     }
 }
 
@@ -138,6 +144,10 @@ public final class ProcessLauncher: RoutineLaunching {
         output.seekToEndOfFile()
         Self.log.info("Starting \(spec.executable, privacy: .public) in \(spec.workingDirectory, privacy: .public)")
         let journal = Self.journal(for: spec, output: output, events: events)
+        DispatchQueue.global(qos: .utility).async {
+            let version = ExecutableDiscovery.version(of: spec.executable)
+            journal.provenance(cli: version)
+        }
         if spec.mode.recordsInitialPrompt, !spec.adopt { journal.record(.user, spec.prompt) }
         return try start(spec, journal: journal)
     }

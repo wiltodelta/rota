@@ -58,6 +58,8 @@ fallback cannot load that tool.
 
 The [user guide](docs/user-guide.md#features) explains the execution modes
 and differences between agents.
+The [compatibility procedure](docs/harness-compatibility.md) explains adapter
+checks, recovery guarantees, and updates when a CLI changes.
 
 ## Every run is a conversation
 
@@ -77,7 +79,7 @@ until you answer it or explicitly cancel the request.
 
 *Questions stay with the work that prompted them.*
 
-Claude Code, Codex, and Grok Build sessions can also continue in Terminal.
+Claude Code, Codex, Grok Build, and Antigravity sessions can also continue in Terminal.
 Rota follows the new activity while it stays open. Question forms,
 mid-run messages, and terminal continuation differ by agent; see
 [agent questions](docs/agent-questions.md) and the [user guide](docs/user-guide.md).

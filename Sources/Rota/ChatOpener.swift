@@ -10,7 +10,7 @@ enum ChatOpener {
 
     static func open(_ record: RunRecord, workingDirectory: String, scheduler: Scheduler, terminal: String?) {
         Task {
-            if !scheduler.isActive(record), !scheduler.isSurvivingClaude(record) {
+            if !scheduler.isActive(record), !scheduler.isSurvivingSession(record) {
                 guard await scheduler.continueInTerminal(record) else { return }
             }
             openAttached(record, workingDirectory: workingDirectory, scheduler: scheduler, terminal: terminal)

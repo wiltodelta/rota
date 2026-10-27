@@ -21,16 +21,32 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     private var early: [String] = []
     /// Grok's own work after the prompts return: background tasks and the turns their completion wakes.
     private var activity = GrokActivity()
+    private var applied = SessionConfiguration()
+    private var effortOptions: [String] = []
 
     private init(spec: LaunchSpec, journal: RunJournal) {
         self.spec = spec
         self.journal = journal
+
     }
 
-    static func start(_ spec: LaunchSpec, journal: RunJournal) -> GrokACPRun {
+    static func start(_ spec: LaunchSpec, journal: RunJournal,
+                      transport: MessageTransport? = nil) -> GrokACPRun {
         let run = GrokACPRun(spec: spec, journal: journal)
-        run.queue.async { run.connect() }
+        let injected = UncheckedSendable(transport)
+        run.queue.async {
+            run.restoreActivity()
+            if let transport = injected.value { run.connect(transport: transport) } else { run.connect() }
+        }
         return run
+    }
+
+    private func restoreActivity() {
+        if let session = self.spec.resume {
+            let restored = GrokRecovery(session: session)
+            activity = restored.activity
+            if spec.adopt { routineOutcome = restored.outcome }
+        }
     }
 
     func stop() {
@@ -41,16 +57,16 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         queue.async {
             guard !self.journal.isFinished else { return self.journal.undelivered(message) }
             self.journal.record(.user, message)
-            guard let sessionID = self.sessionID else { return self.early.append(message) }
+            guard let sessionID = self.sessionID, !self.loading else { return self.early.append(message) }
             self.prompt(message, in: sessionID)
         }
     }
 
     private func prompt(_ message: String, in sessionID: String) {
         openPrompts += 1
-        let params: [String: Any] = ["sessionId": sessionID, "prompt": [["type": "text", "text": message]]]
+        let params: [String: Any] = ["sessionId": sessionID, "prompt": HarnessInput.blocks(message, for: .grokACP)]
         peer?.request("session/prompt", params) { result in
-            self.promptEnded(result, isRoutine: false)
+            self.promptEnded(result)
         }
     }
 
@@ -74,21 +90,27 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
             return journal.finish(.launchFailed(error.localizedDescription))
         }
         self.process = process
-        let peer = JSONRPCPeer(transport: LineTransport(input: stdin.fileHandleForWriting,
-                                                        output: stdout.fileHandleForReading),
-                               callbackQueue: queue)
+        connect(transport: LineTransport(input: stdin.fileHandleForWriting, output: stdout.fileHandleForReading))
+    }
+
+    private func connect(transport: MessageTransport) {
+        let peer = JSONRPCPeer(transport: transport, callbackQueue: queue)
         peer.onNotification = { [weak self] method, params in self?.handle(method, params) }
         peer.onRequestAsync = { [weak self] id, method, params, reply in
+            guard let self, params["sessionId"] as? String == self.sessionID else {
+                self?.peer?.dismissRequest(id)
+                return
+            }
             // Retain the configured automatic tool permissions; explicit questions never auto-answer.
             if method == "session/request_permission", let result = Self.answer(method, params) { return reply(result) }
-            guard let self, var request = QuestionRequest.grok(method, params) else { return reply(nil) }
+            guard var request = QuestionRequest.grok(method, params) else { return reply(nil) }
             request.question.id = id
             let boxed = UncheckedSendable((request, reply))
             self.journal.ask(request.question) { answer in
                 self.queue.async { boxed.value.1(boxed.value.0.response(answer)) }
             }
         }
-        peer.onClose = { [weak self] in self?.journal.finish(.interrupted) }
+        peer.onClose = { [weak self] in self?.connectionLost() }
         self.peer = peer
         let hello: [String: Any] = ["protocolVersion": 1, "clientCapabilities": [String: Any]()]
         peer.request("initialize", hello) { [weak self] result in
@@ -114,22 +136,31 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     }
 
     private func initialized(_ result: Result<Any, JSONRPCError>) {
-        guard case .success = result else { return fail(result, "initialize") }
+        guard !journal.isFinished else { return }
+        guard case .success(let value) = result else { return fail(result, "initialize") }
+        let agent = (value as? [String: Any])?["agentInfo"] as? [String: Any]
+        let metadata = (value as? [String: Any])?["_meta"] as? [String: Any]
+        journal.provenance(server: agent?["version"] as? String ?? metadata?["agentVersion"] as? String)
         let directory = spec.resume.flatMap { NativeTranscript.locate(.grok, session: $0) }
             .flatMap(NativeTranscript.grokDirectory) ?? spec.workingDirectory
-        var params: [String: Any] = ["cwd": directory, "mcpServers": [Any]()]
+        var params: [String: Any] = ["cwd": directory, "mcpServers": SessionBridge.grok(spec)]
         // Grok's commands run under its shared leader, which has no per-session
         // environment; the session learns who it is from a rule instead.
         if let rule = Self.sessionRule(spec.environment) { params["_meta"] = ["rules": rule] }
         if let session = spec.resume {
             // Loading replays the session as updates; they are already in the log.
             params["sessionId"] = session
+            sessionID = session
             loading = true
             peer?.request("session/load", params) { [weak self] result in
                 self?.loading = false
                 guard case .success(let value) = result else { return self?.fail(result, "session/load") ?? () }
                 self?.configure(value)
-                self?.sessionReady(session)
+                if self?.spec.adopt == true {
+                    self?.restored(value, session: session)
+                } else {
+                    self?.sessionReady(session)
+                }
             }
         } else {
             peer?.request("session/new", params) { [weak self] result in
@@ -143,13 +174,41 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
             return fail(result, "session/new")
         }
         let configuration = configure(value)
+        if let requested = spec.model, configuration.model != requested {
+            journal.finish(.launchFailed("Grok did not apply the requested model."))
+            return disconnect()
+        }
         journal.line("[grok session \(id)" + (configuration.model.map { ", \($0)" } ?? "") + "]")
         sessionReady(id)
+    }
+
+    private func restored(_ value: Any, session: String) {
+        let metadata = (value as? [String: Any])?["_meta"] as? [String: Any]
+        if let running = metadata?["x.ai/runningPromptId"] as? String {
+            activity.adoptRunning(running)
+            routineOutcome = nil
+        }
+        journal.session(session)
+        if stopReason != nil, !activity.idle { peer?.notify("session/cancel", ["sessionId": session]) }
+        for message in early { prompt(message, in: session) }
+        early = []
+        if activity.idle, openPrompts == 0 {
+            journal.finish(stopReason ?? routineOutcome ?? .interrupted)
+            disconnect()
+        } else {
+            finishIfIdle()
+        }
     }
 
     @discardableResult
     private func configure(_ value: Any) -> SessionConfiguration {
         let configuration = SessionConfiguration.acp(value)
+        if configuration.model != nil { applied.model = configuration.model }
+        if configuration.effort != nil { applied.effort = configuration.effort }
+        let options = (value as? [String: Any])?["configOptions"] as? [[String: Any]] ?? []
+        if let effort = options.first(where: { $0["id"] as? String == "reasoning_effort" }) {
+            effortOptions = (effort["options"] as? [[String: Any]] ?? []).compactMap { $0["value"] as? String }
+        }
         journal.configure(configuration)
         return configuration
     }
@@ -157,7 +216,15 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     private func sessionReady(_ id: String) {
         sessionID = id
         journal.session(id)
+        if let requested = spec.model, applied.model != requested {
+            journal.finish(.launchFailed("Grok did not apply the requested model."))
+            return disconnect()
+        }
         guard let effort = spec.effort else { return beginPrompt(id) }
+        guard effortOptions.contains(effort) else {
+            journal.finish(.launchFailed("Grok does not advertise the requested effort for this model."))
+            return disconnect()
+        }
         // The shared leader can ignore the proxy's effort flag. Apply it to this session only.
         peer?.request("session/set_config_option", ["sessionId": id, "configId": "reasoning_effort",
                                                     "value": effort]) { [weak self] result in
@@ -174,30 +241,26 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
 
     private func beginPrompt(_ id: String) {
         guard !journal.isFinished, stopReason == nil else { return }
-        let params: [String: Any] = ["sessionId": id, "prompt": [["type": "text", "text": spec.prompt]]]
-        openPrompts += 1
-        peer?.request("session/prompt", params) { [weak self] result in
-            self?.promptEnded(result, isRoutine: true)
-        }
+        prompt(spec.prompt, in: id)
         // Grok queues each after the routine's prompt, as it does a message sent mid-turn.
         for message in early { prompt(message, in: id) }
         early = []
     }
 
     /// The routine's own prompt decides the outcome; the run ends when no prompt is left open.
-    private func promptEnded(_ result: Result<Any, JSONRPCError>, isRoutine: Bool) {
+    private func promptEnded(_ result: Result<Any, JSONRPCError>) {
         openPrompts -= 1
         journal.endText()
         let outcome: RunOutcome
         switch result {
         case .success(let value):
-            let reason = (value as? [String: Any])?["stopReason"] as? String
-            outcome = reason == "cancelled" ? (stopReason ?? .cancelled) : .succeeded
+            outcome = stopReason ?? GrokRecovery.outcome((value as? [String: Any])?["stopReason"] as? String)
         case .failure(let error):
+            if error.message == "connection closed" { journal.requireReconciliation() }
             journal.line("[error] \(error.message)")
             outcome = stopReason ?? .failed(exitCode: 1)
         }
-        if isRoutine { routineOutcome = outcome }
+        if routineOutcome == nil || outcome != .succeeded { routineOutcome = outcome }
         if openPrompts <= 0, outcome == .succeeded, stopReason == nil, activity.running > 0 {
             journal.record(.status, TranscriptService.waiting(activity.running))
         }
@@ -208,38 +271,8 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     private func finishIfIdle() {
         guard openPrompts <= 0, let routineOutcome, !journal.isFinished else { return }
         guard routineOutcome != .succeeded || stopReason != nil || activity.idle else { return }
-        journal.finish(routineOutcome)
+        journal.finish(stopReason ?? routineOutcome)
         disconnect()
-    }
-
-    private func handle(_ method: String, _ params: [String: Any]) {
-        guard !loading else { return }
-        if method != "session/update" { return track(method, params) }
-        guard let update = params["update"] as? [String: Any] else { return }
-        switch update["sessionUpdate"] as? String {
-        case "config_option_update":
-            configure(update)
-        case "agent_message_chunk":
-            if let text = (update["content"] as? [String: Any])?["text"] as? String { journal.text(text) }
-        case "tool_call":
-            journal.record(.tool, update["title"] as? String ?? "tool")
-        case "plan":
-            let steps = (update["entries"] as? [[String: Any]] ?? []).map {
-                PlanStep(status: $0["status"] as? String, text: $0["content"] as? String ?? "")
-            }
-            if !steps.isEmpty { journal.record(.plan, PlanStep.body(steps)) }
-        default:
-            break
-        }
-    }
-
-    private func track(_ method: String, _ params: [String: Any]) {
-        guard let sessionID, activity.read(method, params, session: sessionID) else { return }
-        // A woken turn's text arrives as ordinary updates; its end closes that message.
-        if (params["update"] as? [String: Any])?["sessionUpdate"] as? String == "turn_completed" {
-            journal.endText()
-        }
-        finishIfIdle()
     }
 
     /// Permission requests (rare with --always-approve) get the first "allow"
@@ -255,22 +288,107 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     private func cancel(as reason: RunOutcome) {
         guard !journal.isFinished else { return }
         stopReason = reason
+        if sessionID == nil, spec.resume == nil {
+            journal.finish(reason)
+            return disconnect()
+        }
         if let sessionID { peer?.notify("session/cancel", ["sessionId": sessionID]) }
         queue.asyncAfter(deadline: .now() + 15) { [weak self] in
-            self?.journal.finish(reason)
-            self?.disconnect()
+            guard let self, !self.journal.isFinished else { return }
+            self.journal.record(.status, "Grok has not confirmed cancellation; waiting for the native session")
+            self.cancel(as: reason)
         }
     }
 
     private func fail(_ result: Result<Any, JSONRPCError>, _ step: String) {
-        if case .failure(let error) = result { journal.finish(.launchFailed("\(step): \(error.message)")) }
+        guard !journal.isFinished else { return }
+        if case .failure(let error) = result {
+            let absent = step == "session/load" && error.serverCode == "FS_NOT_FOUND"
+                && spec.resume.flatMap { NativeTranscript.locate(.grok, session: $0) } == nil
+                && FileManager.default.fileExists(atPath: spec.workingDirectory)
+            if spec.resume != nil, !absent { journal.requireReconciliation() }
+            journal.finish(.launchFailed("\(step): \(error.message)"))
+        }
         disconnect()
     }
 
-    private func disconnect() {
+    private func connectionLost() {
+        guard !journal.isFinished else { return }
+        if sessionID != nil || spec.resume != nil { journal.requireReconciliation() }
+        journal.finish(.interrupted)
+    }
+
+    func disconnect() {
         peer?.close()
         process?.terminate()
     }
+}
+
+private extension GrokACPRun {
+    private func handle(_ method: String, _ params: [String: Any]) {
+        if method != "session/update" { return track(method, params) }
+        guard params["sessionId"] as? String == sessionID else { return }
+        guard let update = params["update"] as? [String: Any] else { return }
+        switch update["sessionUpdate"] as? String {
+        case "config_option_update":
+            configure(update)
+        case "agent_message_chunk", "agent_thought_chunk":
+            let thought = update["sessionUpdate"] as? String == "agent_thought_chunk"
+            renderText(update, params: params, kind: thought ? .reasoning : .agent)
+        case "tool_call_update", "tool_call": renderTool(update)
+        case "plan":
+            let steps = (update["entries"] as? [[String: Any]] ?? []).map {
+                PlanStep(status: $0["status"] as? String, text: $0["content"] as? String ?? "")
+            }
+            if !steps.isEmpty { journal.record(.plan, PlanStep.body(steps)) }
+        default:
+            break
+        }
+    }
+
+    private func renderText(_ update: [String: Any], params: [String: Any], kind: TranscriptItem.Kind) {
+        guard let text = (update["content"] as? [String: Any])?["text"] as? String else { return }
+        let metadata = params["_meta"] as? [String: Any] ?? [:]
+        let suffix = kind == .reasoning ? "/thought" : "/text"
+        let nativeID = (metadata["promptId"] as? String).flatMap { prompt in
+            (metadata["streamStartMs"] as? NSNumber).map { "grok/\(sessionID ?? "")/\(prompt)/\($0)" + suffix }
+        }
+        if loading, let nativeID {
+            journal.reconcileText(text, kind: kind, nativeID: nativeID)
+        } else {
+            journal.text(text, kind: kind, nativeID: nativeID)
+        }
+    }
+
+    private func renderTool(_ update: [String: Any]) {
+        let toolID = (update["toolCallId"] as? String).map { "grok/\(sessionID ?? "")/tool/" + $0 }
+        if update["sessionUpdate"] as? String == "tool_call" {
+            journal.record(.tool, update["title"] as? String ?? "tool", nativeID: toolID)
+        }
+        for (index, block) in (update["content"] as? [[String: Any]] ?? []).enumerated() {
+            if let text = (block["content"] as? [String: Any])?["text"] as? String {
+                journal.record(.output, text, nativeID: toolID.map { $0 + "/\(index)" })
+            }
+        }
+    }
+
+    private func track(_ method: String, _ params: [String: Any]) {
+        if params["sessionId"] as? String == sessionID,
+           (params["update"] as? [String: Any])?["sessionUpdate"] as? String == "retry_state" {
+            journal.record(.status, "Grok updated its request retry state")
+        }
+        guard let sessionID, activity.read(method, params, session: sessionID) else { return }
+        // A woken turn's text arrives as ordinary updates; its end closes that message.
+        if (params["update"] as? [String: Any])?["sessionUpdate"] as? String == "turn_completed" {
+            journal.endText()
+            let update = params["update"] as? [String: Any]
+            let outcome = GrokRecovery.outcome(update?["stop_reason"] as? String)
+            if routineOutcome == nil || outcome != .succeeded { routineOutcome = outcome }
+        }
+        guard !loading else { return }
+        finishIfIdle()
+    }
+
 }
 
 /// What a Grok session still has going after its prompts return, read from the
@@ -292,6 +410,8 @@ struct GrokActivity {
 
     var idle: Bool { runningPrompt == nil && !queued && running == 0 && !wakePending }
 
+    mutating func adoptRunning(_ id: String) { runningPrompt = id }
+
     /// Applies one notification of `session`; true when it was about this session's activity.
     mutating func read(_ method: String, _ params: [String: Any], session: String) -> Bool {
         guard method.hasPrefix("_x.ai/"), params["sessionId"] as? String == session else { return false }
@@ -304,7 +424,7 @@ struct GrokActivity {
         return apply(update)
     }
 
-    private mutating func apply(_ update: [String: Any]) -> Bool {
+    mutating func apply(_ update: [String: Any]) -> Bool {
         if update["will_wake"] as? Bool == true { wakePending = true }
         switch update["sessionUpdate"] as? String {
         case "background_tasks":

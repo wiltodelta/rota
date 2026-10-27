@@ -55,6 +55,13 @@ struct AntigravityQuestionArchive {
     private var offset: UInt64 = 0
     private var pending = Data()
     private var seen = Set<String>()
+    private var reasoningSteps = Set<Int>()
+    private var reasoning: [(String, String)] = []
+
+    mutating func takeReasoning() -> [(String, String)] {
+        defer { reasoning.removeAll() }
+        return reasoning
+    }
 
     init?(session: String, home: URL = FileManager.default.homeDirectoryForCurrentUser,
           skipExisting: Bool = false) {
@@ -94,8 +101,11 @@ struct AntigravityQuestionArchive {
         guard !line.isEmpty else { return [] }
         let object = try JSONSerialization.jsonObject(with: line)
         guard let row = object as? [String: Any], row["type"] as? String == "PLANNER_RESPONSE",
-              row["status"] as? String == "DONE", let step = row["step_index"] as? Int,
-              let calls = row["tool_calls"] as? [[String: Any]] else { return [] }
+              row["status"] as? String == "DONE", let step = row["step_index"] as? Int else { return [] }
+        if let text = row["thinking"] as? String, !text.isEmpty, reasoningSteps.insert(step).inserted {
+            reasoning.append(("antigravity/\(session)/\(step)/thinking", text))
+        }
+        let calls = row["tool_calls"] as? [[String: Any]] ?? []
         return calls.enumerated().compactMap { index, call in
             let id = "antigravity/\(session)/\(step)/\(index)"
             guard let tool = call["name"] as? String,

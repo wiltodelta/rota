@@ -141,6 +141,8 @@ final class AuditRegressionTests: XCTestCase {
         XCTAssertFalse(journal.isFinished, "Claude starts another turn when the task finishes")
         runner.handle(#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#)
         runner.handle(#"{"type":"result","subtype":"success","result":"DONE"}"#)
+        XCTAssertFalse(journal.isFinished, "A native result closes input; process exit completes the run")
+        runner.exited(status: 0)
         XCTAssertTrue(journal.isFinished)
         let text = try String(contentsOf: log, encoding: .utf8)
         XCTAssertTrue(text.contains("Waiting for 1 background task"), text)
@@ -163,15 +165,21 @@ final class AuditRegressionTests: XCTestCase {
         XCTAssertFalse(journal.isFinished)
         runner.handle(#"{"type":"system","subtype":"init","session_id":"s1"}"#)
         runner.handle(#"{"type":"result","subtype":"success","result":"DONE"}"#)
+        XCTAssertFalse(journal.isFinished, "A native result closes input; process exit completes the run")
+        runner.exited(status: 0)
         XCTAssertTrue(journal.isFinished)
     }
 
     func testClaudeNotifiedTurnEndsWhenNoTurnFollows() throws {
         let ended = expectation(description: "finished")
-        let (runner, journal, _) = try claudeStreamRun { _ in ended.fulfill() }
+        let (runner, journal, _) = try claudeStreamRun {
+            XCTAssertEqual($0, .succeeded)
+            ended.fulfill()
+        }
         runner.settle = 0
         finishWhileAnswering(runner)
         XCTAssertFalse(journal.isFinished)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { runner.exited(status: 0) }
         wait(for: [ended], timeout: 5)
     }
 
@@ -184,6 +192,8 @@ final class AuditRegressionTests: XCTestCase {
         runner.handle(#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#)
         runner.handle(#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}"#)
         runner.handle(#"{"type":"result","subtype":"success","result":"DONE"}"#)
+        XCTAssertFalse(journal.isFinished, "A native result closes input; process exit completes the run")
+        runner.exited(status: 0)
         XCTAssertTrue(journal.isFinished)
     }
 
@@ -192,6 +202,8 @@ final class AuditRegressionTests: XCTestCase {
         runner.handle(#"{"type":"system","subtype":"background_tasks_changed","#
             + #""tasks":[{"task_id":"m1","ambient":true}]}"#)
         runner.handle(#"{"type":"result","subtype":"success","result":"Watching"}"#)
+        XCTAssertFalse(journal.isFinished, "A native result closes input; process exit completes the run")
+        runner.exited(status: 0)
         XCTAssertTrue(journal.isFinished)
     }
 
@@ -199,6 +211,8 @@ final class AuditRegressionTests: XCTestCase {
         let (runner, journal, _) = try claudeStreamRun()
         runner.handle(#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1"}]}"#)
         runner.handle(#"{"type":"result","subtype":"error_during_execution","is_error":true}"#)
+        XCTAssertFalse(journal.isFinished, "A native result closes input; process exit completes the run")
+        runner.exited(status: 0)
         XCTAssertTrue(journal.isFinished)
     }
 

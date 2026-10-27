@@ -50,6 +50,13 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     public var routineID: String
     public var trigger: RunTrigger
     public var harness: Harness
+    /// Execution provenance, absent in records written before capability tracking.
+    public var launchMode: LaunchMode?
+    public var executablePath: String?
+    public var cliVersion: String?
+    public var serverVersion: String?
+    public var executionID: UUID?
+    public var needsReconciliation: Bool?
     /// Explicit model and effort requested when this session started; absent in old records or for CLI defaults.
     public var model: String?
     public var effort: String?

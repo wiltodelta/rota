@@ -28,8 +28,17 @@ public enum StreamJSONFormatter {
     static func items(_ data: Data) -> [TranscriptItem] {
         guard let event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let type = event["type"] as? String else { return [] }
-        if type == "user", let text = ClaudeTranscript.userText(event), TranscriptService.title(text) != nil {
-            return [TranscriptItem(id: 0, kind: .status, text: text)]
+        if type == "user" {
+            if let text = ClaudeTranscript.userText(event), TranscriptService.title(text) != nil {
+                return [TranscriptItem(id: 0, kind: .status, text: text)]
+            }
+            let blocks = (event["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
+            return blocks.enumerated().compactMap { index, block in
+                guard block["type"] as? String == "tool_result" else { return nil }
+                let text = block["content"] as? String ?? (block["content"] as? [[String: Any]])?
+                    .compactMap { $0["text"] as? String }.joined(separator: "\n")
+                return text.map { TranscriptItem(id: index, kind: .output, text: $0) }
+            }
         }
         return type == "assistant" ? assistantItems(event) : []
     }
@@ -44,6 +53,8 @@ public enum StreamJSONFormatter {
               let content = message["content"] as? [[String: Any]] else { return [] }
         return content.enumerated().compactMap { index, item in
             switch item["type"] as? String {
+            case "thinking":
+                return (item["thinking"] as? String).map { TranscriptItem(id: index, kind: .reasoning, text: $0) }
             case "text":
                 return (item["text"] as? String).map { TranscriptItem(id: index, kind: .agent, text: $0) }
             case "tool_use":

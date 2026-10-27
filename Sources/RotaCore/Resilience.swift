@@ -64,34 +64,93 @@ extension Scheduler {
 
     /// An interactive Claude outlives Rota in its screen session; one still at work is not started again.
     func stillRunning(_ record: RunRecord) -> Bool {
-        guard record.harness == .claude, let session = record.sessionID else { return false }
-        return sessionAlive(ClaudeInteractiveRun.screenName(session))
+        guard let session = record.sessionID else { return false }
+        if let path = record.logPath, let lease = RunLease.read(URL(fileURLWithPath: path)),
+           lease.process?.exists == true { return true }
+        switch record.harness {
+        case .claude: return sessionAlive(ClaudeInteractiveRun.screenName(session))
+        case .shell: return sessionAlive(session)
+        case .codex, .grok, .antigravity: return false
+        }
     }
 
     /// Follows a surviving interactive Claude as the routine's active run again, so its
     /// output reaches the chat and the run ends, and frees the routine, when Claude is done.
-    /// Without a transcript to follow it stays a reservation (`survivingClaude`).
+    /// Without a transcript to follow it stays a reservation (`survivingSessions`).
     func adoptSurviving(_ record: RunRecord) -> Bool {
-        guard let session = record.sessionID, let transcript = terminalTranscript(.claude, session),
-              var (record, spec) = reopen(record, prompt: "") else { return false }
-        spec.mode = .claudeInteractive
+        if record.harness == .shell { return adopt(record, mode: .screen) }
+        if record.harness == .claude, let session = record.sessionID,
+           sessionAlive(ClaudeInteractiveRun.screenName(session)) {
+            guard let transcript = terminalTranscript(.claude, session) else { return false }
+            return adopt(record, mode: .claudeInteractive, transcript: transcript)
+        }
+        return adoptInterrupted(record)
+    }
+
+    /// Recovery submits no prompt. The adapter first reconciles the native session or durable spool.
+    func adoptInterrupted(_ record: RunRecord) -> Bool {
+        adopt(record, mode: record.launchMode ?? record.harness.launchMode)
+    }
+
+    private func adopt(_ original: RunRecord, mode: LaunchMode, transcript: URL? = nil) -> Bool {
+        var record: RunRecord
+        var spec: LaunchSpec
+        if let reopened = reopen(original, prompt: "") {
+            (record, spec) = reopened
+        } else if let routine = routine(original.routineID), let path = original.logPath {
+            record = original
+            record.outcome = .running
+            record.endedAt = nil
+            spec = self.spec(for: routine, record: original, harness: original.harness, prompt: "",
+                             log: URL(fileURLWithPath: path), resume: nil)
+        } else { return false }
+        spec.mode = mode
+        if let path = record.executablePath, FileManager.default.isExecutableFile(atPath: path) {
+            spec.executable = path
+        }
         spec.adopt = true
         spec.terminalTranscript = transcript
+        if let timeout = spec.timeout { spec.timeout = max(0, timeout - now().timeIntervalSince(record.startedAt)) }
+        record.questions = record.questions?.filter { $0.replyViaMessage == true }
         return start(record, spec: spec)
     }
 
     /// A surviving screen owns this routine until it exits. UI reads the last checked state.
-    public func isSurvivingClaude(_ record: RunRecord) -> Bool {
-        survivingClaude[record.routineID]?.id == record.id
+    public func isSurvivingSession(_ record: RunRecord) -> Bool {
+        survivingSessions[record.routineID]?.id == record.id
     }
 
-    func refreshSurvivingClaude() {
-        survivingClaude = survivingClaude.filter { stillRunning($0.value) }
+    func refreshSurvivingSession() {
+        survivingSessions = survivingSessions.filter { $0.value.needsReconciliation == true || stillRunning($0.value) }
     }
 
-    func hasSurvivingClaude(_ routineID: String) -> Bool {
-        if let record = survivingClaude[routineID], !stillRunning(record) { survivingClaude[routineID] = nil }
-        return survivingClaude[routineID] != nil
+    func hasSurvivingSession(_ routineID: String) -> Bool {
+        if survivingSessions[routineID]?.needsReconciliation == true { return true }
+        if let record = survivingSessions[routineID], !stillRunning(record) { survivingSessions[routineID] = nil }
+        return survivingSessions[routineID] != nil
+    }
+
+    func reserveUnverified(_ record: RunRecord) {
+        var record = record
+        record.needsReconciliation = true
+        saveRecord(record)
+        survivingSessions[record.routineID] = record
+        reconciliationRetry[record.routineID] = now().addingTimeInterval(Self.retryDelay)
+        lastError = "The native session state is unknown. Rota will check it before starting another run."
+    }
+
+    func reconcileNative(_ record: RunRecord) {
+        survivingSessions[record.routineID] = nil
+        guard adoptInterrupted(record) else { return reserveUnverified(record) }
+    }
+
+    func reconcilePending() {
+        guard isOnline() else { return }
+        let records = survivingSessions.values.filter {
+            $0.needsReconciliation == true && active[$0.routineID] == nil
+                && (reconciliationRetry[$0.routineID] ?? .distantPast) <= now()
+        }
+        for record in records { reconcileNative(record) }
     }
 
     /// Continues or reruns what waits, each once its service answers; what cannot yet waits a minute.
@@ -107,7 +166,7 @@ extension Scheduler {
                 guard let self, reachable else { self?.retryLater(); return }
                 guard self.pendingResumes.removeValue(forKey: recordID) != nil,
                       // A routine already running again leaves the older session as it ended.
-                      self.active[routineID] == nil, !self.hasSurvivingClaude(routineID),
+                      self.active[routineID] == nil, !self.hasSurvivingSession(routineID),
                       var record = self.history.records(for: routineID).first(where: { $0.id == recordID })
                 else { return }
                 record.resumes = (record.resumes ?? 0) + 1
@@ -123,7 +182,7 @@ extension Scheduler {
             probe(routine.harness) { [weak self] reachable in
                 guard let self, reachable else { self?.retryLater(); return }
                 guard self.pendingReruns.removeValue(forKey: routineID) != nil,
-                      self.active[routineID] == nil, !self.hasSurvivingClaude(routineID),
+                      self.active[routineID] == nil, !self.hasSurvivingSession(routineID),
                       let routine = self.routine(routineID) else { return }
                 self.reruns[routineID, default: 0] += 1
                 Self.log.info("Running \(routineID, privacy: .public) again after a network failure")

@@ -5,7 +5,8 @@ final class HarnessTests: XCTestCase {
     func testClaudeStreamArguments() {
         let plain = Harness.claude.arguments(settings: ClaudeUserSettings())
         XCTAssertEqual(plain, ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-                               "--permission-mode", "bypassPermissions", "--permission-prompt-tool", "stdio"])
+                        "--permission-mode", "bypassPermissions", "--permission-prompt-tool", "stdio",
+                        "--include-partial-messages"])
         XCTAssertEqual(Array(Harness.claude.arguments(settings: ClaudeUserSettings(), resume: "s1").suffix(2)),
                        ["--resume", "s1"])
     }

@@ -1,7 +1,7 @@
 # Transcript format
 
 Rota supports a small common presentation subset: user and agent messages,
-generic tool activity, and informational or error notices. Plans are optional
+provider-exposed reasoning, generic tool activity, and informational or error notices. Plans are optional
 existing metadata. Runner adapters select these kinds; provider event names
 and tool schemas never reach the view. Unknown auxiliary provider events are
 ignored, while supported text in neighboring blocks is retained. Transport
@@ -28,9 +28,15 @@ length after the corresponding write. Supported record types are:
 | `checkpoint` | `required: false` | Accounts for diagnostic log metadata with no chat entry. |
 
 Kinds are `user`, `agent`, `tool`, `status`, `error`, `output`, and optional
-`plan`. Only `agent` text currently uses append records. A partial message is
+`plan` and `reasoning`. Agent and reasoning text can use append records. A partial message is
 persisted as chunks arrive; its readable log text is flushed before the next
 entry or run completion. All other messages can be delivered complete.
+Optional `sourceID` on records identifies durable source frames; `nativeID`
+on items identifies native messages across coalesced replay and live chunks.
+The journal restores unfinished items and recovery indexes before appending.
+UI readers do not retain that recovery-only source index. Provider-exposed
+reasoning is collapsed behind Reasoning; tool output remains tool activity.
+Readable logs use `[reasoning]` and `[output]` prefixes as well.
 The scheduler's `RunRecord` remains the authority for run outcome and attention.
 
 Continuing an existing normalized session validates and appends its journal.
@@ -199,6 +205,7 @@ User text may end with `ChatMessage`'s `[Rota attachments v1]` JSON manifest.
 The journal still stores an ordinary user item's text, with no schema bump.
 Rota renders valid manifests as filename chips; agent adapters receive the same
 text with local file paths. Copies live in the log's `.attachments` companion
-folder and follow its retention. This is local file access through agent tools,
-not a provider-specific image or document upload. Invalid manifests remain
+folder and follow its retention. Claude stream, Codex and Grok additionally receive validated native image
+inputs through `HarnessInput`. Other modes and other files use local tool
+access; this does not promise native document uploads. Invalid manifests remain
 literal text. Original files are never removed by session cleanup.

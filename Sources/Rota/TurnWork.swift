@@ -181,6 +181,7 @@ private struct WorkNoteView: View {
 
     var body: some View {
         switch item.kind {
+        case .reasoning: ReasoningView(text: item.text)
         case .output:
             CodeBox(text: item.text)
         default:

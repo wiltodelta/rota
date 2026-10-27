@@ -99,7 +99,66 @@ final class ResilienceTests: XCTestCase {
         XCTAssertEqual(launcher.specs.count, 1)
     }
 
-    func testRunsOpenAtShutdownContinueOnTheNextLaunch() {
+    func testFinishedTerminalContinuationReturnsToTheAgentComposer() throws {
+        let routine = add()
+        startRun(routine)
+        launcher.events.last?.finished(.succeeded)
+        var record = try XCTUnwrap(scheduler.history.records(for: routine.id).first)
+        record.launchMode = .terminal(.codex)
+        XCTAssertTrue(scheduler.canMessage(record))
+    }
+
+    func testUnknownNativeStateBlocksNewWorkUntilReconciledAndSurvivesRestart() throws {
+        let routine = add()
+        startRun(routine)
+        launcher.events.last?.reconciliationRequired()
+        launcher.events.last?.finished(.interrupted)
+        let record = try XCTUnwrap(scheduler.history.records(for: routine.id).first)
+        XCTAssertTrue(record.needsReconciliation == true)
+        scheduler.run(routine, trigger: .manual)
+        XCTAssertFalse(scheduler.continueSession(record, with: "follow-up"))
+        XCTAssertEqual(launcher.specs.count, 1)
+        XCTAssertFalse(scheduler.canMessage(record))
+        XCTAssertFalse(scheduler.canDelete(record))
+        XCTAssertFalse(scheduler.deleteSession(record), "Unknown native state must retain its ownership record")
+        XCTAssertNil(scheduler.terminalCommand(for: record),
+                     "Unknown remote work must not start a second native client")
+
+        scheduler = makeScheduler()
+        scheduler.start()
+        XCTAssertEqual(launcher.specs.count, 2)
+        XCTAssertTrue(launcher.specs.last?.adopt == true)
+        XCTAssertEqual(launcher.specs.last?.prompt, "")
+        launcher.events.last?.reconciliationRequired()
+        launcher.events.last?.finished(.interrupted)
+        clock = clock.addingTimeInterval(Scheduler.retryDelay)
+        scheduler.tick()
+        XCTAssertEqual(launcher.specs.count, 3)
+        XCTAssertTrue(launcher.specs.last?.adopt == true)
+        launcher.events.last?.finished(.succeeded)
+        scheduler.run(routine, trigger: .manual)
+        XCTAssertEqual(launcher.specs.count, 4)
+        XCTAssertFalse(launcher.specs.last?.adopt == true)
+    }
+
+    func testLateProvenanceCannotOverwriteTheNextContinuation() throws {
+        let routine = add()
+        startRun(routine)
+        let original = try XCTUnwrap(launcher.events.last)
+        original.finished(.succeeded)
+        original.provenance("cli 1.2.3", "server 1.2.3")
+        let record = try XCTUnwrap(scheduler.history.records(for: routine.id).first)
+        XCTAssertEqual(record.cliVersion, "cli 1.2.3",
+                       "Late version discovery still belongs to the completed execution")
+        XCTAssertTrue(scheduler.message("next", to: record))
+        XCTAssertNil(scheduler.active[routine.id]?.cliVersion)
+        original.provenance("outdated 0.0.1", "outdated 0.0.1")
+        XCTAssertNil(scheduler.active[routine.id]?.cliVersion)
+        launcher.events.last?.provenance("cli 2.3.4", "server 2.3.4")
+        XCTAssertEqual(scheduler.active[routine.id]?.cliVersion, "cli 2.3.4")
+    }
+
+    func testRunsOpenAtShutdownAreReconciledWithoutSubmittingAPrompt() {
         let routine = add()
         startRun(routine)
         // The Mac shut down: nothing finished the run, and Rota starts again later.
@@ -107,7 +166,9 @@ final class ResilienceTests: XCTestCase {
         scheduler.start()
         XCTAssertEqual(launcher.specs.count, 2)
         XCTAssertEqual(launcher.specs.last?.resume, "thread-1")
-        XCTAssertEqual(scheduler.active[routine.id]?.resumes, 1)
+        XCTAssertTrue(launcher.specs.last?.adopt == true)
+        XCTAssertEqual(launcher.specs.last?.prompt, "")
+        XCTAssertNil(scheduler.active[routine.id]?.resumes)
     }
 
     func testAClaudeSessionStillAliveInItsTerminalIsFollowedNotStartedTwice() throws {
@@ -154,7 +215,9 @@ final class ResilienceTests: XCTestCase {
         startRun(routine)
         scheduler = makeScheduler()
         scheduler.start()
-        XCTAssertEqual(launcher.specs.count, 1)
+        XCTAssertEqual(launcher.specs.count, 2)
+        XCTAssertTrue(launcher.specs.last?.adopt == true)
+        XCTAssertEqual(launcher.specs.last?.mode, .screen)
     }
 
     func testContinuationsStopAtTheLimit() {

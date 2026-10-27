@@ -42,9 +42,10 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     private var failed = false
     private var exiting = false
     private var stopReason: RunOutcome?
+    private var stopping: [OwnedProcess] = []
     private var headerWritten = false
 
-    private init(spec: LaunchSpec, journal: RunJournal, session: String, folder: URL) {
+    init(spec: LaunchSpec, journal: RunJournal, session: String, folder: URL) {
         self.spec = spec
         self.journal = journal
         self.session = session
@@ -156,7 +157,8 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         guard !journal.isFinished else { return }
         readEffort()
         readTranscript()
-        if let status = exitStatus ?? (isAlive() ? nil : exitStatus ?? -1) {
+        if !stopping.contains(where: { $0.exists }),
+           let status = exitStatus ?? (isAlive() ? nil : exitStatus ?? -1) {
             return finish(status: status)
         }
         if turnEnded, unanswered == 0, background.isEmpty, !exiting, stopReason == nil {
@@ -227,12 +229,13 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         case .background(let id, let running):
             if running { background.insert(id) } else { background.remove(id) }
         case .turnEnded: turnEnded = true
-        case .assistant, .apiError, .other: break
+        case .assistant, .apiError: turnEnded = false
+        case .other: break
         }
     }
 
     /// The entry's state (as `restore`), then what reaches the chat.
-    private func handle(entry data: Data) {
+    func handle(entry data: Data) {
         let entry = ClaudeTranscript.read(data)
         restore(entry)
         switch entry {
@@ -258,11 +261,12 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         case .turnEnded:
             if !background.isEmpty { journal.record(.status, TranscriptService.waiting(background.count)) }
         case .background, .other:
-            break
+            for item in StreamJSONFormatter.items(data) { journal.record(item.kind, item.text) }
         }
     }
 
     private func assistant(model: String?, items: [TranscriptItem]) {
+        if !items.isEmpty { failed = false }
         journal.configure(SessionConfiguration(model: model))
         if !headerWritten, let model {
             headerWritten = true
@@ -285,12 +289,18 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     private func end(as reason: RunOutcome) {
         guard !journal.isFinished, stopReason == nil else { return }
         stopReason = reason
+        if let pid = ScreenRun.pid(name), let root = OwnedProcess(pid: pid) {
+            stopping = root.descendants() + [root]
+        }
         // Escape interrupts the turn; then the session closes, its transcript saved as it went.
         type("\u{1B}")
         queue.asyncAfter(deadline: .now() + 1) { [weak self] in self?.quitScreen() }
+        let owned = stopping
+        queue.asyncAfter(deadline: .now() + 3) { for child in owned { child.signal(SIGTERM) } }
+        queue.asyncAfter(deadline: .now() + 10) { for child in owned { child.signal(SIGKILL) } }
     }
 
-    private func finish(status: Int32) {
+    func finish(status: Int32) {
         readEffort()
         readTranscript()
         let outcome: RunOutcome

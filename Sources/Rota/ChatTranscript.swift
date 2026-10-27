@@ -10,7 +10,6 @@ struct ChatTranscript: View {
     let items: [TranscriptItem]
     let running: Bool
     let record: RunRecord
-    /// Messages sent and not yet in the log.
     var sending: [String] = []
     var structured = false
     var hasEarlier = false
@@ -39,6 +38,9 @@ struct ChatTranscript: View {
             ScrollView {
                 VStack(spacing: 0) {
                     LazyVStack(alignment: .leading, spacing: metrics.points(22)) {
+                        if let notice = record.compatibilityNotice {
+                            CompatibilityNotice(text: notice)
+                        }
                         if hasEarlier {
                             Button(interfaceTitle: loadingEarlier ? "Loading…" : "Load Earlier Messages") {
                                 following = false
@@ -224,6 +226,7 @@ private struct TranscriptRow: View {
                 .font(model.chatText.small)
                 .foregroundStyle(Color.secondaryText)
             case .plan: PlanCard(steps: PlanStep.parse(item.text))
+            case .reasoning: ReasoningView(text: item.text)
             case .output: CodeBox(text: item.text)
             case .status, .error:
                 if let title = TranscriptService.title(item.text) {

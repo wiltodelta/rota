@@ -43,6 +43,8 @@ final class ScreenRun: RunControl, @unchecked Sendable {
     private let name: String
     private let exitFile: URL
     private let script: URL
+    private let childFile: URL
+    private var children: [OwnedProcess] = []
     private let queue = DispatchQueue(label: "com.wiltodelta.rota.screen")
     private var stopReason: RunOutcome?
 
@@ -51,15 +53,29 @@ final class ScreenRun: RunControl, @unchecked Sendable {
         self.name = name
         self.exitFile = exitFile
         self.script = script
+        childFile = exitFile.appendingPathExtension("pid")
     }
 
     static func start(_ spec: LaunchSpec, journal: RunJournal) throws -> ScreenRun {
-        let name = "rota-" + UUID().uuidString.prefix(8).lowercased()
+        let name = spec.adopt ? (spec.resume ?? "") : "rota-" + UUID().uuidString.prefix(8).lowercased()
+        guard name.hasPrefix("rota-"), !name.contains("/"), !name.contains("..") else {
+            throw CocoaError(.fileReadInvalidFileName)
+        }
         let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rota/screen")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let script = folder.appendingPathComponent("\(name).zsh")
         let exitFile = folder.appendingPathComponent("\(name).exit")
+        let run = ScreenRun(journal: journal, name: name, exitFile: exitFile, script: script)
+        if spec.adopt {
+            journal.session(name)
+            journal.record(.status, "Following the shell command that kept running while Rota was closed")
+            run.queue.async { run.poll() }
+            if let timeout = spec.timeout {
+                run.queue.asyncAfter(deadline: .now() + timeout) { [weak run] in run?.end(as: .timedOut) }
+            }
+            return run
+        }
         try scriptText(command: spec.prompt, directory: spec.workingDirectory, log: spec.log, exitFile: exitFile)
             .write(to: script, atomically: true, encoding: .utf8)
         // The command's output reaches the log through tee; keep the journal's
@@ -71,7 +87,6 @@ final class ScreenRun: RunControl, @unchecked Sendable {
         guard process.terminationStatus == 0 else {
             throw LaunchError.screenFailed(process.terminationStatus)
         }
-        let run = ScreenRun(journal: journal, name: name, exitFile: exitFile, script: script)
         journal.session(name)
         if let timeout = spec.timeout {
             run.queue.asyncAfter(deadline: .now() + timeout) { [weak run] in run?.end(as: .timedOut) }
@@ -83,7 +98,9 @@ final class ScreenRun: RunControl, @unchecked Sendable {
     static func scriptText(command: String, directory: String, log: URL, exitFile: URL) -> String {
         """
         cd \(shellQuote(directory)) || { print -r -- 1 > \(shellQuote(exitFile.path)); exit 1 }
-        { \(command)
+        { zmodload zsh/system
+        print -r -- "$sysparams[pid] $sysparams[ppid]" > \(shellQuote(exitFile.appendingPathExtension("pid").path))
+        \(command)
         } 2>&1 | tee -a \(shellQuote(log.path))
         print -r -- ${pipestatus[1]} > \(shellQuote(exitFile.path))
         """
@@ -94,6 +111,12 @@ final class ScreenRun: RunControl, @unchecked Sendable {
     }
 
     private func poll() {
+        guard !journal.isFinished else { return }
+        captureChildren()
+        if stopReason != nil, children.contains(where: { $0.exists }) {
+            queue.asyncAfter(deadline: .now() + 0.1) { self.poll() }
+            return
+        }
         var status = exitStatus
         if status == nil, !isAlive() {
             // The script writes the exit file before screen ends, so a command that
@@ -118,12 +141,27 @@ final class ScreenRun: RunControl, @unchecked Sendable {
     private func end(as reason: RunOutcome) {
         guard !journal.isFinished, stopReason == nil else { return }
         stopReason = reason
+        captureChildren()
+        if let pid = Self.pid(name), let screen = OwnedProcess(pid: pid) {
+            children = screen.descendants() + children
+        }
+        for child in children { child.signal(SIGTERM) }
+        let owned = children
+        queue.asyncAfter(deadline: .now() + 2) { for child in owned { child.signal(SIGKILL) } }
         Self.quit(name)
+    }
+
+    private func captureChildren() {
+        guard let text = try? String(contentsOf: childFile, encoding: .utf8) else { return }
+        let ids = text.split(whereSeparator: \.isWhitespace).compactMap { Int32($0) }
+        guard ids.count == 2, let child = OwnedProcess(pid: ids[0]), child.parent == UInt32(ids[1]) else { return }
+        children = child.descendants() + [child]
     }
 
     private func finish(_ outcome: RunOutcome) {
         journal.finish(outcome)
         try? FileManager.default.removeItem(at: exitFile)
         try? FileManager.default.removeItem(at: script)
+        try? FileManager.default.removeItem(at: childFile)
     }
 }

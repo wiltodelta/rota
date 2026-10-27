@@ -184,6 +184,31 @@ final class StorageTests: XCTestCase {
         }
     }
 
+    func testDeletingASessionRemovesItsRuntimeLeaseAndSpool() throws {
+        let history = RunHistory(location: location)
+        let record = try savedSession(history, at: 0)
+        let log = URL(fileURLWithPath: try XCTUnwrap(record.logPath))
+        let runtime = RunLease.url(log)
+        let streams = DurableStream.folder(log)
+        try Data("lease".utf8).write(to: runtime)
+        try FileManager.default.createDirectory(at: streams, withIntermediateDirectories: true)
+        try Data("output".utf8).write(to: streams.appendingPathComponent("stream.jsonl"))
+        XCTAssertTrue(try history.remove(record.id, for: "a"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: streams.path))
+    }
+
+    func testUnknownNativeStateSurvivesRetentionAndCannotBeDeleted() throws {
+        let history = RunHistory(location: location)
+        var record = try savedSession(history, at: 0)
+        record.needsReconciliation = true
+        try history.upsert(record)
+        for index in 1...(RunHistory.limit + 1) { _ = try savedSession(history, at: TimeInterval(index * 60)) }
+        XCTAssertTrue(history.records(for: "a").contains { $0.id == record.id })
+        XCTAssertThrowsError(try history.remove(record.id, for: "a"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(record.logPath)))
+    }
+
     func testDeletionDoesNotFollowALogDirectoryOutsideStorage() throws {
         let history = RunHistory(location: location)
         let outside = directory.appendingPathComponent("outside")

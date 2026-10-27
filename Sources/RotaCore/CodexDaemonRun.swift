@@ -17,12 +17,19 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     private var pendingMessages: [String] = []
     private var approvalItems: [String: [String: Any]] = [:]
     private var stopReason: RunOutcome?
+    private var turnStarting = false
+    private var loadingHistory = false
+    private var deferredEvents: [(String, [String: Any])] = []
+    private var latestRestoredTurn: [String: Any]?
+    private var nativeActive = false
+    private var nativeStateKnown: Bool
 
     init(spec: LaunchSpec, journal: RunJournal, peer: JSONRPCPeer? = nil) {
         self.spec = spec
         self.journal = journal
         threadID = spec.resume
         self.peer = peer
+        nativeStateKnown = spec.resume == nil
     }
 
     static func start(_ spec: LaunchSpec, journal: RunJournal) -> CodexDaemonRun {
@@ -50,7 +57,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         for message in messages {
             journal.record(.user, message)
             peer.request("turn/steer", ["threadId": threadID, "expectedTurnId": turnID,
-                                       "input": [["type": "text", "text": message]]]) { result in
+                                       "input": HarnessInput.blocks(message, for: .codexDaemon)]) { result in
                 if case .failure(let error) = result {
                     self.journal.line("[rota: message not delivered: \(error.message)]")
                 }
@@ -66,7 +73,8 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
                   let turn = (value as? [String: Any])?["turn"] as? [String: Any],
                   let id = turn["id"] as? String else { return self.fail(boxed.value, "turn/start") }
             self.turnID = id
-            self.deliverPendingMessages()
+            self.turnStarting = false
+            if let reason = self.stopReason { self.interrupt(as: reason) } else { self.deliverPendingMessages() }
         }
     }
 
@@ -74,7 +82,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
 
     private func connect() {
         let (status, output) = ProcessLauncher.capture(spec.executable, ["app-server", "daemon", "start"],
-                                                       in: ProcessLauncher.helperDirectory)
+                                                       in: ProcessLauncher.helperDirectory, timeout: 15)
         guard status == 0 else {
             return finish(.launchFailed("codex app-server daemon start: \(output.prefix(200))"))
         }
@@ -111,16 +119,20 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     }
 
     private func initialized(_ result: Result<Any, JSONRPCError>) {
-        guard case .success = result else { return fail(result, "initialize") }
+        guard !journal.isFinished else { return }
+        guard case .success(let value) = result else { return fail(result, "initialize") }
+        journal.provenance(server: (value as? [String: Any])?["userAgent"] as? String)
         peer?.notify("initialized")
         var params: [String: Any] = ["cwd": spec.workingDirectory, "approvalPolicy": "never",
                                      "sandbox": "danger-full-access"]
         if let model = spec.model { params["model"] = model }
         // The daemon's commands inherit the daemon's environment, not this run's, so the
         // run's variables reach them as a per-thread config override.
-        params["config"] = Self.configOverrides(spec.environment)
+        let bridge = SessionBridge.codex(spec)
+        params["config"] = Self.configOverrides(spec.environment).merging(bridge) { _, scoped in scoped }
         // A continued session loads its thread back onto the daemon and takes the next turn.
         let method = spec.resume == nil ? "thread/start" : "thread/resume"
+        loadingHistory = spec.resume != nil
         if let thread = spec.resume { params["threadId"] = thread }
         peer?.request(method, params) { [weak self] result in
             self?.threadStarted(result)
@@ -137,7 +149,8 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         return config
     }
 
-    private func threadStarted(_ result: Result<Any, JSONRPCError>) {
+    func threadStarted(_ result: Result<Any, JSONRPCError>) {
+        guard !journal.isFinished else { return }
         guard case .success(let value) = result,
               let thread = (value as? [String: Any])?["thread"] as? [String: Any],
               let id = thread["id"] as? String else {
@@ -150,14 +163,124 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
             effort: spec.effort ?? (value as? [String: Any])?["reasoningEffort"] as? String))
         if spec.resume == nil { journal.line("[codex thread \(id)" + (model.map { ", \($0)" } ?? "") + "]") }
         journal.session(id)
-        var params: [String: Any] = ["threadId": id, "input": [["type": "text", "text": spec.prompt]]]
+        nativeActive = (thread["status"] as? [String: Any])?["type"] as? String == "active"
+        if spec.resume != nil { return restoreTurns(id) }
+        beginTurn(id)
+    }
+
+    private func beginTurn(_ id: String) {
+        guard !journal.isFinished, stopReason == nil else { return }
+        var params: [String: Any] = ["threadId": id, "input": HarnessInput.blocks(spec.prompt, for: .codexDaemon)]
         if let model = spec.model { params["model"] = model }
         if let effort = spec.effort { params["effort"] = effort }
+        turnStarting = true
         peer?.request("turn/start", params) { [weak self] result in
             self?.turnStarted(result)
         }
     }
 
+    private func restoreTurns(_ id: String, cursor: String? = nil) {
+        var params: [String: Any] = ["threadId": id, "limit": 100, "sortDirection": "asc", "itemsView": "full"]
+        if let cursor { params["cursor"] = cursor }
+        peer?.request("thread/turns/list", params) { [weak self] result in
+            guard let self, !self.journal.isFinished else { return }
+            guard case .success(let value) = result, let page = value as? [String: Any],
+                  let turns = page["data"] as? [[String: Any]] else { return self.fail(result, "thread/turns/list") }
+            for turn in turns {
+                self.latestRestoredTurn = turn
+                for item in turn["items"] as? [[String: Any]] ?? [] {
+                    self.itemStarted(item)
+                    self.itemCompleted(item)
+                }
+            }
+            if let next = page["nextCursor"] as? String { return self.restoreTurns(id, cursor: next) }
+            self.historyRestored(id)
+        }
+    }
+
+    private func historyRestored(_ id: String) {
+        loadingHistory = false
+        nativeStateKnown = true
+        let active = latestRestoredTurn?["status"] as? String == "inProgress"
+        if active { turnID = latestRestoredTurn?["id"] as? String }
+        let deferred = deferredEvents
+        deferredEvents = []
+        for (method, params) in deferred { handle(method, params) }
+        guard !journal.isFinished else { return }
+        if active, let turnID {
+            if let reason = stopReason { return interrupt(as: reason) }
+            if !spec.adopt {
+                peer?.request("turn/steer", ["threadId": id, "expectedTurnId": turnID,
+                    "input": HarnessInput.blocks(spec.prompt, for: .codexDaemon)]) { [weak self] result in
+                    if case .failure = result { self?.fail(result, "turn/steer") }
+                }
+            }
+            return deliverPendingMessages()
+        }
+        guard !nativeActive else {
+            journal.line("[error] Codex reports active work without a recoverable turn. No second turn was started.")
+            finish(.interrupted)
+            return disconnect()
+        }
+        if spec.adopt {
+            turnID = latestRestoredTurn?["id"] as? String
+            turnCompleted(latestRestoredTurn)
+        } else {
+            beginTurn(id)
+        }
+    }
+
+    private func interrupt(as reason: RunOutcome) {
+        guard !journal.isFinished else { return }
+        stopReason = reason
+        guard let threadID, let turnID else {
+            if turnStarting || !nativeStateKnown {
+                // Keep the connection until start identifies the turn we must cancel.
+                queue.asyncAfter(deadline: .now() + 15) { [weak self] in self?.cancellationUnconfirmed() }
+                return
+            }
+            finish(reason, nativeFinal: true)
+            return disconnect()
+        }
+        peer?.request("turn/interrupt", ["threadId": threadID, "turnId": turnID]) { _ in }
+        // A missing confirmation keeps the routine reserved.
+        queue.asyncAfter(deadline: .now() + 15) { [weak self] in
+            self?.cancellationUnconfirmed()
+        }
+    }
+
+    private func cancellationUnconfirmed() {
+        guard !journal.isFinished else { return }
+        journal.record(.status, "Codex has not confirmed cancellation; waiting for the native turn")
+        if let reason = stopReason { interrupt(as: reason) }
+    }
+
+    private func fail(_ result: Result<Any, JSONRPCError>, _ step: String) {
+        let reason: String
+        if case .failure(let error) = result { reason = error.message } else { reason = "Malformed reply" }
+        let absent = step == "thread/resume" && reason.hasPrefix("no rollout found for thread id ")
+        finish(.launchFailed("\(step): \(reason)"), nativeFinal: absent)
+        disconnect()
+    }
+
+    private func finish(_ outcome: RunOutcome, nativeFinal: Bool = false) {
+        guard !journal.isFinished else { return }
+        if threadID != nil, !nativeFinal { journal.requireReconciliation() }
+        for message in pendingMessages {
+            journal.record(.user, message)
+            journal.line("[rota: message not delivered: the turn did not become ready]")
+        }
+        pendingMessages = []
+        journal.finish(outcome)
+    }
+
+    func disconnect() {
+        peer?.close()
+        proxy?.terminate()
+    }
+}
+
+extension CodexDaemonRun {
     /// The daemon broadcasts other roots and child threads on the same connection.
     /// Their root's collaboration items already describe child work; child messages
     /// must never become this session's answers, questions, plans or completion.
@@ -186,19 +309,15 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
 
     func handle(_ method: String, _ params: [String: Any]) {
         guard owns(params), !journal.isFinished else { return }
-        if method == "serverRequest/resolved", let id = params["requestId"] {
-            let key = String(describing: id)
-            peer?.dismissRequest(key)
-            journal.resolveQuestion(key)
-        }
+        if loadingHistory { deferredEvents.append((method, params)); return }
+        if method.hasPrefix("item/") { return handleItem(method, params) }
         switch method {
-        case "item/started": itemStarted(params["item"] as? [String: Any])
-        case "item/completed": itemCompleted(params["item"] as? [String: Any])
-        case "turn/plan/updated":
-            let steps = (params["plan"] as? [[String: Any]] ?? []).map {
-                PlanStep(status: $0["status"] as? String, text: $0["step"] as? String ?? "")
-            }
-            if !steps.isEmpty { journal.record(.plan, PlanStep.body(steps)) }
+        case "serverRequest/resolved": resolveRequest(params)
+        case "error":
+            let message = (params["error"] as? [String: Any])?["message"] as? String ?? "Codex request error"
+            journal.record(params["willRetry"] as? Bool == true ? .status : .error, message)
+        case "turn/started": nativeTurnStarted(params)
+        case "turn/plan/updated": updatePlan(params)
         case "turn/completed":
             turnCompleted(params["turn"] as? [String: Any])
         default:
@@ -206,14 +325,75 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         }
     }
 
+    private func nativeTurnStarted(_ params: [String: Any]) {
+        guard let id = (params["turn"] as? [String: Any])?["id"] as? String else { return }
+        turnID = id
+        if let reason = stopReason { interrupt(as: reason) }
+    }
+
+    private func updatePlan(_ params: [String: Any]) {
+        let steps = (params["plan"] as? [[String: Any]] ?? []).map {
+            PlanStep(status: $0["status"] as? String, text: $0["step"] as? String ?? "")
+        }
+        if !steps.isEmpty { journal.record(.plan, PlanStep.body(steps)) }
+    }
+
+    private func resolveRequest(_ params: [String: Any]) {
+        guard let id = params["requestId"] else { return }
+        let key = String(describing: id)
+        peer?.dismissRequest(key)
+        journal.resolveQuestion(key)
+    }
+
+    private func handleItem(_ method: String, _ params: [String: Any]) {
+        switch method {
+        case "item/agentMessage/delta", "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
+            if let delta = params["delta"] as? String, let id = params["itemId"] as? String {
+                let agent = method == "item/agentMessage/delta"
+                let summary = method == "item/reasoning/summaryTextDelta"
+                let index = params[summary ? "summaryIndex" : "contentIndex"] as? Int ?? 0
+                let suffix = agent ? "" : (summary ? "/summary/" : "/content/") + String(index)
+                journal.text(delta, kind: agent ? .agent : .reasoning, nativeID: "codex/" + id + suffix)
+            }
+        case "item/started": itemStarted(params["item"] as? [String: Any])
+        case "item/completed": itemCompleted(params["item"] as? [String: Any])
+        default: break
+        }
+    }
+
     private func itemCompleted(_ item: [String: Any]?) {
         guard let item else { return }
         if let id = item["id"] as? String { approvalItems[id] = nil }
+        let nativeID = "codex/" + (item["id"] as? String ?? UUID().uuidString)
         if item["type"] as? String == "agentMessage", let text = item["text"] as? String {
-            journal.record(.agent, text)
+            journal.reconcileText(text, kind: .agent, nativeID: nativeID)
         }
+        completedReasoning(item, nativeID: nativeID)
+        completedOutput(item, nativeID: nativeID)
         if let question = QuestionRequest.codexMessage(item) {
             journal.ask(question, recordText: false) { _ in }
+        }
+    }
+
+    private func completedReasoning(_ item: [String: Any], nativeID: String) {
+        guard item["type"] as? String == "reasoning" else { return }
+        for field in ["summary", "content"] {
+            for (index, text) in (item[field] as? [String] ?? []).enumerated() {
+                journal.reconcileText(text, kind: .reasoning, nativeID: nativeID + "/\(field)/\(index)")
+            }
+        }
+    }
+
+    private func completedOutput(_ item: [String: Any], nativeID: String) {
+        if let output = item["aggregatedOutput"] as? String, !output.isEmpty {
+            journal.record(.output, output, nativeID: nativeID + "/output")
+        }
+        let result = item["result"] as? [String: Any]
+        let content = result?["content"] as? [[String: Any]] ?? item["contentItems"] as? [[String: Any]] ?? []
+        for (index, block) in content.enumerated() {
+            if let text = block["text"] as? String {
+                journal.record(.output, text, nativeID: nativeID + "/content/\(index)")
+            }
         }
     }
 
@@ -221,7 +401,9 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         if let item, item["type"] as? String == "fileChange", let id = item["id"] as? String {
             approvalItems[id] = item
         }
-        if let title = Self.describe(started: item) { journal.record(.tool, title) }
+        if let title = Self.describe(started: item) {
+            journal.record(.tool, title, nativeID: (item?["id"] as? String).map { "codex/" + $0 + "/tool" })
+        }
     }
 
     private func turnCompleted(_ turn: [String: Any]?) {
@@ -233,7 +415,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         default: outcome = .failed(exitCode: 1)
         }
         if let error = (turn?["error"] as? [String: Any])?["message"] as? String { journal.line("[error] \(error)") }
-        finish(outcome)
+        finish(outcome, nativeFinal: true)
         disconnect()
     }
 
@@ -249,39 +431,4 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         }
     }
 
-    private func interrupt(as reason: RunOutcome) {
-        guard !journal.isFinished else { return }
-        stopReason = reason
-        guard let threadID, let turnID else {
-            finish(reason)
-            return disconnect()
-        }
-        peer?.request("turn/interrupt", ["threadId": threadID, "turnId": turnID]) { _ in }
-        // If the daemon never confirms, end the run anyway.
-        queue.asyncAfter(deadline: .now() + 15) { [weak self] in
-            self?.finish(reason)
-            self?.disconnect()
-        }
-    }
-
-    private func fail(_ result: Result<Any, JSONRPCError>, _ step: String) {
-        let reason: String
-        if case .failure(let error) = result { reason = error.message } else { reason = "Malformed reply" }
-        finish(.launchFailed("\(step): \(reason)"))
-        disconnect()
-    }
-
-    private func finish(_ outcome: RunOutcome) {
-        for message in pendingMessages {
-            journal.record(.user, message)
-            journal.line("[rota: message not delivered: the turn did not become ready]")
-        }
-        pendingMessages = []
-        journal.finish(outcome)
-    }
-
-    private func disconnect() {
-        peer?.close()
-        proxy?.terminate()
-    }
 }

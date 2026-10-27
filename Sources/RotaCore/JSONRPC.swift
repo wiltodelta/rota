@@ -80,7 +80,8 @@ final class JSONRPCPeer: @unchecked Sendable {
             let reply = pending.removeValue(forKey: id)
             lock.unlock()
             let result: Result<Any, JSONRPCError> = if let error = message["error"] as? [String: Any] {
-                .failure(JSONRPCError(message: error["message"] as? String ?? "error"))
+                .failure(JSONRPCError(message: error["message"] as? String ?? "error",
+                                      serverCode: (error["data"] as? [String: Any])?["code"] as? String))
             } else {
                 .success(message["result"] ?? NSNull())
             }
@@ -150,6 +151,7 @@ struct UncheckedSendable<Value>: @unchecked Sendable {
 
 struct JSONRPCError: Error, LocalizedError {
     let message: String
+    var serverCode: String?
     var errorDescription: String? { message }
 }
 

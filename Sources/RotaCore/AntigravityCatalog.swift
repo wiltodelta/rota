@@ -27,37 +27,48 @@ enum AntigravityCatalog {
     }
 
     static func read(executable: String) -> [ModelOption] {
+        readResult(executable: executable).models
+    }
+
+    static func readResult(executable: String) -> (models: [ModelOption], complete: Bool) {
+        let deadline = ProcessInfo.processInfo.systemUptime + 75
         // `agy models` fetches from the service: 12 to 20 s on 2026-10-26, so 15 s emptied the picker.
         let (status, output) = ProcessLauncher.capture(executable, ["models"], in: NSTemporaryDirectory(),
                                                        timeout: 45, errors: false)
-        guard status == 0 else { return [] }
+        guard status == 0 else { return ([], false) }
         let listed = rows(output)
         let candidates = listed.map(\.candidate).reduce(into: [String]()) {
             if !$0.contains($1) { $0.append($1) }
         }
-        guard let current = command("model", executable: executable)?["id"] as? String,
-              listed.contains(where: { $0.id == current }) else { return [] }
+        let current = command("model", executable: executable, deadline: deadline)?["id"] as? String
+        let defaultKnown = current.map { value in listed.contains(where: { $0.id == value }) } ?? false
+        let probeOrder = candidates.sorted { left, right in
+            let leftDefault = listed.contains { $0.candidate == left && $0.id == current }
+            let rightDefault = listed.contains { $0.candidate == right && $0.id == current }
+            return leftDefault && !rightDefault
+        }
         let found = OSAllocatedUnfairLock(initialState: [String: ModelOption]())
         // Bound workers independently of how many families the vendor adds, so
         // catalog refresh cannot flood CLI processes.
         DispatchQueue.concurrentPerform(iterations: min(4, candidates.count)) { worker in
-            for index in stride(from: worker, to: candidates.count, by: 4) {
-                let candidate = candidates[index]
+            for index in stride(from: worker, to: probeOrder.count, by: 4) {
+                guard ProcessInfo.processInfo.systemUptime < deadline else { break }
+                let candidate = probeOrder[index]
                 let members = listed.filter { $0.candidate == candidate }
-                let model = command("model", executable: executable, model: candidate)
-                let effort = model == nil ? nil : command("effort", executable: executable, model: candidate)
+                let model = command("model", executable: executable, model: candidate, deadline: deadline)
+                let effort = model == nil ? nil
+                    : command("effort", executable: executable, model: candidate, deadline: deadline)
                 let option = family(candidate, rows: members, model: model, effort: effort, current: current)
                 found.withLock { $0[candidate] = option }
             }
         }
         let options = found.withLock { $0 }
-        guard candidates.allSatisfy({ options[$0] != nil }) else { return [] }
-        return candidates.compactMap { options[$0] }
+        let complete = !candidates.isEmpty && defaultKnown && candidates.allSatisfy { options[$0] != nil }
+        return (candidates.compactMap { options[$0] }, complete)
     }
 
     /// Native resolution, rather than suffix similarity, authorizes grouping.
-    /// Missing metadata leaves the catalog unavailable, never a mixed list of
-    /// verified families and unverified effort-specific variants.
+    /// A family with missing metadata is omitted; other verified families remain available.
     static func family(_ candidate: String, rows: [Row], model: [String: Any]?,
                        effort: [String: Any]?, current: String?) -> ModelOption? {
         guard let resolved = model?["id"] as? String, rows.contains(where: { $0.id == resolved }),
@@ -73,11 +84,14 @@ enum AntigravityCatalog {
                             isDefault: rows.contains { $0.id == current }, aliases: rows.map(\.id))
     }
 
-    private static func command(_ name: String, executable: String, model: String? = nil) -> [String: Any]? {
+    private static func command(_ name: String, executable: String, model: String? = nil,
+                                deadline: TimeInterval) -> [String: Any]? {
+        let remaining = deadline - ProcessInfo.processInfo.systemUptime
+        guard remaining > 0 else { return nil }
         var arguments = ["-p", "/" + name, "--output-format", "json"]
         if let model { arguments += ["--model", model] }
         let (status, output) = ProcessLauncher.capture(executable, arguments, in: NSTemporaryDirectory(),
-                                                       timeout: 30, errors: false)
+                                                       timeout: min(30, remaining), errors: false)
         guard status == 0 else { return nil }
         return payload(output, command: name)
     }

@@ -45,10 +45,10 @@
     Models are grouped by family, with a separate effort picker containing
     only the tiers its CLI reports for that model. Fixed-effort models disable
     the effort picker. Antigravity's questionnaire is
-    answered as a later message, and it has no terminal continuation.
+    answered as a later message.
   - Shell commands run in a detached `screen` session; **Open in Terminal**
     attaches with `screen -r`, where you can type into the command or stop it.
-  A continued session runs again and appends to the same chat. Finished Claude Code, Codex and Grok Build
+  A continued session runs again and appends to the same chat. Finished Claude Code, Codex, Grok Build and Antigravity
   sessions also open in their own CLI with **Continue in Terminal**. Rota follows
   that continuation: new messages and tool calls appear in the same chat and
   session preview, with **Working in Terminal** or **Waiting in Terminal** as
@@ -56,7 +56,7 @@
   composer returns after the CLI exits. Closing the terminal window detaches;
   **Open in Terminal** reconnects, and **Stop** ends the owned session. Terminal
   continuations have no routine time limit and are not automatically resumed
-  after an interruption. Rota must stay open for synchronization. Sessions
+  after an interruption. After a Rota restart, it reconnects to the surviving terminal session. Sessions
   open in the terminal app picked in Settings (Terminal, iTerm2, Ghostty or
   any other), or in the macOS default terminal, the one that opens executables
   (iTerm2 after "Make iTerm2 Default Term"). iTerm2 asks "OK to run" before
@@ -221,7 +221,15 @@ Settings, so runs cut off by a shutdown continue after the Mac starts.
 Quitting Rota yourself while routines run asks first and stops them; their
 sessions can be continued later.
 
-If Rota restarts while an interactive Claude session is still alive, that routine
-stays occupied until the session exits. Open in Terminal attaches to the existing
-session. Another scheduled or manual run cannot start over it. Close that session
-before deleting the routine.
+After a Rota restart, Rota checks the existing native session or local process
+before allowing another run. Recovery follows the same work without sending
+another prompt. If the native state cannot be checked yet, the routine stays
+occupied and Rota retries. A surviving terminal session can be opened with
+Open in Terminal. Older runs without recovery metadata may have incomplete
+recovered output; see [Harness compatibility](harness-compatibility.md).
+
+Claude stream, Codex and Grok receive supported image attachments natively.
+Other attachments remain file references for the agent's tools. Exposed
+reasoning has a separate, expandable Reasoning row. If the selected CLI and its
+running service have different versions, the chat shows a warning; let other
+sessions finish before restarting that service.

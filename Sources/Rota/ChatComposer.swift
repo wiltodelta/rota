@@ -277,6 +277,9 @@ struct ChatComposer: View {
 
     /// Why there is no field.
     private var note: String? {
+        if record.needsReconciliation == true {
+            return "Checking the native session before starting more work. Rota will retry automatically."
+        }
         if running, model.scheduler.current(record.id)?.terminalState != nil {
             return "Reply and approve actions in Terminal. Messages sync here automatically."
         }

@@ -10,6 +10,8 @@ struct TranscriptRecord: Codable {
     var text: String?
     var complete: Bool?
     var logSize: UInt64
+    var sourceID: String?
+    var nativeID: String?
 }
 
 public struct TranscriptSnapshot: Equatable, Sendable {
@@ -43,12 +45,19 @@ public struct TranscriptReader: Sendable {
     private var headerEnd: UInt64 = 0
     private var lastGood: TranscriptSnapshot?
     private var unsettledReads = 0
+    private(set) var sourceIDs = Set<String>()
+    private var collectsSourceIDs = false
     /// Actual bytes fetched, including header and incremental reads, for bounded-I/O checks.
     private(set) var bytesRead = 0
 
     public init(pageSize: Int? = nil, settleWrites: Bool = false) {
         self.pageSize = pageSize.map { max(1, $0) }
         self.settleWrites = settleWrites
+    }
+
+    init(recovering: Bool) {
+        self.init()
+        collectsSourceIDs = recovering
     }
 
     public static func journalURL(for log: URL) -> URL { log.appendingPathExtension("chat.jsonl") }
@@ -162,6 +171,7 @@ public struct TranscriptReader: Sendable {
 
     private mutating func apply(_ record: TranscriptRecord) throws {
         guard record.version == 1 else { throw JournalError.unsupported }
+        if collectsSourceIDs, let source = record.sourceID { sourceIDs.insert(source) }
         if record.type == "header" {
             guard !headerSeen else { throw JournalError.unsupported }
             headerSeen = true
@@ -195,7 +205,7 @@ public struct TranscriptReader: Sendable {
         indices[id] = items.count
         // An unfamiliar presentation kind still has the contract's explicit display text.
         items.append(TranscriptItem(id: id, kind: TranscriptItem.Kind(rawValue: kind) ?? .status,
-                                    text: text, isComplete: record.complete ?? true))
+                                    text: text, isComplete: record.complete ?? true, nativeID: record.nativeID))
     }
 
     private func legacy(_ log: URL, shell: Bool, problem: String? = nil) -> TranscriptSnapshot {
@@ -216,14 +226,20 @@ enum JournalError: Error { case unsupported }
 final class TranscriptJournal {
     private let handle: FileHandle
     private(set) var nextID: Int
+    private(set) var sourceIDs = Set<String>()
+    private(set) var unfinished: TranscriptItem?
+    private(set) var nativeItems: [String: String] = [:]
 
     init(log: URL, resuming: Bool, logSize: UInt64) throws {
         let url = TranscriptReader.journalURL(for: log)
         if resuming {
-            var reader = TranscriptReader()
+            var reader = TranscriptReader(recovering: true)
             let snapshot = reader.read(log: log)
             guard snapshot.structured, reader.canAppend else { throw JournalError.unsupported }
             nextID = reader.nextID
+            sourceIDs = reader.sourceIDs
+            unfinished = snapshot.items.last.flatMap { $0.isComplete ? nil : $0 }
+            for item in snapshot.items { if let id = item.nativeID { nativeItems[id] = item.text } }
         } else {
             FileManager.default.createFile(atPath: url.path, contents: nil)
             nextID = 0

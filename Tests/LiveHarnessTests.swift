@@ -78,6 +78,37 @@ final class LiveHarnessTests: XCTestCase {
         XCTAssertTrue(log.lowercased().contains("purple otter\n") || log.lowercased().hasSuffix("purple otter"), log)
     }
 
+    @MainActor
+    func testClaudeCodexAndGrokReadANativeImageWithoutTools() throws {
+        let code = String(UUID().uuidString.prefix(6))
+        let image = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 600, pixelsHigh: 180,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: image))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        NSColor.white.setFill()
+        NSRect(x: 0, y: 0, width: 600, height: 180).fill()
+        (code as NSString).draw(at: NSPoint(x: 30, y: 40), withAttributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: 80, weight: .bold), .foregroundColor: NSColor.black,
+        ])
+        NSGraphicsContext.restoreGraphicsState()
+        let file = folder.appendingPathComponent("image.png")
+        try XCTUnwrap(image.representation(using: .png, properties: [:])).write(to: file)
+        for (harness, model) in [(Harness.claude, "haiku"), (.codex, "gpt-6-luna"), (.grok, "grok-4.6")] {
+            let attachments = try ChatAttachmentStore(log: folder.appendingPathComponent(harness.rawValue + ".log"))
+                .stage([file])
+            let prompt = try ChatMessage(text: "Read the code in the attached image. Reply with that code only. "
+                + "Do not call any tools or open the image file by path.", attachments: attachments).encoded()
+            let (outcome, log, _) = try run(harness, prompt: prompt, message: nil, model: model, effort: "low")
+            XCTAssertEqual(outcome, .succeeded, log)
+            let items = Transcript.parse(log)
+            let answers = items.filter { $0.kind == .agent }.map(\.text)
+            XCTAssertTrue(answers.contains { $0.trimmingCharacters(in: .whitespaces) == code }, log)
+            XCTAssertFalse(items.contains { $0.kind == .tool }, "Vision must use the native input: \(log)")
+        }
+    }
+
     /// Grok answers a message sent mid-turn after that turn; the run waits for the answer.
     func testGrokTakesAMessageIntoTheSession() throws {
         let (outcome, log, session) = try run(.grok, prompt: steerable, message: "Reply with exactly: purple otter")
@@ -98,7 +129,8 @@ final class LiveHarnessTests: XCTestCase {
         XCTAssertEqual(second, .succeeded, log)
         XCTAssertEqual(again, id, "the same session continues")
         XCTAssertTrue(log.contains("red fox") && log.lowercased().contains("blue whale"), log)
-        XCTAssertEqual(log.components(separatedBy: "red fox").count, 3, "the first answer is not copied twice: \(log)")
+        XCTAssertEqual(Transcript.parse(log).filter { $0.kind == .agent && $0.text == "red fox" }.count, 1,
+                       "the first answer is not copied twice: \(log)")
     }
 
     func testCodexContinuesAFinishedSession() throws { try checkContinuation(.codex) }

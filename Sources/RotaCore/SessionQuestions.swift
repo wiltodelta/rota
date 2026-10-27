@@ -39,7 +39,22 @@ extension Scheduler {
             }, undelivered: { [weak self] message in
                 // Not tied to the launch: it may arrive after the run has finished.
                 self?.receiveLate(message, routineID: id, runID: runID)
+            }, provenance: { [weak self] cli, server in
+                self?.updateProvenance(cli: cli, server: server, runID: runID, launchID: launchID)
+            }, reconciliationRequired: { [weak self] in
+                guard isCurrent(), let self, var record = self.active[id] else { return }
+                record.needsReconciliation = true
+                self.active[id] = record
+                self.saveRecord(record)
             })
+    }
+
+    private func updateProvenance(cli: String?, server: String?, runID: UUID, launchID: UUID) {
+        guard var record = current(runID), record.executionID == launchID else { return }
+        if let cli { record.cliVersion = cli }
+        if let server { record.serverVersion = server }
+        if isActive(record) { active[record.routineID] = record }
+        saveRecord(record)
     }
 
     func receiveQuestion(

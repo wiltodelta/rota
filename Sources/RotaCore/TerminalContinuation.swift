@@ -1,9 +1,32 @@
 import Foundation
 
 extension Scheduler {
+    /// The terminal command for `record`'s session, with the harness's executable filled in.
+    public func terminalCommand(for record: RunRecord) -> (executable: String, arguments: [String])? {
+        if isSurvivingSession(record) {
+            if let path = record.logPath, let lease = RunLease.read(URL(fileURLWithPath: path)),
+               let name = lease.screenName, lease.process?.exists == true {
+                return (ScreenRun.screen, ["-x", name])
+            }
+            if record.harness == .shell || record.harness == .claude, let session = record.sessionID {
+                let name = record.harness == .shell ? session : ClaudeInteractiveRun.screenName(session)
+                if sessionAlive(name) { return (ScreenRun.screen, ["-r", name]) }
+            }
+            return nil
+        }
+        if isActive(record), let command = controls[record.routineID]?.attachCommand, let program = command.first {
+            return (program, Array(command.dropFirst()))
+        }
+        guard isActive(record) || active[record.routineID] == nil,
+              let session = record.sessionID,
+              let (program, arguments) = record.harness.terminal(session: session, running: isActive(record))
+        else { return nil }
+        return (program ?? executable(record.harness), arguments)
+    }
+
     /// Resumes the native CLI under Rota's ownership without submitting a new prompt.
     public func continueInTerminal(_ record: RunRecord) async -> Bool {
-        guard !openingTerminals.contains(record.id), !hasSurvivingClaude(record.routineID),
+        guard !openingTerminals.contains(record.id), !hasSurvivingSession(record.routineID),
               active[record.routineID] == nil,
               let record = current(record.id, routineID: record.routineID),
               let routine = routine(record.routineID), let session = record.sessionID,
@@ -17,7 +40,7 @@ extension Scheduler {
             lastError = "Could not find this session's native transcript. Terminal continuation was not started."
             return false
         }
-        guard active[record.routineID] == nil, !hasSurvivingClaude(record.routineID), let latest = current(record.id),
+        guard active[record.routineID] == nil, !hasSurvivingSession(record.routineID), let latest = current(record.id),
               latest.sessionID == session, latest.logPath == logPath,
               self.routine(record.routineID) != nil else { return false }
         var next = latest
@@ -36,9 +59,11 @@ extension Scheduler {
 
     @discardableResult
     func continueSession(_ record: RunRecord, with message: String) -> Bool {
-        guard !hasSurvivingClaude(record.routineID), var (record, spec) = reopen(record, prompt: message) else {
+        guard !hasSurvivingSession(record.routineID), let reopened = reopen(record, prompt: message) else {
             return false
         }
+        var record = reopened.0
+        let spec = reopened.1
         record.reportedModel = nil
         record.reportedEffort = nil
         record.questions = record.questions?.filter { $0.replyViaMessage == true }

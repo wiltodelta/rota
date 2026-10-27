@@ -8,6 +8,7 @@
 #   scripts/ui-check.sh           shell routine only, no agent quota spent
 #   scripts/ui-check.sh --live    also message a running Codex session
 #   scripts/ui-check.sh --questions-only  finished question and verification states only
+#   scripts/ui-check.sh --harnesses-only  reasoning and CLI/service compatibility states only
 #   ROTA_UI_QUESTION_HARNESS=antigravity scripts/ui-check.sh --questions-only
 #   ROTA_UI_TERMINAL=terminal scripts/ui-check.sh  use Terminal in both appearances
 set -euo pipefail
@@ -340,6 +341,56 @@ check_mixed_questions() {
     quit_rota
 }
 
+if [[ "$LIVE" == --harnesses-only ]]; then
+    # No installed agents are needed to render this protocol-neutral presentation contract.
+    defaults write "$DOMAIN" executables -dict claude /unavailable/claude codex /unavailable/codex \
+        grok /unavailable/grok antigravity /unavailable/agy
+    python3 - "$SUPPORT" "$WORK/project" <<'PYTHON'
+from datetime import datetime, timedelta, timezone
+import json
+from pathlib import Path
+import sys
+import uuid
+root = Path(sys.argv[1])
+routine = "harness-presentation"
+log = root / "Logs" / routine / "synthetic.log"
+log.parent.mkdir(parents=True, exist_ok=True)
+reasoning = "Checked the available inputs and kept the answer separate."
+answer = "The harness completed its task."
+body = "[reasoning] " + reasoning + "\n" + answer + "\n"
+log.write_text(body)
+size = len(body.encode())
+entries = [{"version": 1, "type": "header", "logSize": 0},
+           {"version": 1, "type": "item", "id": 0, "kind": "reasoning", "text": reasoning, "logSize": size},
+           {"version": 1, "type": "item", "id": 1, "kind": "agent", "text": answer, "logSize": size}]
+log.with_name(log.name + ".chat.jsonl").write_text("".join(json.dumps(row) + "\n" for row in entries))
+now = datetime.now(timezone.utc)
+stamp = lambda value: value.isoformat(timespec="seconds").replace("+00:00", "Z")
+(root / "routines.json").write_text(json.dumps([{
+    "id": routine, "name": "Harness compatibility check", "harness": "codex", "enabled": False,
+    "schedule": "0 9 * * *", "workingDirectory": sys.argv[2], "prompt": "Synthetic task"}]))
+(root / "runs").mkdir(exist_ok=True)
+(root / "runs" / (routine + ".json")).write_text(json.dumps([{
+    "id": str(uuid.uuid4()).upper(), "routineID": routine, "trigger": "manual", "harness": "codex",
+    "startedAt": stamp(now - timedelta(seconds=2)), "endedAt": stamp(now), "outcome": {"succeeded": {}},
+    "logPath": str(log), "cliVersion": "fixture 1.0.0", "serverVersion": "fixture 1.0.1"}]))
+PYTHON
+    for appearance in light dark; do
+        launch "$appearance"
+        "$DRIVER" key command-zero
+        check "$DRIVER" exists harnessCompatibilityNotice
+        check "$DRIVER" exists Reasoning
+        capture "Harness compatibility check" "$appearance-harness-reasoning-collapsed"
+        "$DRIVER" disclose reasoningDetails Expanded
+        check wait_visible "Checked the available inputs and kept the answer separate."
+        capture "Harness compatibility check" "$appearance-harness-reasoning-expanded"
+        "$DRIVER" disclose reasoningDetails Collapsed
+        quit_rota
+    done
+    pass "harness presentation in both appearances"
+    exit 0
+fi
+
 if [[ "$LIVE" == --questions-only ]]; then
     for appearance in light dark; do
         rm -rf "$SUPPORT"
@@ -571,7 +622,7 @@ PYTHON
         && pass "panel row opens its session" || fail "panel row opens its session"
     quit_rota
 
-    # Render a synthetic legacy agent response without launching an agent.
+    # Render a synthetic normalized agent response without launching an agent.
     python3 - "$SUPPORT" "ui-shell-$appearance" <<'PYTHON'
 from datetime import datetime, timedelta, timezone
 import json
@@ -580,7 +631,8 @@ import sys
 import uuid
 root, routine = Path(sys.argv[1]), sys.argv[2]
 log = root / "Logs" / routine / "table-fixture.log"
-log.write_text("""## Итог
+log.write_text("""[reasoning] Synthetic provider reasoning remains separate from the answer.
+## Итог
 
 Абзац с **полужирным**, `кодом` и [ссылкой](https://example.com).
 - Пункт списка достаточно длинный, чтобы перенестись на вторую строку и показать висячий отступ под текстом, а не под маркером.
@@ -596,17 +648,32 @@ log.write_text("""## Итог
 
 Текст после таблицы.
 """, encoding="utf-8")
+body = log.read_text(encoding="utf-8")
+reasoning, answer = body.split("\n", 1)
+size = len(body.encode("utf-8"))
+entries = [{"version": 1, "type": "header", "logSize": 0},
+           {"version": 1, "type": "item", "id": 0, "kind": "reasoning",
+            "text": reasoning.removeprefix("[reasoning] "), "logSize": size},
+           {"version": 1, "type": "item", "id": 1, "kind": "agent", "text": answer, "logSize": size}]
+log.with_name(log.name + ".chat.jsonl").write_text("".join(json.dumps(row) + "\n" for row in entries))
 now = datetime.now(timezone.utc)
 stamp = lambda value: value.isoformat(timespec="seconds").replace("+00:00", "Z")
 history = root / "runs" / f"{routine}.json"
 records = json.loads(history.read_text())
 records.insert(0, {"id": str(uuid.uuid4()).upper(), "routineID": routine, "trigger": "manual",
                    "harness": "claude", "startedAt": stamp(now - timedelta(seconds=2)), "endedAt": stamp(now),
-                   "outcome": {"succeeded": {}}, "logPath": str(log)})
+                   "outcome": {"succeeded": {}}, "logPath": str(log),
+                   "cliVersion": "fixture 1.0.0", "serverVersion": "fixture 1.0.1"})
 history.write_text(json.dumps(records))
 PYTHON
     launch "$appearance"
     check "$DRIVER" exists markdownTable
+    check "$DRIVER" exists harnessCompatibilityNotice
+    check "$DRIVER" exists Reasoning
+    "$DRIVER" reveal Reasoning
+    capture "UI check $appearance" "$appearance-harness-reasoning-collapsed"
+    "$DRIVER" disclose reasoningDetails Expanded
+    capture "UI check $appearance" "$appearance-harness-reasoning-expanded"
     capture "UI check $appearance" "$appearance-table"
     for _ in 1 2 3; do "$DRIVER" key command-plus; sleep 0.2; done
     "$DRIVER" window "UI check $appearance" 820 600

@@ -5,6 +5,7 @@
 //   tree [depth]                 print roles, titles and identifiers of the windows
 //   menu <title>                invoke an app menu item by its title
 //   press <id-or-title>          press the first button with that identifier or title
+//   disclose <id> <state>        expand or collapse a disclosure and verify its explicit state
 //   set <id> <value>             set a text field or numeric slider value
 //   value <id>                   print an element's value
 //   enabled <id>                 print whether a control is enabled
@@ -120,6 +121,25 @@ case "press":
     else { fail("no element \(arguments[1])") }
     let result = AXUIElementPerformAction(button, kAXPressAction as CFString)
     guard result == .success else { fail("press failed: \(result.rawValue)") }
+case "disclose":
+    guard arguments.count == 3, ["Expanded", "Collapsed"].contains(arguments[2]),
+          let button = find({ matches($0, arguments[1]) }),
+          let before: String = attribute(button, kAXValueAttribute),
+          ["Expanded", "Collapsed"].contains(before) else { fail("disclose <id> <Expanded|Collapsed>") }
+    if before == arguments[2] { exit(0) }
+    app.activate()
+    let result = AXUIElementPerformAction(button, kAXPressAction as CFString)
+    // SwiftUI can report an action error after changing state. Require fresh observable confirmation.
+    let deadline = ProcessInfo.processInfo.systemUptime + 2
+    while ProcessInfo.processInfo.systemUptime < deadline {
+        if let current = find({ matches($0, arguments[1]) }),
+           (attribute(current, kAXValueAttribute) as String?) == arguments[2] {
+            print("disclosure verified: \(before) -> \(arguments[2]); AX result \(result.rawValue)")
+            exit(0)
+        }
+        Thread.sleep(forTimeInterval: 0.02)
+    }
+    fail("disclosure did not reach \(arguments[2]); AX result \(result.rawValue)")
 case "set":
     guard arguments.count == 3 else { fail("set <id> <value>") }
     guard let field = find({ matches($0, arguments[1]) }) else { fail("no element \(arguments[1])") }
@@ -380,6 +400,24 @@ case "scroll-wheel":
         end.post(tap: .cghidEventTap)
     }
 case "key":
+    // Recheck the console at the point of delivery, including after a long build or relaunch.
+    let console = Process()
+    console.executableURL = URL(fileURLWithPath: "/usr/sbin/ioreg")
+    console.arguments = ["-n", "Root", "-d1", "-a"]
+    let consoleOutput = Pipe()
+    console.standardOutput = consoleOutput
+    console.standardError = FileHandle.nullDevice
+    do { try console.run() } catch { fail("cannot verify the console; refusing keystrokes") }
+    let consoleData = consoleOutput.fileHandleForReading.readDataToEndOfFile()
+    console.waitUntilExit()
+    let consolePlist = try? PropertyListSerialization.propertyList(from: consoleData, format: nil)
+    let consoleRoot = (consolePlist as? [String: Any]) ?? (consolePlist as? [[String: Any]])?.first
+    guard console.terminationStatus == 0,
+          let users = consoleRoot?["IOConsoleUsers"] as? [[String: Any]],
+          let user = users.first(where: { $0["kCGSSessionOnConsoleKey"] as? Bool == true }),
+          user["CGSSessionScreenIsLocked"] as? Bool != true,
+          NSWorkspace.shared.frontmostApplication?.bundleIdentifier != "com.apple.loginwindow"
+    else { fail("console is locked or unavailable; refusing keystrokes") }
     // Keystrokes posted to Rota's process reach its key window even when System
     // Events keystrokes do not. Focus the target first with `focus`.
     let keys: [String: (CGKeyCode, CGEventFlags)] = [

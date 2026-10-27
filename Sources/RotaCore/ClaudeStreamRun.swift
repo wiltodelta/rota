@@ -18,9 +18,9 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     private let journal: RunJournal
     private let queue = DispatchQueue(label: "com.wiltodelta.rota.claude")
     private var hookSettings: URL?
-    private var process: Process?
+    private var capture: DurableStream?
+    private var recoveredOutcome: RunOutcome?
     private var input: FileHandle?
-    private var buffer = Data()
     private var stopReason: RunOutcome?
     private var questions: [String: String] = [:]
     /// Background shells and agents running, as `background_tasks_changed` last listed them.
@@ -28,6 +28,7 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     /// A background task finished during this turn; Claude may answer it in a turn of its own.
     private var notified = false
     private var turns = 0
+    private var streamed = false
     var settle: TimeInterval = 5
 
     init(spec: LaunchSpec, journal: RunJournal) {
@@ -37,7 +38,13 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
 
     static func start(_ spec: LaunchSpec, journal: RunJournal) throws -> ClaudeStreamRun {
         let run = ClaudeStreamRun(spec: spec, journal: journal)
-        try run.launch()
+        do {
+            if spec.adopt { try run.restore() } else { try run.launch() }
+        } catch {
+            if let settings = run.hookSettings { try? FileManager.default.removeItem(at: settings) }
+            run.capture?.stop(on: run.queue)
+            throw error
+        }
         return run
     }
 
@@ -45,7 +52,8 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     /// `chrome` passes on the user's Chrome default, which print mode would not apply.
     static func arguments(chrome: Bool, resume: String?) -> [String] {
         var arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-                         "--permission-mode", "bypassPermissions", "--permission-prompt-tool", "stdio"]
+                         "--permission-mode", "bypassPermissions", "--permission-prompt-tool", "stdio",
+                         "--include-partial-messages"]
         if chrome { arguments.append("--chrome") }
         if let resume { arguments += ["--resume", resume] }
         return arguments
@@ -54,7 +62,8 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     /// One user message on the stream-json input.
     static func userMessage(_ text: String) -> Data {
         let message: [String: Any] = ["type": "user",
-                                      "message": ["role": "user", "content": [["type": "text", "text": text]]]]
+                                      "message": ["role": "user",
+                                                  "content": HarnessInput.blocks(text, for: .claudeStream)]]
         let data = (try? JSONSerialization.data(withJSONObject: message)) ?? Data()
         return data + Data("\n".utf8)
     }
@@ -62,36 +71,12 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     private func launch() throws {
         let settings = try ClaudeRunSettings.hooks(in: spec.log.deletingLastPathComponent())
         hookSettings = settings
-        let process = ProcessLauncher.loginShellProcess(spec.executable,
-                                                        spec.arguments + ["--settings", settings.path]
-                                                            + spec.modelFlags(effortFlag: "--effort"),
-                                                        in: spec.workingDirectory, environment: spec.environment)
-        let stdin = Pipe()
-        let stdout = Pipe()
-        process.standardInput = stdin
-        process.standardOutput = stdout
-        process.standardError = stdout
-        stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty else {
-                handle.readabilityHandler = nil
-                return
-            }
-            guard let self else { return }
-            self.queue.async { self.consume(data) }
-        }
-        process.terminationHandler = { [weak self] finished in
-            guard let self else { return }
-            let status = finished.terminationStatus
-            self.queue.async { self.exited(status: status) }
-        }
-        do { try process.run() } catch {
-            try? FileManager.default.removeItem(at: settings)
-            throw error
-        }
-        self.process = process
-        input = stdin.fileHandleForWriting
-        _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        let capture = try DurableStream(spec: spec, arguments: spec.arguments + ["--settings", settings.path]
+            + spec.modelFlags(effortFlag: "--effort"))
+        self.capture = capture
+        input = capture.input
+        queue.async { self.followCapture() }
+        _ = fcntl(input!.fileDescriptor, F_SETNOSIGPIPE, 1)
         try input?.write(contentsOf: ClaudeConfiguration.request("initialize", id: ClaudeConfiguration.initializeID))
         try input?.write(contentsOf: ClaudeConfiguration.request("get_settings", id: ClaudeConfiguration.settingsID))
         try input?.write(contentsOf: Self.userMessage(spec.prompt))
@@ -99,6 +84,21 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
         if let timeout = spec.timeout {
             queue.asyncAfter(deadline: .now() + timeout) { [weak self] in self?.end(as: .timedOut) }
         }
+    }
+
+    private func restore() throws {
+        capture = try DurableStream(restoring: spec.log)
+        if let session = spec.resume { journal.session(session) }
+        queue.async { self.followCapture() }
+        if let timeout = spec.timeout {
+            queue.asyncAfter(deadline: .now() + timeout) { [weak self] in self?.end(as: .timedOut) }
+        }
+    }
+
+    private func followCapture() {
+        capture?.follow(on: queue, line: { data, source in
+            self.journal.withSource(source) { self.handle(lossyUTF8(data)) }
+        }, ended: { self.exited(status: $0) })
     }
 
     func send(_ message: String) {
@@ -119,15 +119,6 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
 
     // MARK: On `queue`
 
-    private func consume(_ data: Data) {
-        buffer.append(data)
-        while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-            let line = lossyUTF8(buffer[buffer.startIndex..<newline])
-            buffer.removeSubrange(buffer.startIndex...newline)
-            handle(line)
-        }
-    }
-
     func handle(_ line: String) {
         guard let data = line.data(using: .utf8),
               let event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
@@ -137,22 +128,45 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
             return
         }
         if let configuration = ClaudeConfiguration.applied(event) { journal.configure(configuration) }
+        if spec.adopt, type.hasPrefix("control_") { return }
         if handleControl(event) { return }
         switch type {
+        case "stream_event": partial(event)
         case "system":
             system(event, line: line)
         case "result":
             turnEnded(event)
-        default:
-            // A tool result after a notification means another request, which carries the notification.
-            if type == "user" { notified = false }
-            for item in StreamJSONFormatter.items(data) { journal.record(item.kind, item.text) }
+        default: message(data, type: type)
         }
+    }
+
+    private func partial(_ event: [String: Any]) {
+        let event = event["event"] as? [String: Any] ?? [:]
+        let delta = event["delta"] as? [String: Any] ?? [:]
+        if let text = delta["text"] as? String {
+            streamed = true
+            journal.text(text)
+        } else if let thinking = delta["thinking"] as? String {
+            streamed = true
+            journal.text(thinking, kind: .reasoning)
+        }
+    }
+
+    private func message(_ data: Data, type: String) {
+        if type == "user" { notified = false }
+        let skipText = type == "assistant" && streamed
+        for item in StreamJSONFormatter.items(data) {
+            let text = item.kind == .agent || item.kind == .reasoning
+            if !skipText || !text { journal.record(item.kind, item.text) }
+        }
+        if type == "assistant" { streamed = false }
     }
 
     private func system(_ event: [String: Any], line: String) {
         let subtype = event["subtype"] as? String
-        if subtype == "background_tasks_changed" {
+        if subtype == "api_retry" {
+            journal.record(.status, "Claude is retrying its request")
+        } else if subtype == "background_tasks_changed" {
             // `ambient` tasks (watchers such as Monitor) are not activity, by the CLI's own schema.
             let tasks = (event["tasks"] as? [[String: Any]] ?? []).filter { $0["ambient"] as? Bool != true }
             background = Set(tasks.compactMap { $0["task_id"] as? String })
@@ -215,6 +229,10 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     /// or a notification may start one more turn; closing stdin lets Claude exit and save the session.
     private func turnEnded(_ event: [String: Any]) {
         let failed = event["is_error"] as? Bool == true || (event["subtype"] as? String)?.hasPrefix("error") == true
+        if spec.adopt {
+            recoveredOutcome = failed ? .failed(exitCode: 1) : .succeeded
+            return
+        }
         if !failed, stopReason == nil {
             if !background.isEmpty { return journal.record(.status, TranscriptService.waiting(background.count)) }
             if notified { return closeUnlessATurnStarts() }
@@ -234,25 +252,23 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     }
 
     private func close(failed: Bool) {
-        journal.finish(stopReason ?? (failed ? .failed(exitCode: 1) : .succeeded))
+        recoveredOutcome = failed ? .failed(exitCode: 1) : .succeeded
         try? input?.close()
         input = nil
     }
 
     func exited(status: Int32) {
+        if capture?.alive == true { journal.requireReconciliation() }
         if let hookSettings { try? FileManager.default.removeItem(at: hookSettings) }
         // Normally the result came first; an exit without one is a crash or a refusal to start.
-        journal.finish(stopReason ?? (status == 0 ? .interrupted : .failed(exitCode: status)))
+        journal.finish(stopReason ?? recoveredOutcome
+            ?? (status == 0 || status == -1 ? .interrupted : .failed(exitCode: status)))
         Self.log.info("claude exited with \(status)")
     }
 
     private func end(as reason: RunOutcome) {
-        guard !journal.isFinished, let process, process.isRunning else { return }
+        guard !journal.isFinished, capture?.alive == true else { return }
         stopReason = reason
-        process.terminate()
-        let pid = process.processIdentifier
-        DispatchQueue.global().asyncAfter(deadline: .now() + 10) {
-            if process.isRunning { kill(pid, SIGKILL) }
-        }
+        capture?.stop(on: queue, delay: 10)
     }
 }

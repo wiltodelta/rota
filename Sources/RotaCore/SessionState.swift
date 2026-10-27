@@ -29,13 +29,14 @@ extension Scheduler {
 
     /// Whether Rota can message this session now, running or finished.
     public func canMessage(_ record: RunRecord) -> Bool {
-        guard !openingTerminals.contains(record.id), survivingClaude[record.routineID] == nil,
+        guard !openingTerminals.contains(record.id), survivingSessions[record.routineID] == nil,
               record.sessionID != nil else { return false }
         if isActive(record), active[record.routineID]?.terminalState != nil { return false }
         let running = isActive(record)
         // While another run of the routine works, its finished sessions wait.
         if !running && active[record.routineID] != nil { return false }
-        return record.harness.takesMessages
+        let mode = running ? record.launchMode ?? record.harness.launchMode : record.harness.launchMode
+        return mode.capabilities.messages != .terminal
     }
 
     func updateConfiguration(_ configuration: SessionConfiguration, routineID: String, runID: UUID) {

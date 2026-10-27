@@ -6,9 +6,10 @@ Provider text alone never becomes a question: the adapter requires structured me
 
 ## Protocol inventory
 
-The inventory was checked against Claude Code 2.1.304, Codex CLI 0.163.0's
-experimental JSON schema and Grok Build 1.0.62's installed guide and native requests.
-Recheck those producers when upgrading a runner; fixtures are examples, not the schema.
+The inventory follows installed Claude hook/control requests, Codex's experimental
+JSON schema and Grok's installed guide and native ACP requests. Installed versions
+are emitted by `scripts/check-harnesses.sh` and saved with runs. Recheck those
+producers when upgrading a runner; fixtures are examples, not the schema.
 Grok's live `initialize` response advertises capabilities and hook metadata but
 not a complete list of interaction methods. This is a release-specific inventory,
 not a claim to recognize every future vendor extension.
@@ -87,8 +88,9 @@ ROTA_LIVE_QUESTIONS=1 swift test --filter LiveQuestionTests
 
 The live suite checks each installed agent's native questionnaire and its reply,
 Claude/Grok multiple selection,
-Codex's asynchronous message and a later answer in the same thread, and walks
-all interaction methods in the installed Codex JSON schema. Interactive Claude
+Codex's asynchronous message and a later answer in the same thread.
+`InstalledHarnessContractTests` walks interaction methods in the installed Codex
+JSON schema without inference, as part of the ordinary test suite. Interactive Claude
 also needs `ROTA_INTERACTIVE_TEST_DIR` set to an already trusted test workspace.
 Tests never create trust grants or change the agents' own configuration.
 

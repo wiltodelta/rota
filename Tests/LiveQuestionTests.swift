@@ -17,28 +17,6 @@ final class LiveQuestionTests: XCTestCase {
         if let folder { try? FileManager.default.removeItem(at: folder) }
     }
 
-    func testInstalledCodexInteractionSchemaMatchesAdapters() throws {
-        let schema = folder.appendingPathComponent("schema")
-        let (status, output) = ProcessLauncher.capture(Harness.codex.defaultExecutable(),
-            ["app-server", "generate-json-schema", "--experimental", "--out", schema.path], in: folder.path)
-        XCTAssertEqual(status, 0, output)
-        let data = try Data(contentsOf: schema.appendingPathComponent("ServerRequest.json"))
-        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let variants = try XCTUnwrap(root["oneOf"] as? [[String: Any]])
-        var checked: [String] = []
-        for variant in variants {
-            let properties = variant["properties"] as? [String: Any]
-            let method = (properties?["method"] as? [String: Any])?["enum"] as? [String]
-            guard let method = method?.first,
-                  method.contains("Approval") || method.contains("requestUserInput") || method.contains("elicitation")
-            else { continue }
-            XCTAssertNotNil(QuestionRequest.codex(method, [:]), method)
-            checked.append(method)
-        }
-        XCTAssertFalse(checked.isEmpty, "The schema walk must reach interaction requests")
-        print("Codex interaction methods checked: \(checked.sorted())")
-    }
-
     func testGrokNativeQuestion() throws { try question(.grok) }
     func testGrokMultipleSelection() throws { try question(.grok, multiple: true) }
     func testClaudeMultipleSelection() throws { try question(.claude, multiple: true) }

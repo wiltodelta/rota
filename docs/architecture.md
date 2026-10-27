@@ -267,6 +267,9 @@ flowchart LR
   (`shell_environment_policy.set.*`, verified live in the command's
   environment) or, for Grok, whose commands have no per-session environment,
   as a `_meta.rules` sentence naming the session and the `rota notify` command.
+  When Rota MCP is already registered, `SessionBridge` additionally overrides
+  only that server's command and environment per Codex thread or Grok session;
+  `notify_user` then has the run identity without editing global agent settings.
 - What a run can reach, checked live 2026-10-11 through Rota on each harness
   (`GLOBAL`/`CHROME`/`COMPUTER` self-report, Claude's `system/init` tool list,
   Codex `mcpServerStatus/list`, Grok session `events.jsonl`): all three load
@@ -374,7 +377,7 @@ flowchart LR
   through its runner's `send`, or, for a finished one, `continueSession`
   starts a run of the same `RunRecord` with `LaunchSpec.resume` set to its
   session id, appending to the same log: Claude `--resume <session id>`, Codex
-  `thread/resume`, Grok `session/load` with its replayed updates ignored.
+  `thread/resume`, Grok `session/load` with native replay reconciled by item ID.
   Verified live 2026-10-09 by the `*Continues*` tests in `LiveHarnessTests`.
   A runner whose session is ending (Claude typing `/exit` or past its result,
   Antigravity after closing its input, any run already finished) hands a
@@ -814,6 +817,16 @@ captures were inspected. These are Settings checks, not a repeat of the full
 session and terminal scenario.
 Control-row reviews also measure vertical centers and
 exercise optional rows, including the enabled time limit.
+`ui-check.sh --harnesses-only` isolates Reasoning and the CLI/service version
+warning using disabled synthetic sessions. It captures both disclosure states
+in both appearances at minimum width. Reasoning exposes a stable accessibility
+group, its own button and an explicit Expanded/Collapsed value. The driver's
+`disclose` command requires fresh state confirmation: SwiftUI returned an AX
+action error after successfully opening the content on this Mac. The error is
+reported alongside the confirmed transition, rather than treated as proof of
+failure or success. Ordinary `press` remains strict. Before any key, the driver
+rechecks the console and refuses input while it is locked or its state is unknown.
+
 The UI layout gate checks the window frame against the screen's visible area,
 including menu bar and Dock exclusions, as well as checking the controls inside it.
 The hosting controller's cached preferred size alone does not update an already
@@ -824,8 +837,11 @@ resume arguments. The existing run ID, session ID, log and normalized journal
 are retained. `NativeTranscript` checkpoints the provider file before launch
 and reads only appended complete JSONL records: Claude's project transcript,
 Codex's rollout (user `item_completed` events and assistant `response_item`
-messages, excluding injected user-role instructions), or Grok's persisted ACP
-updates, including `_x.ai/session/update` turn boundaries. Provider stores are
+messages, excluding injected user-role instructions), Grok's persisted ACP
+updates including `_x.ai/session/update` turn boundaries, or Antigravity's
+completed native steps. Provider-exposed reasoning and tool output remain
+separate from answers. Native offsets are checkpointed with the process lease
+for adoption after restart. Provider stores are
 read-only. Partial UTF-8 lines are buffered; old history is not imported again.
 Grok resumes over ACP using the directory encoded in that archive's group
 (or its `.cwd` file for long paths). The routine's spelling can name the same
@@ -1008,10 +1024,11 @@ shown as a fictitious default; an unknown model reads `Default model`. No histor
 `ChatAttachmentStore` copies regular files into UUID subfolders beside the owned
 log, in `<log>.attachments`. Picker and URL drops share this path, off the UI actor;
 a failed batch rolls back only its new copies. `ChatMessage` appends a versioned
-JSON manifest to ordinary message text. All adapters receive the same text and
-local paths, letting agent tools read files without requiring native attachment
-payload support in every provider. This does not promise native multimodal input
-or support for every file format. The transcript decodes the manifest into file
+JSON manifest to ordinary message text. All adapters retain that text and local paths. `HarnessInput` additionally sends
+validated supported images as Claude stream image blocks, Codex `localImage`
+items or Grok ACP image blocks. Other modes and non-image files remain file
+references. ImageIO validates the contents before native encoding; unsupported,
+corrupt or oversized images keep their file-reference fallback. The transcript decodes the manifest into file
 chips, including file-only messages; malformed manifests remain visible text.
 
 `MarkdownImageReference` uses Foundation's inline Markdown attributes to separate
@@ -1125,8 +1142,9 @@ stream-json --output-format stream-json --dangerously-skip-permissions`, with
 optional `--model`, `--effort` and `--conversation` flags. Messages sent while
 working wait in Rota until the current result before starting another turn.
 Rota closes stdin after the last result and waits for the process to exit.
-The pipe reader uses `availableData`: a fixed-length read can hold a short
-`init` event until EOF and deadlock an interactive peer. A FIFO-coordinated
+`DurableStream` reads complete NDJSON lines from a private file while the CLI
+keeps writing, drains its tail before completion, and recovers the same file
+after restart. A FIFO-coordinated
 local peer pins message queuing without timing assumptions.
 
 `AntigravityStream` normalizes `init`, `step_update` and `result` events into
@@ -1159,9 +1177,10 @@ skip missing executables before starting a protocol peer: probing an absent
 Codex CLI reproduced a process-wide `SIGPIPE` during UI fixture startup. These
 commands report zero turns and an empty conversation ID, use no generation
 quota, and do not change saved defaults. The current `/model` marks the
-catalog's default family. If native metadata cannot verify any family or the current default, the
-catalog remains unavailable; it never mixes verified families with unverified
-effort-specific variants. `AppSettings` publishes each agent's catalog as it
+catalog's default family. Failed families leave independently verified families available. The read has
+an overall deadline and reports incomplete metadata to compatibility checks.
+The next catalog refresh retries the read. Unverified
+effort-specific variants never become selectable families. `AppSettings` publishes each agent's catalog as it
 arrives, so a slow CLI cannot delay another agent's ready models. The form
 reports loading and unavailable catalogs separately from a verified model
 whose effort is fixed. A canceled refresh cannot replace newer results.
@@ -1186,7 +1205,7 @@ On continuation, the reader starts after the existing archive, so answered
 questions do not return. Partial lines wait for completion; duplicate native
 rows are ignored, and corrupt/truncated sources report that question sync paused
 and fail the Rota run even when the model process exits successfully.
-No model reasoning or prose is converted to a form or copied into Rota's log.
+No model reasoning or prose is converted to a form. Exposed reasoning is stored separately from the answer.
 
 Antigravity's execution permissions retain the unattended policy. Archived
 `ask_permission` and `ask_custom_permission` calls, as well as unsupported
@@ -1286,90 +1305,67 @@ and an exited parent with an inherited output pipe.
 
 ## Feature coverage across harnesses
 
-Audited 2026-10-26 against claude 2.1.311, codex-cli 0.164.0, grok 1.0.70 and
-agy 1.4.7: code, `--help`, the Codex schema, Grok's user guide, the agy
-binary's strings, and counts over local session archives. "Yes" is handled;
-"partial" is handled with the gap named below; "n/a" means the harness has no
-such concept; "gap" means the harness exposes it and Rota does not use it.
+Capabilities belong to `LaunchMode`, including Claude's two execution modes,
+not just to the harness name. `HarnessCapabilities` is the code contract;
+[Harness compatibility](harness-compatibility.md) describes verification and updates.
+The selected executable and its reported version, the host mode, execution ID
+and optional native server version are saved with each run. A CLI/server version
+mismatch is visible in the chat and session API. Rota never restarts a shared
+service that may host somebody else's work.
 
-| Feature | Claude `-p` | Claude interactive | Codex | Grok Build | Antigravity | Shell |
+| Feature | Claude stream | Claude interactive | Codex | Grok Build | Antigravity | Shell |
 |---|---|---|---|---|---|---|
-| Model and effort choice | yes | yes | yes | partial (G6) | yes | n/a |
-| Message while running | joins turn | joins turn | joins turn | after turn | after turn | Terminal only |
-| Continue a finished session | yes | yes | yes | yes | yes | n/a |
-| Stop and time limit | yes | yes | partial (X3) | yes | yes | partial (S2) |
-| Native questions | partial (C3) | partial (C3) | yes | yes | as a later message | n/a |
-| Attachments | paths only (X1) | paths only (X1) | paths only (X1) | paths only (X1) | paths only (X1) | n/a |
-| Background tasks | yes | yes (C4) | n/a | yes | partial (A2) | n/a |
-| Terminal while running / after | n/a / yes | yes / yes | no / yes | no / yes | gap (A3) | yes / n/a |
-| A run surviving a Rota restart | n/a | yes | gap (X4) | gap (X4) | gap (X4) | gap (S1) |
-| Reasoning, tool output, live text | partial (X2) | partial (X2) | partial (X2) | partial (X2) | partial (X2) | log |
-| Retry progress | gap (X5) | gap (X5) | gap (X5) | gap (X5) | unknown | n/a |
-| `rota notify` and MCP in session | yes | yes | partial (X6) | partial (rules sentence) | yes | CLI only |
-| Import from the harness's app | yes | yes | yes | n/a (`/loop` is per session) | unknown (A4) | n/a |
+| Model and effort | native configuration | native configuration | native configuration | native model/options verified | native family/options verified | n/a |
+| Message while running | joins turn | terminal input | steer | queued prompt | queued prompt | Terminal |
+| Continue finished session | yes | yes | yes | yes | yes | n/a |
+| Stop and routine time limit | owned process tree | owned screen/tree | native turn confirmation | native prompt confirmation | owned process tree | owned screen/tree |
+| Native images | image blocks | file references | localImage | ACP image blocks | file references | n/a |
+| Questions | hooks/control | hooks | RPC/message | ACP | later message | n/a |
+| Reasoning/tool output | exposed blocks | native archive | exposed RPC items | ACP thought/tool content | native archive/stream | log |
+| Live answer text | partial events | transcript entries | deltas | chunks | deltas | log |
+| Retry progress | api_retry status | api_error status | willRetry status | live retry payload unverified | CLI owns retries | n/a |
+| Recover after Rota restart | durable spool | surviving screen | native thread/turn history | load replay/active prompt | durable spool | surviving screen |
+| Terminal continuation | after run | live/after | after | after | after | live |
+| Wait for background work | non-ambient tasks | shells/agents | no root wake signal verified | native activity | CLI controls its grace period | n/a |
+| Session identity in Rota MCP | inherited | inherited | per-thread server config | per-session server config | inherited | CLI only |
+| Import schedules | Claude Desktop | Claude Desktop | Codex app, read-only | no verified routine store | store unverified | n/a |
 
-Claude:
-- Fixed 2026-10-26: a surviving interactive screen is followed again and
-  closed when done; `screen -X` commands are bounded (both under "Reliability
-  boundaries"); print mode no longer counts `ambient` tasks.
-- C3. Tool approval offers Allow Once only; the CLI also carries permission
-  suggestions. Print mode answers every non-`can_use_tool` control request
-  (`elicitation`, `request_user_dialog`) as a declined approval; whether the
-  `Elicitation` hook answers first is unverified.
-- C4. Watchers such as Monitor are `ambient` in the CLI's task schema ("not
-  activity ... hosts should exclude them"), so neither runner waits for them;
-  the interactive runner, which tracks shells and agents only, ends the
-  session and with it any Monitor at the turn's end.
+Recovery submits no prompt. Codex loads all turn pages before following the
+active turn; Grok replays `session/load`, including its native running-prompt
+metadata and archived background activity. New Claude stream and Antigravity
+runs persist a private stdout spool and process lease; the wrapper saves the
+actual exit code. Shell and terminal runs follow the existing screen and
+native archive. Process ownership includes kernel birth time, so stale leases
+cannot signal a reused PID. Stop waits for owned descendants to exit and
+escalates when they ignore termination. Codex waits for a turn ID and native
+completion even if Stop arrives before the start reply. A lost connection
+reserves the routine until reconciliation succeeds; scheduled slots, manual
+runs and follow-up messages cannot create another writer while state is unknown.
 
-Codex: a finished child agent does not start a root turn (every
-`trigger_turn: true` record in about 1000 local rollouts was in a subagent
-thread), so a Codex run has no background work to wait for.
+Recovery source IDs and native item IDs let new normalized logs replay missing
+output without appending known chunks again. Legacy journals lack these IDs;
+exact duplicate suppression cannot be promised for their first native replay.
+Interactive Claude uses the existing transcript timestamp boundary, so output
+between its last poll and a later log write can be omitted. Older stream runs
+without a durable lease cannot be reconstructed from a spool that never existed.
+These limitations do not authorize sending an implicit Continue at startup.
 
-Grok Build:
-- Background commands and subagents (background by default) wake the session
-  when they finish; the run waits for them (`GrokActivity`, under the Grok
-  runner above).
-- G6. Effort is checked against the session's options; the model is not, and
-  the effort list has no `minimal`.
+Remaining provider boundaries:
 
-Antigravity:
-- Fixed 2026-10-26: `agy models` took 12 to 20 s, past the catalog's 15 s
-  limit, which emptied the model picker; the limit is now 45 s. The catalog
-  stays all or nothing, so one family failing still empties it.
-- A2. Commands go asynchronous after `WaitMsBeforeAsync`, and `agy` has
-  `manage_task`, `schedule` and `invoke_subagent`. In print mode `agy` itself
-  waits a grace period for them ("root agent idle; waiting up to %s for %d
-  background task(s)") and then terminates them ("terminating %d background
-  task(s) on exit"); whether a woken turn reaches Rota is unverified.
-- A3. Terminal continuation is excluded, but `agy --conversation <id>`
-  resumes interactively and Rota already parses its conversation log.
-- A4. The app has scheduled tasks (cron and delayed timers); where it stores
-  them is unknown. Browser tools exist in `agy` and are not listed under
-  "What a run can reach".
-
-Shell:
-- S1. A `screen` surviving a Rota crash is not tracked like Claude's, so the
-  next slot can start a second copy writing the same log (inferred from code).
-- S2. Stop quits the screen (bounded, then by pid), without the TERM and KILL
-  of the command's own process that `TerminalRun` has, so a child ignoring
-  HUP may survive (inferred).
-
-Across harnesses:
-- X1. Attachments are file paths in text; native image inputs (Claude image
-  blocks, Codex `localImage`, ACP image content) are unused.
-- X2. The transcript has no reasoning kind, so thinking is dropped everywhere.
-  Tool output is shown for Antigravity only. Text streams live for Grok and
-  Antigravity; Claude print mode (no `--include-partial-messages`) and Codex
-  (`item/agentMessage/delta` unused) show each message when it completes.
-- X3. Codex: Stop or the time limit between `turn/start` and its reply finds
-  no turn id, so the turn keeps running on the daemon (inferred).
-- X4. After a Rota restart, Codex, Grok and Antigravity runs are offered
-  Continue without checking whether the harness still runs that turn, and
-  output produced meanwhile is not pulled in (`thread/turns/list`,
-  `session/load` replays and Grok's `updates.jsonl` carry it).
-- X5. Retry progress is dropped: Claude `system/api_retry` and transcript
-  `api_error`, Codex `error` with `willRetry`, Grok `retry_state`. One API
-  error marks an interactive Claude run failed even when later turns succeed.
-- X6. Codex starts MCP servers in the shared daemon's environment, so MCP
-  `notify_user` gets no session id (inferred); the `rota notify` command works.
-
+- Claude control approvals offer Allow Once. Other control requests have an
+  explicit refusal path; arbitrary elicitation/device verification is not a
+  generic form protocol. Ambient tasks such as Monitor do not keep a run open.
+- Codex child completion has not been verified to wake a root turn. Rota follows
+  root turn completion and filters events belonging to other threads.
+- Grok model catalogs come from ACP initialization metadata, with per-model
+  effort lists. Launch checks the returned model and effort configuration.
+  Retry status parsing is defensive; a live retry payload has not been induced
+  in the compatibility suite. Archive and live notification method names differ.
+- Antigravity owns its background grace period and may terminate remaining
+  tasks on exit. Rota does not infer a background completion guarantee. Its
+  scheduled-task import store is unverified. A failed model family does not
+  discard independently verified families, with missing families retried on the next catalog refresh.
+- Only provider-exposed reasoning is shown. Encrypted reasoning, hidden model
+  thoughts, unsupported optional events and output absent from native archives
+  cannot be recovered. Interactive/file-reference modes require native tools
+  to read attachments; they do not receive multimodal blocks.

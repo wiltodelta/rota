@@ -34,8 +34,8 @@ extension Scheduler {
 
     @discardableResult
     public func delete(_ id: String) -> Bool {
-        guard !hasSurvivingClaude(id) else {
-            lastError = "Close this routine's surviving Claude session in Terminal before deleting it."
+        guard !hasSurvivingSession(id) else {
+            lastError = "Close this routine's surviving native session before deleting it."
             return false
         }
         let next = routines.filter { $0.id != id }
@@ -60,16 +60,17 @@ extension Scheduler {
     /// Availability is drawn for every list row. Reuse the display snapshot;
     /// the action below reloads storage before removing anything.
     public func canDelete(_ record: RunRecord) -> Bool {
-        guard !isActive(record),
+        guard !isActive(record), !isSurvivingSession(record),
               let stored = records(for: record.routineID).first(where: { $0.id == record.id }) else { return false }
-        return stored.outcome != .running
+        return stored.outcome != .running && stored.needsReconciliation != true
     }
 
     /// The confirmation can outlive the record it showed, so check current state again.
     @discardableResult
     public func deleteSession(_ record: RunRecord) -> Bool {
         guard let stored = current(record.id, routineID: record.routineID),
-              stored.outcome != .running, !isActive(stored), !stillRunning(stored) else {
+              stored.outcome != .running, stored.needsReconciliation != true,
+              !isActive(stored), !isSurvivingSession(stored), !stillRunning(stored) else {
             lastError = "The session is running or is no longer in history."
             return false
         }
