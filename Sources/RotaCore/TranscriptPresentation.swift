@@ -25,6 +25,12 @@ public enum TranscriptService {
 }
 
 extension TranscriptItem {
+    /// Some providers persist a signed thinking block without exposing its text.
+    /// Keep it in history, but do not offer an empty disclosure in the chat.
+    public var isEmptyReasoning: Bool {
+        kind == .reasoning && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// Presentation changes never rewrite saved history or change entry IDs.
     public var presented: TranscriptItem {
         var item = self

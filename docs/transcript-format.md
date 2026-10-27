@@ -36,7 +36,18 @@ on items identifies native messages across coalesced replay and live chunks.
 The journal restores unfinished items and recovery indexes before appending.
 UI readers do not retain that recovery-only source index. Provider-exposed
 reasoning is collapsed behind Reasoning; tool output remains tool activity.
+Empty or whitespace-only reasoning stays in the journal but creates no chat row
+and does not split adjacent tool calls. This applies to legacy turn grouping too.
 Readable logs use `[reasoning]` and `[output]` prefixes as well.
+Claude stream deduplication tracks nonempty answer and reasoning deltas separately:
+receiving one never suppresses an unstreamed completed block of the other kind.
+Grok tool text and textual file diffs share one decoder for live ACP updates
+and newly appended terminal history. Native event IDs distinguish revised results
+from repeated delivery at the same tool/block index; older events without IDs keep
+their existing index-based fallback. Antigravity reads available native reasoning
+before recording the next tool event, as well as before answer text and results.
+These adapters apply to new events; opening an old journal does not backfill it
+from a provider archive or rewrite its records.
 The scheduler's `RunRecord` remains the authority for run outcome and attention.
 
 Continuing an existing normalized session validates and appends its journal.

@@ -230,6 +230,7 @@ recovered output; see [Harness compatibility](harness-compatibility.md).
 
 Claude stream, Codex and Grok receive supported image attachments natively.
 Other attachments remain file references for the agent's tools. Exposed
-reasoning has a separate, expandable Reasoning row. If the selected CLI and its
+reasoning has a separate, expandable Reasoning row. Blocks without exposed text
+do not appear. If the selected CLI and its
 running service have different versions, the chat shows a warning; let other
 sessions finish before restarting that service.

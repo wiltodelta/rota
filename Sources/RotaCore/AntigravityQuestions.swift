@@ -47,8 +47,8 @@ extension QuestionRequest {
     }
 }
 
-/// Reads only native tool-call metadata. Stream-json omits ask_question arguments;
-/// prose and model reasoning never enter the question adapter.
+/// Reads native question metadata and exposed reasoning omitted by stream-json.
+/// Prose and reasoning never become question fields.
 struct AntigravityQuestionArchive {
     let session: String
     let file: URL

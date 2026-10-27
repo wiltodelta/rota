@@ -362,7 +362,12 @@ log.write_text(body)
 size = len(body.encode())
 entries = [{"version": 1, "type": "header", "logSize": 0},
            {"version": 1, "type": "item", "id": 0, "kind": "reasoning", "text": reasoning, "logSize": size},
-           {"version": 1, "type": "item", "id": 1, "kind": "agent", "text": answer, "logSize": size}]
+           {"version": 1, "type": "item", "id": 1, "kind": "reasoning", "text": "", "logSize": size},
+           {"version": 1, "type": "item", "id": 2, "kind": "reasoning", "text": " \n\t", "logSize": size},
+           {"version": 1, "type": "item", "id": 3, "kind": "tool", "text": "Inspect example.txt", "logSize": size},
+           {"version": 1, "type": "item", "id": 4, "kind": "output",
+            "text": "example.txt\nBefore:\nbefore\nAfter:\nafter", "logSize": size},
+           {"version": 1, "type": "item", "id": 5, "kind": "agent", "text": answer, "logSize": size}]
 log.with_name(log.name + ".chat.jsonl").write_text("".join(json.dumps(row) + "\n" for row in entries))
 now = datetime.now(timezone.utc)
 stamp = lambda value: value.isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -380,11 +385,17 @@ PYTHON
         "$DRIVER" key command-zero
         check "$DRIVER" exists harnessCompatibilityNotice
         check "$DRIVER" exists Reasoning
+        "$DRIVER" tree > "$WORK/reasoning-tree.txt"
+        [[ "$(grep -c ' | reasoningDetails$' "$WORK/reasoning-tree.txt")" == 1 ]] || fail "empty reasoning is hidden"
         capture "Harness compatibility check" "$appearance-harness-reasoning-collapsed"
         "$DRIVER" disclose reasoningDetails Expanded
         check wait_visible "Checked the available inputs and kept the answer separate."
         capture "Harness compatibility check" "$appearance-harness-reasoning-expanded"
         "$DRIVER" disclose reasoningDetails Collapsed
+        "$DRIVER" disclose toolCalls-3 Expanded
+        "$DRIVER" reveal toolCall-4
+        check wait_visible toolCall-4
+        capture "Harness compatibility check" "$appearance-harness-tool-output"
         quit_rota
     done
     pass "harness presentation in both appearances"

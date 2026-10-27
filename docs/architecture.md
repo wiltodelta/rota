@@ -820,7 +820,8 @@ exercise optional rows, including the enabled time limit.
 `ui-check.sh --harnesses-only` isolates Reasoning and the CLI/service version
 warning using disabled synthetic sessions. It captures both disclosure states
 in both appearances at minimum width. Reasoning exposes a stable accessibility
-group, its own button and an explicit Expanded/Collapsed value. The driver's
+group; empty blocks are hidden, and expanded tool results include textual diffs.
+It has its own button and an explicit Expanded/Collapsed value. The driver's
 `disclose` command requires fresh state confirmation: SwiftUI returned an AX
 action error after successfully opening the content on this Mac. The error is
 reported alongside the confirmed transition, rather than treated as proof of
@@ -1349,6 +1350,13 @@ Interactive Claude uses the existing transcript timestamp boundary, so output
 between its last poll and a later log write can be omitted. Older stream runs
 without a durable lease cannot be reconstructed from a spool that never existed.
 These limitations do not authorize sending an implicit Continue at startup.
+
+Transcript adapters preserve exposed reasoning separately from answers. Claude
+stream suppresses completed copies only for the kind actually streamed. Grok
+preserves text and textual file diffs on both ACP and terminal continuation;
+Antigravity checks its native archive before recording subsequent tool activity.
+Empty reasoning has no disclosure row. These are new-event and presentation
+rules; existing journals are read without provider-archive backfill or migration.
 
 Remaining provider boundaries:
 

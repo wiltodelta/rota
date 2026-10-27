@@ -70,6 +70,34 @@ final class LiveHarnessTests: XCTestCase {
     private let steerable = "Run the shell command `sleep 15; echo first`. When it is done, reply with exactly "
         + "the phrase a later user message gives you, or with the word done if there is none."
 
+    func testNewAgentSessionsPreserveToolOutputSeparatelyFromTheAnswer() throws {
+        for harness in [Harness.claude, .codex, .grok, .antigravity] {
+            try checkToolOutput(harness)
+        }
+    }
+
+    func testNewInteractiveClaudeSessionPreservesToolOutputSeparatelyFromTheAnswer() throws {
+        guard let directory = ProcessInfo.processInfo.environment["ROTA_INTERACTIVE_TEST_DIR"],
+              ClaudeUserSettings.read().trusts(directory) else {
+            throw XCTSkip("Set ROTA_INTERACTIVE_TEST_DIR to an already trusted workspace")
+        }
+        try checkToolOutput(.claude, directory: directory, mode: .claudeInteractive)
+    }
+
+    private func checkToolOutput(_ harness: Harness, directory: String? = nil, mode: LaunchMode? = nil) throws {
+        let proof = "ROTA-TOOL-" + UUID().uuidString
+        let prompt = "Use a shell tool to run exactly: printf '\(proof)'. "
+            + "Then reply with the single word Checked, without punctuation. Do not change files or use other tools."
+        let (outcome, log, _) = try run(harness, prompt: prompt, message: nil, directory: directory, mode: mode)
+        XCTAssertEqual(outcome, .succeeded, log)
+        var reader = TranscriptReader()
+        let items = reader.read(log: folder.appendingPathComponent(harness.rawValue + ".log"), finished: true).items
+        XCTAssertTrue(items.contains { $0.kind == .tool }, log)
+        XCTAssertTrue(items.contains { $0.kind == .output && $0.text.contains(proof) }, log)
+        XCTAssertTrue(items.contains { $0.kind == .agent && $0.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            == "Checked" }, log)
+    }
+
     func testCodexTakesAMessageMidTurn() throws {
         let (outcome, log, session) = try run(.codex, prompt: steerable, message: "Reply with exactly: purple otter")
         XCTAssertEqual(outcome, .succeeded, log)

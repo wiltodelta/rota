@@ -3,6 +3,25 @@
 import XCTest
 
 final class ToolGroupingTests: XCTestCase {
+    func testEmptyReasoningDoesNotCreateDisclosureRowsOrSplitTools() {
+        let items = [
+            TranscriptItem(id: 0, kind: .tool, text: "Read"),
+            TranscriptItem(id: 1, kind: .reasoning, text: ""),
+            TranscriptItem(id: 2, kind: .reasoning, text: " \n\t"),
+            TranscriptItem(id: 3, kind: .tool, text: "Inspect"),
+            TranscriptItem(id: 4, kind: .reasoning, text: "Exposed reasoning"),
+            TranscriptItem(id: 5, kind: .agent, text: "Answer")
+        ]
+        let rows = WorkRow.group(items)
+        XCTAssertEqual(rows.map(\.id), [0, 4, 5])
+        XCTAssertEqual(rows.first?.items.map(\.id), [0, 3])
+        XCTAssertEqual(rows.flatMap(\.items), [items[0], items[3], items[4], items[5]])
+        let turn = TranscriptTurn.group(items).first
+        XCTAssertEqual(turn?.work, [items[0], items[3], items[4]])
+        XCTAssertEqual(turn?.answer, [items[5]])
+        XCTAssertTrue(TranscriptTurn.group(Array(items[1...2])).isEmpty)
+    }
+
     func testOnlyAdjacentToolsFoldAndEveryOtherKindRemainsVisible() {
         let kinds: [TranscriptItem.Kind] = [.user, .tool, .tool, .agent, .tool, .error, .tool,
                                            .status, .tool, .plan, .tool, .output, .tool]

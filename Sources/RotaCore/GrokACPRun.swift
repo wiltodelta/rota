@@ -335,7 +335,7 @@ private extension GrokACPRun {
         case "agent_message_chunk", "agent_thought_chunk":
             let thought = update["sessionUpdate"] as? String == "agent_thought_chunk"
             renderText(update, params: params, kind: thought ? .reasoning : .agent)
-        case "tool_call_update", "tool_call": renderTool(update)
+        case "tool_call_update", "tool_call": renderTool(update, params: params)
         case "plan":
             let steps = (update["entries"] as? [[String: Any]] ?? []).map {
                 PlanStep(status: $0["status"] as? String, text: $0["content"] as? String ?? "")
@@ -360,14 +360,17 @@ private extension GrokACPRun {
         }
     }
 
-    private func renderTool(_ update: [String: Any]) {
+    private func renderTool(_ update: [String: Any], params: [String: Any]) {
         let toolID = (update["toolCallId"] as? String).map { "grok/\(sessionID ?? "")/tool/" + $0 }
+        let eventID = (params["_meta"] as? [String: Any])?["eventId"] as? String
         if update["sessionUpdate"] as? String == "tool_call" {
             journal.record(.tool, update["title"] as? String ?? "tool", nativeID: toolID)
         }
         for (index, block) in (update["content"] as? [[String: Any]] ?? []).enumerated() {
-            if let text = (block["content"] as? [String: Any])?["text"] as? String {
-                journal.record(.output, text, nativeID: toolID.map { $0 + "/\(index)" })
+            if let text = GrokToolOutput.text(block) {
+                // One tool can publish different results at the same block index.
+                let outputID = toolID.map { $0 + "/\(index)" + (eventID.map { "/event/" + $0 } ?? "") }
+                journal.record(.output, text, nativeID: outputID)
             }
         }
     }

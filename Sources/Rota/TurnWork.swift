@@ -94,7 +94,7 @@ enum WorkRow: Identifiable {
     static func group(_ items: [TranscriptItem]) -> [WorkRow] {
         var rows: [WorkRow] = []
         var calls: [TranscriptItem] = []
-        for raw in items {
+        for raw in items where !raw.isEmptyReasoning {
             let item = raw.presented
             if item.kind.canJoinToolGroup && (item.kind == .tool || !calls.isEmpty) {
                 calls.append(item)

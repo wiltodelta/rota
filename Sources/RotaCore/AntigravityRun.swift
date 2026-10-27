@@ -116,7 +116,9 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
         case .text(let text):
             readQuestions()
             journal.text(text)
-        case .item(let kind, let text): journal.record(kind, text)
+        case .item(let kind, let text):
+            readQuestions()
+            journal.record(kind, text)
         case .result(let result):
             readQuestions()
             journal.endText()

@@ -175,7 +175,7 @@ public struct TranscriptTurn: Equatable, Identifiable, Sendable {
             current = TranscriptTurn()
             body = []
         }
-        for raw in items {
+        for raw in items where !raw.isEmptyReasoning {
             let item = raw.presented
             if item.kind == .user {
                 close()

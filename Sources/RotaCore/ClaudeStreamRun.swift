@@ -28,7 +28,8 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     /// A background task finished during this turn; Claude may answer it in a turn of its own.
     private var notified = false
     private var turns = 0
-    private var streamed = false
+    private var streamedText = false
+    private var streamedReasoning = false
     var settle: TimeInterval = 5
 
     init(spec: LaunchSpec, journal: RunJournal) {
@@ -143,23 +144,26 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
     private func partial(_ event: [String: Any]) {
         let event = event["event"] as? [String: Any] ?? [:]
         let delta = event["delta"] as? [String: Any] ?? [:]
-        if let text = delta["text"] as? String {
-            streamed = true
+        if let text = delta["text"] as? String, !text.isEmpty {
+            streamedText = true
             journal.text(text)
-        } else if let thinking = delta["thinking"] as? String {
-            streamed = true
+        } else if let thinking = delta["thinking"] as? String, !thinking.isEmpty {
+            streamedReasoning = true
             journal.text(thinking, kind: .reasoning)
         }
     }
 
     private func message(_ data: Data, type: String) {
         if type == "user" { notified = false }
-        let skipText = type == "assistant" && streamed
         for item in StreamJSONFormatter.items(data) {
-            let text = item.kind == .agent || item.kind == .reasoning
-            if !skipText || !text { journal.record(item.kind, item.text) }
+            let alreadyStreamed = type == "assistant"
+                && (item.kind == .agent && streamedText || item.kind == .reasoning && streamedReasoning)
+            if !alreadyStreamed { journal.record(item.kind, item.text) }
         }
-        if type == "assistant" { streamed = false }
+        if type == "assistant" {
+            streamedText = false
+            streamedReasoning = false
+        }
     }
 
     private func system(_ event: [String: Any], line: String) {

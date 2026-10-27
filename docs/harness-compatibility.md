@@ -31,8 +31,9 @@ coverage matrix and remaining gaps live in
 
 `ROTA_LIVE`, `ROTA_LIVE_QUESTIONS`, `ROTA_PROTOCOL_CHECK` and
 `ROTA_INTERACTIVE_TEST_DIR` are test inputs, not saved application settings.
-Run `scripts/ui-check.sh --harnesses-only` for Reasoning expansion and version
-warnings in both appearances at the minimum window width. It uses disabled
+Run `scripts/ui-check.sh --harnesses-only` for Reasoning expansion, hidden empty
+reasoning, tool text/diffs and version warnings in both appearances at the minimum
+window width. It uses disabled
 synthetic sessions and requires no installed agent. The full `scripts/ui-check.sh`
 covers the other application surfaces. Use the native capture notice and preflight
 procedure; the driver also checks the console before delivering a key. Its imported names may be personal; keep captures outside Git.
@@ -103,7 +104,9 @@ Do not restart a shared daemon or leader while other clients use it.
 Tests use synthetic `rota-live-*` working directories and print native session
 IDs. Remove only sessions created by the current test run. Delete Codex threads
 through `thread/delete` over the owning app-server, never by editing its SQLite
-store. A recently stopped writer may need time to release its thread before
+store. Shared-daemon sessions use `app-server proxy` with the WebSocket transport
+implemented by `WebSocketTransport`; a separate stdio server cannot release the
+daemon's writers. A recently stopped writer may need time to release its thread before
 retrying deletion. Remove exact synthetic Grok session folders, exact Claude
 transcripts and their owned subagent directories, and exact Antigravity brain
 folders. A trusted workspace can contain unrelated Claude sessions: never delete

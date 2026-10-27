@@ -195,7 +195,15 @@ struct NativeTranscript {
         case "config_option_update":
             return [.configuration(.acp(update))]
         case "turn_completed": return [.state(.waiting)]
-        case "tool_call": return [.item(.tool, update["title"] as? String ?? "Tool")]
+        case "tool_call", "tool_call_update":
+            var events: [Event] = []
+            if update["sessionUpdate"] as? String == "tool_call" {
+                events.append(.item(.tool, update["title"] as? String ?? "Tool"))
+            }
+            events += (update["content"] as? [[String: Any]] ?? []).compactMap { block in
+                GrokToolOutput.text(block).map { .item(.output, $0) }
+            }
+            return events
         default: return []
         }
     }
