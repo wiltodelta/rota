@@ -57,7 +57,9 @@ struct ChatTranscript: View {
                                 VStack(alignment: .leading, spacing: 0) {
                                     switch row {
                                     case .note(let item):
+                                        // A container, so a table or link inside keeps its own identifier.
                                         TranscriptRow(item: item, record: record)
+                                            .accessibilityElement(children: .contain)
                                             .accessibilityIdentifier("transcriptItem-\(item.id)")
                                     case .tools(let calls):
                                         ToolCallsView(calls: calls, expanded: Binding(
@@ -463,22 +465,6 @@ private struct WorkingLabel: View {
                 .shimmering()
         }
         .font(model.chatText.small)
-    }
-}
-
-struct CodeBox: View {
-    @Environment(\.interfaceScale) private var metrics
-    @Environment(AppModel.self) private var model
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(model.chatText.code)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(metrics.points(12))
-            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: metrics.points(10)))
-            .overlay { RoundedRectangle(cornerRadius: metrics.points(10)).strokeBorder(Color.primary.opacity(0.06)) }
     }
 }
 

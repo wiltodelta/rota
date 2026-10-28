@@ -157,7 +157,7 @@ private struct PermissionRow: View {
 }
 
 extension View {
-    /// A grouped settings Form at the scaled window width, owning its vertical scrolling.
+    /// A grouped settings Form at a readable width, centred in the main window and owning its scrolling.
     func settingsPane() -> some View {
         modifier(SettingsPaneModifier())
     }
@@ -169,7 +169,8 @@ private struct SettingsPaneModifier: ViewModifier {
     func body(content: Content) -> some View {
         content.formStyle(.grouped)
             .toggleStyle(InterfaceFormToggleStyle())
-            .frame(width: scale.sheetWidth(520))
+            .frame(maxWidth: scale.sheetWidth(640))
+            .frame(maxWidth: .infinity)
     }
 }
 

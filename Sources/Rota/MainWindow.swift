@@ -29,7 +29,8 @@ struct MainWindow: View {
     }
 
     private func title(_ records: [RunRecord]) -> String {
-        switch model.selection {
+        if let pane = model.settingsPane { return pane.title }
+        return switch model.selection {
         case .routine(let id): model.scheduler.routine(id)?.name ?? "Rota"
         case .session(let id):
             records.first(where: { $0.id == id }).flatMap { model.scheduler.routine($0.routineID)?.name } ?? "Rota"
@@ -43,13 +44,19 @@ struct MainWindow: View {
         let title = title(records)
         // Dragging the divider shut hides the list too, and the binding keeps that.
         NavigationSplitView(columnVisibility: Binding(
-            get: { model.sidebarVisible ? .all : .detailOnly },
-            set: { model.sidebarVisible = $0 != .detailOnly }
+            get: { model.sidebarShown ? .all : .detailOnly },
+            set: { if model.settingsPane == nil { model.sidebarVisible = $0 != .detailOnly } }
         )) {
-            MainSidebar(records: records)
+            Group {
+                if model.settingsPane != nil {
+                    SettingsSidebar()
+                } else {
+                    MainSidebar(records: records)
+                }
+            }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
                 sidebarWidth = width
-                if model.sidebarVisible, width >= min(metrics.points(240), 280) {
+                if model.sidebarShown, width >= min(metrics.points(240), 280) {
                     UserDefaults.standard.set(Double(width), forKey: "sidebarWidth")
                 }
             }
@@ -58,7 +65,7 @@ struct MainWindow: View {
                                             max: metrics.points(360))
             .overlay {
                 // The detail explains a first routine and offers both ways to add one.
-                if model.scheduler.routines.isEmpty {
+                if model.scheduler.routines.isEmpty, model.settingsPane == nil {
                     Text("No routines yet")
                         .interfaceFont(.body)
                         .foregroundStyle(Color.secondaryText)
@@ -69,10 +76,11 @@ struct MainWindow: View {
             detail(records)
         }
         .background(WindowToolbarOverlay(
-            content: AnyView(MainWindowToolbar(title: title, sidebarWidth: model.sidebarVisible ? sidebarWidth : 0,
+            content: AnyView(MainWindowToolbar(title: title, sidebarWidth: model.sidebarShown ? sidebarWidth : 0,
                                               toggleSidebar: { model.sidebarVisible.toggle() },
                                               importRoutines: { model.presentingImport = true },
-                                              newRoutine: { model.presentingNew = true })
+                                              newRoutine: { model.presentingNew = true },
+                                              showsActions: model.settingsPane == nil)
                 .interfaceScale(model.interfaceScale)),
             height: max(52, metrics.points(52)), title: title
         ).frame(width: 0, height: 0))
@@ -101,12 +109,25 @@ struct MainWindow: View {
             Text(model.scheduler.lastError ?? "")
         }
         .onAppear {
-            if model.selection == nil { model.selection = records.first.map { .session($0.id) } }
+            if model.selection == nil, model.settingsPane == nil {
+                model.selection = records.first.map { .session($0.id) }
+            }
         }
+        // Picking a routine or session leaves Settings.
+        .onChange(of: model.selection) { _, item in if item != nil { model.closeSettings() } }
     }
 
     @ViewBuilder
     private func detail(_ records: [RunRecord]) -> some View {
+        if let pane = model.settingsPane {
+            SettingsDetail(pane: pane)
+        } else {
+            sessionDetail(records)
+        }
+    }
+
+    @ViewBuilder
+    private func sessionDetail(_ records: [RunRecord]) -> some View {
         switch model.selection {
         case .session(let id):
             if let record = records.first(where: { $0.id == id }),
@@ -181,8 +202,7 @@ private struct MainSidebar: View {
                         .tag(SidebarItem.routine(routine.id))
                 }
             } header: {
-                Text("Routines").interfaceFont(.caption).fontWeight(.semibold)
-                    .foregroundStyle(Color.secondaryText)
+                SidebarHeader(title: "Routines")
             }
             Section {
                 ForEach(DayGroup.group(records), id: \.title) { group in
@@ -198,8 +218,7 @@ private struct MainSidebar: View {
                     }
                 }
             } header: {
-                Text("Sessions").interfaceFont(.caption).fontWeight(.semibold)
-                    .foregroundStyle(Color.secondaryText)
+                SidebarHeader(title: "Sessions")
                     .accessibilityIdentifier("sessionsSection")
             }
         }
@@ -234,6 +253,15 @@ private struct RoutineRow: View {
                 }
             }
         }
+    }
+}
+
+/// A sidebar section title, shared by the main and Settings sidebars.
+struct SidebarHeader: View {
+    let title: String
+
+    var body: some View {
+        Text(title).interfaceFont(.caption).fontWeight(.semibold).foregroundStyle(Color.secondaryText)
     }
 }
 

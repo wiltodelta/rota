@@ -130,28 +130,31 @@ final class InterfaceScaleTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(button.font).pointSize, NSFont.systemFontSize * 1.5)
     }
 
-    func testSettingsPaneReportsItsNaturalSizeAfterZoom() async throws {
+    func testSettingsPaneKeepsAReadableWidthThatFollowsZoom() async throws {
         _ = NSApplication.shared
         let name = "rota-scale-test-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let scale = InterfaceScaleSettings(defaults: defaults)
-        let controller = SettingsPaneController(rootView: Text("Settings").settingsPane().interfaceScale(scale))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 100),
+        var width: CGFloat = 0
+        let host = NSHostingView(rootView: Form { Text("Setting") }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+            .settingsPane().frame(width: 1200, height: 300).interfaceScale(scale))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 300),
                               styleMask: [], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         defer { window.close() }
-        window.contentViewController = controller
-        controller.view.layoutSubtreeIfNeeded()
-        XCTAssertEqual(controller.contentSize.width, 520)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(width, 640, "A wide main window must not stretch the form")
         scale.factor = 1.5
         for _ in 0..<4 {
             await withCheckedContinuation { continuation in
                 DispatchQueue.main.async { continuation.resume() }
             }
-            controller.view.layoutSubtreeIfNeeded()
+            host.layoutSubtreeIfNeeded()
         }
-        XCTAssertEqual(controller.contentSize.width, 780)
+        XCTAssertEqual(width, 780, "Zoom widens the form up to the shared cap")
     }
 
     func testPickerValuesKeepTheSameGapToTheirArrows() throws {

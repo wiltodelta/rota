@@ -48,7 +48,8 @@ struct InterfaceScale: Equatable {
         return factor < 0.9 ? .small : .regular
     }
 
-    /// Sheets stay within the minimum main-window width even at maximum zoom.
+    /// Sheets, and Settings' readable form width, stay within the minimum main-window
+    /// width even at maximum zoom.
     func sheetWidth(_ value: CGFloat) -> CGFloat { min(points(value), 780) }
 }
 

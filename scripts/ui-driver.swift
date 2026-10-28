@@ -421,7 +421,7 @@ case "key":
     // Keystrokes posted to Rota's process reach its key window even when System
     // Events keystrokes do not. Focus the target first with `focus`.
     let keys: [String: (CGKeyCode, CGEventFlags)] = [
-        "return": (36, []), "option-return": (36, .maskAlternate),
+        "return": (36, []), "escape": (53, []), "command-comma": (43, .maskCommand), "option-return": (36, .maskAlternate),
         "shift-return": (36, .maskShift), "control-return": (36, .maskControl),
         "command-zero": (29, .maskCommand), "command-plus": (24, [.maskCommand, .maskShift]),
         "command-minus": (27, .maskCommand), "command-w": (13, .maskCommand),

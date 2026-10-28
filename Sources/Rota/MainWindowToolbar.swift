@@ -9,6 +9,8 @@ struct MainWindowToolbar: View {
     let toggleSidebar: () -> Void
     let importRoutines: () -> Void
     let newRoutine: () -> Void
+    /// Settings keeps its sections in the sidebar: it dims the toggle and hides the routine actions.
+    let showsActions: Bool
 
     var body: some View {
         HStack(spacing: metrics.points(12)) {
@@ -18,6 +20,8 @@ struct MainWindowToolbar: View {
                     .background { glass(in: Circle()) }
             }
             .help("\(sidebarWidth > 0 ? "Hide" : "Show") the sidebar (Control-Command-S)")
+            // Dimmed rather than removed, so the title keeps its place.
+            .disabled(!showsActions)
             .accessibilityIdentifier("toggleSidebar")
             Text(title)
                 .font(Font(InterfaceTypography.font(size: metrics.points(15), semibold: true)))
@@ -28,31 +32,35 @@ struct MainWindowToolbar: View {
             Spacer(minLength: 0)
                 .contentShape(Rectangle())
                 .gesture(WindowDragGesture())
-            HStack(spacing: 0) {
-                Button(action: importRoutines) {
-                    symbol("square.and.arrow.down", title: "Import Routines")
-                        .frame(width: metrics.points(28), height: metrics.points(36))
-                        .contentShape(Rectangle())
-                }
-                .help("Import routines from Claude Desktop or Codex")
-                .accessibilityIdentifier("import")
-                Button(action: newRoutine) {
-                    symbol("plus", title: "New Routine")
-                        .frame(width: metrics.points(28), height: metrics.points(36))
-                        .contentShape(Rectangle())
-                }
-                .help("New Routine")
-                .accessibilityIdentifier("newRoutine")
-            }
-            .padding(.horizontal, metrics.points(4))
-            .background { glass(in: Capsule()) }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("toolbarActions")
+            if showsActions { actions }
         }
         .buttonStyle(.plain)
         .padding(.leading, sidebarWidth > 0 ? sidebarWidth + metrics.points(8) : 96)
         .padding(.trailing, metrics.points(12))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var actions: some View {
+        HStack(spacing: 0) {
+            Button(action: importRoutines) {
+                symbol("square.and.arrow.down", title: "Import Routines")
+                    .frame(width: metrics.points(28), height: metrics.points(36))
+                    .contentShape(Rectangle())
+            }
+            .help("Import routines from Claude Desktop or Codex")
+            .accessibilityIdentifier("import")
+            Button(action: newRoutine) {
+                symbol("plus", title: "New Routine")
+                    .frame(width: metrics.points(28), height: metrics.points(36))
+                    .contentShape(Rectangle())
+            }
+            .help("New Routine")
+            .accessibilityIdentifier("newRoutine")
+        }
+        .padding(.horizontal, metrics.points(4))
+        .background { glass(in: Capsule()) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("toolbarActions")
     }
 
     private func symbol(_ name: String, title: String) -> some View {

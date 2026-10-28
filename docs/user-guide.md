@@ -122,7 +122,7 @@
   Rota uses bundled IBM Plex Sans for interface text.
   View > Zoom In, Zoom Out and Reset (Command-Plus, Command-Minus,
   Command-0) adjust it immediately. Toolbar height, buttons, backgrounds, text
-  and Settings tabs grow together. Text and icons render at their new size.
+  and the Settings sections grow together. Text and icons render at their new size.
 - **Readable chat text.** Settings > Chat independently controls the chat's
   font, monospaced font for commands and output, and text scale (70% to 200%).
   View > Chat Zoom offers Zoom In, Zoom Out and Reset (Option-Command-Plus,
@@ -200,6 +200,9 @@
 - The sidebar folds away with the button beside the title, View > Hide
   Sidebar or Control-Command-S. Its visibility and resized width are kept across
   launches, so the divider returns to where you left it.
+- Settings… (Command-,) opens Settings inside the main window: the sidebar
+  lists General, Chat and Agents, and Back or Escape returns to your routines
+  and sessions. It reopens on the section you used last.
 - Menus: File > New Routine… (Command-N) and Import Routines…;
   Routine > Run Now (Command-R), Stop (Command-.) and Edit Routine…
   (Command-E), acting on the selected routine or the selected session's.

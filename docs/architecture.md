@@ -595,9 +595,29 @@ the implemented subset and journal schema are in [Transcript format](transcript-
 AppKit shell, SwiftUI content, the same structure as watch-me-sleep:
 `AppDelegate` owns an `NSStatusItem`, the borderless `NSPanel` dropdown
 (`MenuBarPanel.swift`, ported from watch-me-sleep with its sizing and Liquid
-Glass rules), and the main and settings windows as `NSWindow`s around
-`NSHostingController`s. The app turns `.regular` while a window is open and
-back to `.accessory` when the last one closes. Window tabbing is off. The
+Glass rules), and the main window as an `NSWindow` around an
+`NSHostingController`. The app turns `.regular` while the window is open and
+back to `.accessory` when it closes. Window tabbing is off. Settings is a mode
+of the main window, not the family's separate Settings window: the main window
+is Rota's primary surface, and agent settings belong beside the routines they
+run (decided 2026-10-27). `AppModel.settingsPane` swaps the sidebar for Back and
+the General, Chat and Agents sections (`SettingsMode.swift`) and the detail for
+the selected form, hides the import/new actions and titles the window after the
+section. Back (Escape, as its cancel shortcut, from any focus), picking a session
+from a notification and closing the window leave the mode and restore the
+previous selection; Command-, reopens the last section. Settings shows a hidden
+sidebar through `AppModel.sidebarShown` without changing the saved preference.
+The sidebar toggle and View > Hide Sidebar are dimmed in Settings, since its
+sections and Back live there.
+Section rows use `ScaledSidebarLabelStyle`: the sidebar row style keeps its own
+icon gap and font at 100%, so the label sets the font, gap and icon column itself,
+and colours the icon with the accent (`SidebarText` on the focused selection).
+SwiftUI widens the window by the sidebar's width whenever a hidden sidebar
+returns, by the toggle or by Settings; neither the split item's
+`collapseBehavior` nor a `setFrame` override in an `NSWindow` subclass stopped
+it (2026-10-27). `keepMainWindowWidth` watches `didResizeNotification` for a
+second after the reveal and puts back the frame when only the width grew, so
+the detail gives up the room as with a dragged divider. `ui-check.sh` checks it. The
 panel footer places Open Rota on the left and groups Settings with Quit on
 the right, per the requested Rota layout rather than the family default.
 Two more departures from `macos-apps.md` came from the 2026-10-21 UX audit: the
@@ -674,7 +694,7 @@ not checked while the light-appearance reproduction remained broken.
 SwiftUI environment scales layout dimensions. `InterfaceTypography` resolves
 bundled IBM Plex Sans at the system's semantic text sizes, including semibold
 headlines. The inherited SwiftUI font, explicit text styles, main-window title,
-native popup values and Settings tab captions share that family. Registration
+native popup values and Settings section labels share that family. Registration
 through `BundledFonts` also works when a native control is created before the
 chat settings. SF Symbols and system-owned menus retain their system fonts;
 the routine's prompt and schedule editors retain their monospaced design.
@@ -717,7 +737,7 @@ whole actions to two rows when they no longer fit. Import caps its height at
 500 pt so its action row remains inside the minimum-height window. System-owned menus,
 window chrome and file dialogs retain their native size. Preserve the original
 main-toolbar presentation: navigation and title start beside the actual sidebar,
-with the import/new action pair at the trailing edge. Keep native Settings tabs.
+with the import/new action pair at the trailing edge; Settings hides that pair.
 `MainWindowToolbar` scales symbols, type, glass shapes and spacing in logical
 points. Its circular surface is 36 pt, the two-action capsule 64 x 36 pt, and the
 bar 52 pt at 100%; all grow with zoom. The bar retains a native 52 pt minimum.
@@ -764,37 +784,18 @@ light appearance before the same checks ran in dark appearance. Captures covered
 new/import sheets. Ten consecutive native resize states passed; window captures
 and ScreenCaptureKit composites were inspected. The native-window regression
 fixtures detected deliberate display-mode, autoresizing and position mutations.
-Settings keeps the native General, Chat and Agents toolbar tabs in their original
-order and placement. `ScalableSettingsTabController` supplies a plain view around
-each native button, with proportional symbols and captions on a common baseline.
-Putting an `NSControl` directly in the toolbar lets AppKit normalize its font.
-The tab controller also caches the first item height, so live zoom replaces the
-native toolbar with the same identifiers, delegate and selection to remeasure it.
-Set its display mode to `iconOnly` after attaching it to the window too: attachment
-can restore `iconAndLabel` and duplicate the custom caption. The selected tab and
-native selection background survive zoom and pane changes. Unit fixtures measure
-all six scales; the UI check measures live growth, allowing for fixed native AX
-hit insets and system-font optical sizing. Selected tab captions and symbols use
-`NSColor.labelColor`; other tabs retain the secondary label treatment. The native
-toolbar supplies the selection background, without a fixed blue foreground that
-can disagree with the user's accent. Each tab exposes one accessible button;
-its decorative image and caption are excluded from the wrapper's children.
+Settings sections are ordinary sidebar rows, so they scale with the rest of the
+sidebar; the custom toolbar tabs the separate window needed are gone.
 
 New views must use the shared scaled fonts and point dimensions for app content.
 The root modifier reads the observable scale inside its SwiftUI body. Reading it
 only when AppKit constructs a hosting controller freezes that window's initial
 scale. Verification must change the setting on an existing host and measure the
 resulting font or geometry, rather than merely check the selected percentage.
-Settings uses one scroll owner: the native grouped Form. Its hosting view fills
-the screen-capped viewport; do not give the Form a fixed ideal height or wrap it
-in another NSScrollView. That former arrangement could reveal lower controls
-through Accessibility while swallowing wheel input over the Form.
-`SettingsHostingView` reports its ideal `fittingSize` after native layout and
-coalesces changes into the pane's `contentSize`. Only intrinsic sizing is enabled,
-with low vertical compression resistance, so ideal content height does not force
-the viewport to grow. A callback fits the selected pane's window within the
-screen's visible frame. Keep its `preferredContentSize` unset: publishing the
-full ideal height would reintroduce a constraint on the viewport.
+Settings uses one scroll owner: the native grouped Form, filling the detail
+column at a readable width (640 pt, scaled, capped at the 780 pt sheet width).
+Do not wrap it in another scroll view: an earlier nested arrangement revealed
+lower controls through Accessibility while swallowing wheel input over the Form.
 The UI check stops at the first failure and completes light appearance before
 starting dark appearance, following the shared macOS UI verification rules.
 The UI check uses the native Command-0 and Command-Plus shortcuts for zoom, so
@@ -848,8 +849,6 @@ rechecks the console and refuses input while it is locked or its state is unknow
 
 The UI layout gate checks the window frame against the screen's visible area,
 including menu bar and Dock exclusions, as well as checking the controls inside it.
-The hosting controller's cached preferred size alone does not update an already
-open Settings pane after zoom.
 `Scheduler.continueInTerminal` reserves the session while locating its native
 transcript off the main actor, then starts `TerminalRun` with the CLI's native
 resume arguments. The existing run ID, session ID, log and normalized journal

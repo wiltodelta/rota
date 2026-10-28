@@ -8,9 +8,9 @@ struct RotaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        // A menu-bar accessory: the status item, its panel and the windows are
+        // A menu-bar accessory: the status item, its panel and the window are
         // AppKit, owned by AppDelegate. This scene only satisfies `App`; its menu
-        // items are rerouted so Settings... (Command-,) opens the real window.
+        // items are rerouted so Settings... (Command-,) opens Settings in the main window.
         Settings {
             EmptyView()
         }
@@ -67,31 +67,6 @@ struct RotaApp: App {
     }
 }
 
-/// The Routine menu: what a person does to the routine in front of them.
-struct RoutineCommands: Commands {
-    var body: some Commands {
-        CommandMenu("Routine") {
-            let model = AppModel.shared
-            let routine = model.selectedRoutine
-            let running = routine.map { model.scheduler.active[$0.id] != nil } ?? false
-            Button("Run Now") {
-                guard let routine else { return }
-                model.scheduler.run(routine, trigger: .manual)
-                model.selection = model.latest(of: routine.id)
-            }
-            .keyboardShortcut("r")
-            .disabled(routine == nil || running)
-            Button("Stop") { routine.map { model.scheduler.stop($0.id) } }
-                .keyboardShortcut(".")
-                .disabled(!running)
-            Divider()
-            Button("Edit Routine\u{2026}") { model.editSelectedRoutine() }
-                .keyboardShortcut("e")
-                .disabled(routine == nil)
-        }
-    }
-}
-
 /// App-wide state: the scheduler plus the window selection the menu bar can drive.
 @MainActor
 @Observable
@@ -120,8 +95,13 @@ final class AppModel {
     var editingRoutineID: String?
     /// Whether the sessions and routines list shows; kept across launches.
     var sidebarVisible = UserDefaults.standard.object(forKey: "sidebarVisible") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(sidebarVisible, forKey: "sidebarVisible") }
+        didSet {
+            UserDefaults.standard.set(sidebarVisible, forKey: "sidebarVisible")
+            if sidebarVisible, !oldValue { keepWindowWidth() }
+        }
     }
+    /// SwiftUI widens the window by the sidebar's width when the sidebar returns.
+    @ObservationIgnored var keepWindowWidth: () -> Void = {}
 
     /// The routine the selection is about: the selected routine, or the selected session's.
     var selectedRoutine: Routine? {
@@ -162,7 +142,6 @@ final class AppModel {
     let chatText: ChatTextSettings
     private let notifier = Notifier()
     @ObservationIgnored var openMainWindow: () -> Void = {}
-    @ObservationIgnored var openSettingsWindow: () -> Void = {}
 
     private init() {
         let scale = InterfaceScaleSettings()
@@ -202,9 +181,18 @@ final class AppModel {
         SidebarItem.latest(routineID: routineID, records: scheduler.records(for: routineID))
     }
 
-    func showSettings() {
-        openSettingsWindow()
+    /// The Settings section the main window shows; nil shows routines and sessions.
+    var settingsPane: SettingsPane? {
+        didSet {
+            if let settingsPane { UserDefaults.standard.set(settingsPane.rawValue, forKey: SettingsPane.lastKey) }
+            // Settings' sections and Back live in the sidebar, so it shows a hidden one.
+            if oldValue == nil, settingsPane != nil, !sidebarVisible { keepWindowWidth() }
+        }
     }
+    /// What Back returns to.
+    @ObservationIgnored var selectionBeforeSettings: SidebarItem?
+    /// Settings shows the sidebar without changing the saved preference.
+    var sidebarShown: Bool { sidebarVisible || settingsPane != nil }
 }
 
 @MainActor
@@ -213,7 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private var panel: MenuBarPanelController!
     private var mainWindow: NSWindow?
-    private var settingsWindow: NSWindow?
+    private var widthGuard: NSObjectProtocol?
     private var macState: MacState?
     private var controlServer: ControlServer?
 
@@ -243,7 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .interfaceScale(model.interfaceScale).environment(model),
                                        size: NSSize(width: 340, height: 300), contentBackgroundOpacity: 0)
         model.openMainWindow = { [weak self] in self?.showMainWindow() }
-        model.openSettingsWindow = { [weak self] in self?.showSettingsWindow() }
+        model.keepWindowWidth = { [weak self] in self?.keepMainWindowWidth() }
         observeStatus()
 
         Updater.shared.start()
@@ -252,7 +240,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         startControlServer()
         if model.scheduler.routines.isEmpty { showMainWindow() }
         // Development hooks: open settings, or the panel, where a capture script can find them.
-        if ProcessInfo.processInfo.environment["ROTA_OPEN_SETTINGS"] != nil { showSettingsWindow() }
+        if let pane = ProcessInfo.processInfo.environment["ROTA_OPEN_SETTINGS"] {
+            model.showSettings(SettingsPane(rawValue: pane) ?? .last)
+        }
         if ProcessInfo.processInfo.environment["ROTA_OPEN_PANEL"] != nil, let screen = NSScreen.main {
             panel.show(topLeft: NSPoint(x: screen.visibleFrame.midX - 170, y: screen.visibleFrame.maxY - 40))
             Logger(subsystem: "com.wiltodelta.rota", category: "app")
@@ -381,7 +371,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let button = statusItem.button else { return }
         let menu = NSMenu()
         menu.addItem(item("Open Rota", symbol: "macwindow", action: #selector(openMainFromMenu)))
-        menu.addItem(item("Settings\u{2026}", symbol: "gearshape", action: #selector(showSettingsWindow), key: ","))
+        menu.addItem(item("Settings\u{2026}", symbol: "gearshape", action: #selector(showSettingsFromMenu), key: ","))
         menu.addItem(item("Check for Updates\u{2026}", symbol: "arrow.triangle.2.circlepath",
                           action: #selector(checkForUpdates)))
         menu.addItem(.separator())
@@ -423,6 +413,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func openMainFromMenu() { showMainWindow() }
+    @objc private func showSettingsFromMenu() { model.showSettings() }
     @objc private func checkForUpdates() { Updater.shared.checkForUpdates() }
 
     // MARK: Windows
@@ -452,21 +443,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         present(mainWindow)
     }
 
-    @objc private func showSettingsWindow() {
-        panel.close()
-        if settingsWindow == nil {
-            let window = NSWindow(contentViewController: SettingsTabController(model: model))
-            window.styleMask = [.titled, .closable]
-            window.isReleasedWhenClosed = false
-            window.delegate = self
-            window.center()
-            settingsWindow = window
+    /// SwiftUI widens the window to keep the detail's width when the sidebar
+    /// returns, and neither the split item's collapse behavior nor a `setFrame`
+    /// override stops it. Putting the frame back as soon as it grows makes the
+    /// detail give up the room instead, as a dragged divider does.
+    private func keepMainWindowWidth() {
+        guard let window = mainWindow, window.isVisible else { return }
+        let frame = window.frame
+        dropWidthGuard()
+        widthGuard = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification,
+                                                            object: window, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                guard window.frame.width > frame.width, window.frame.height == frame.height else { return }
+                window.setFrame(frame, display: true)
+            }
         }
-        present(settingsWindow)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.dropWidthGuard() }
+    }
+
+    private func dropWidthGuard() {
+        widthGuard.map(NotificationCenter.default.removeObserver)
+        widthGuard = nil
     }
 
     /// A window comes forward reliably only from a regular app, so Rota takes a
-    /// Dock icon while one is open and gives it up when the last one closes.
+    /// Dock icon while its window is open and gives it up when it closes.
     private func present(_ window: NSWindow?) {
         // Reapply the label when entering the Dock: AppKit can retain the value set while accessory
         // without displaying it, and assigning the same value again does not redraw the badge.
@@ -478,20 +479,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        guard let closing = notification.object as? NSWindow else { return }
-        // Let the settings window go, so the next opening starts fresh.
-        if closing === settingsWindow { settingsWindow = nil }
-        let others = [mainWindow, settingsWindow].compactMap { $0 }.filter { $0 !== closing && $0.isVisible }
-        if others.isEmpty { NSApp.setActivationPolicy(.accessory) }
-    }
-}
-
-/// View > Hide Sidebar / Show Sidebar, Control-Command-S as in Finder and Mail.
-private struct SidebarToggleCommand: View {
-    @State private var model = AppModel.shared
-
-    var body: some View {
-        Button(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") { model.sidebarVisible.toggle() }
-            .keyboardShortcut("s", modifiers: [.control, .command])
+        guard notification.object as? NSWindow === mainWindow else { return }
+        // Reopening shows routines and sessions again.
+        model.closeSettings()
+        NSApp.setActivationPolicy(.accessory)
     }
 }

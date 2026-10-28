@@ -80,3 +80,19 @@ struct CodeBlockView: View {
         .overlay { RoundedRectangle(cornerRadius: metrics.points(10)).strokeBorder(Color.primary.opacity(0.06)) }
     }
 }
+
+struct CodeBox: View {
+    @Environment(\.interfaceScale) private var metrics
+    @Environment(AppModel.self) private var model
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(model.chatText.code)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(metrics.points(12))
+            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: metrics.points(10)))
+            .overlay { RoundedRectangle(cornerRadius: metrics.points(10)).strokeBorder(Color.primary.opacity(0.06)) }
+    }
+}

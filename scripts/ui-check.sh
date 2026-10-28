@@ -720,61 +720,52 @@ PYTHON
     # Settings, with each agent's installed copies and versions; the light pass
     # shows the terminal picker on its default, which names the macOS default terminal.
     [[ "$appearance" == light ]] && { defaults delete "$DOMAIN" terminalApp >/dev/null 2>&1 || true; }
-    defaults write "$DOMAIN" settingsTab -int 0
-    open_rota --env "ROTA_APPEARANCE=$appearance" --env ROTA_OPEN_SETTINGS=1
+    open_rota --env "ROTA_APPEARANCE=$appearance" --env ROTA_OPEN_SETTINGS=general
     sleep 8
-    # Preserve the original native Settings toolbar tabs.
-    for tab in General Chat Agents; do
-        [[ "$tab" == General ]] || { "$DRIVER" press "$tab"; sleep 2; }
-        if [[ "$tab" == Chat ]]; then
-            check "$DRIVER" aligned 'Text scale' chatTextScale
-            check "$DRIVER" aligned 'Text scale' chatTextScaleValue
-        fi
-        if [[ "$tab" == General ]]; then
-            "$DRIVER" scroll-wheel General -3000 pixel
-            check wait_visible 'Check for Updates…'
-        fi
-        if [[ "$tab" == Agents ]]; then
-            check_agents_scrolling
-        fi
-        settings_id="$("$DRIVER" wid "$tab")" \
-            && screencapture -x -o -l "$settings_id" "$OUT/$appearance-settings-$(echo "$tab" | tr A-Z a-z).png" \
-            && pass "captured $appearance-settings-$tab" || fail "captured $appearance-settings-$tab"
-        check_layout "settings $tab"
+    # Settings is a mode of the main window: its sidebar lists the sections,
+    # so the sidebar toggle is dimmed while it shows.
+    check wait_exists settingsSidebar
+    [[ "$("$DRIVER" enabled toggleSidebar)" == false ]] && pass "sidebar toggle dimmed in Settings" \
+        || fail "sidebar toggle dimmed in Settings"
+    for zoom in "" -zoom; do
+        for tab in General Chat Agents; do
+            [[ "$tab" == General && -z "$zoom" ]] || { "$DRIVER" select "$tab"; sleep 2; }
+            if [[ "$tab" == Chat ]]; then
+                check "$DRIVER" aligned 'Text scale' chatTextScale
+                check "$DRIVER" aligned 'Text scale' chatTextScaleValue
+            fi
+            if [[ "$tab" == General ]]; then
+                "$DRIVER" scroll-wheel General -3000 pixel
+                check wait_visible 'Check for Updates…'
+            fi
+            if [[ "$tab" == Agents ]]; then
+                check_agents_scrolling
+            fi
+            capture "$tab" "$appearance-settings-$(echo "$tab" | tr A-Z a-z)$zoom"
+        done
+        # The second pass repeats every section at 150%.
+        [[ -z "$zoom" ]] && { for _ in 1 2 3; do "$DRIVER" key command-plus; sleep 0.2; done; sleep 1; }
     done
-    normal_tab="$("$DRIVER" bounds settingsTab-General)"
-    for _ in 1 2 3; do "$DRIVER" key command-plus; sleep 0.2; done
-    sleep 1
-    large_tab="$("$DRIVER" bounds settingsTab-General)"
-    python3 - "$normal_tab" "$large_tab" <<'PYTHON'
-import sys
-normal, large = (list(map(float, value.split())) for value in sys.argv[1:])
-# AX hit frames include fixed native insets and the system font uses optical sizing.
-# Content fonts and geometry are checked directly by SettingsTabToolbarTests.
-for dimension in (2, 3):
-    assert 1.35 <= large[dimension] / normal[dimension] <= 1.65, ("Settings tab zoom", normal, large)
-PYTHON
-    pass "native Settings tabs grow with live zoom"
-    [[ "$("$DRIVER" value settingsTab-Agents)" == Selected ]] || fail "Settings keeps the selected tab across zoom"
-    for tab in General Chat Agents; do
-        "$DRIVER" press "$tab"; sleep 1
-        current_tab="$("$DRIVER" bounds settingsTab-General)"
-        python3 - "$large_tab" "$current_tab" <<'PYTHON'
-import sys
-expected, actual = (list(map(float, value.split())) for value in sys.argv[1:])
-assert all(abs(expected[index] - actual[index]) <= 1 for index in (2, 3)), (expected, actual)
-PYTHON
-        if [[ "$tab" == General ]]; then
-            "$DRIVER" scroll-wheel General -3000 pixel
-            check wait_visible 'Check for Updates…'
-        fi
-        if [[ "$tab" == Agents ]]; then
-            check_agents_scrolling
-        fi
-        settings_id="$("$DRIVER" wid "$tab")"
-        screencapture -x -o -l "$settings_id" "$OUT/$appearance-settings-$tab-zoom.png"
-        check_layout "Settings $tab at 150%"
-    done
+    "$DRIVER" key command-zero
+    # Escape leaves Settings for the sessions even from a form control;
+    # Command-comma returns to the last section.
+    "$DRIVER" select General; sleep 1
+    check "$DRIVER" focus interfaceScale
+    "$DRIVER" key escape
+    check wait_exists routineSidebar
+    "$DRIVER" key command-comma
+    check wait_exists settingsSidebar
+    # The window takes the last section's title.
+    check "$DRIVER" bounds General
+    "$DRIVER" press settingsBack
+    check wait_exists routineSidebar
+    # Showing the sidebar again takes room from the detail instead of widening the window.
+    main_title="$("$DRIVER" value mainWindowTitle)"
+    width_before="$("$DRIVER" bounds "$main_title" | awk '{print $3}')"
+    "$DRIVER" press toggleSidebar; sleep 1
+    "$DRIVER" press toggleSidebar; sleep 1.5
+    [[ "$("$DRIVER" bounds "$main_title" | awk '{print $3}')" == "$width_before" ]] \
+        && pass "showing the sidebar keeps the window width" || fail "showing the sidebar keeps the window width"
     quit_rota
 done
 

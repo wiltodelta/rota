@@ -62,7 +62,8 @@ final class WindowToolbarOverlayTests: XCTestCase {
         anchor.height = 78
         anchor.title = "Example"
         anchor.host.rootView = AnyView(MainWindowToolbar(title: "Example", sidebarWidth: 280,
-                                                       toggleSidebar: {}, importRoutines: {}, newRoutine: {})
+                                                       toggleSidebar: {}, importRoutines: {}, newRoutine: {},
+                                                       showsActions: true)
             .environment(\.interfaceScale, InterfaceScale(factor: 1.5)))
         let content = try XCTUnwrap(window.contentView)
         content.addSubview(anchor)
@@ -95,7 +96,7 @@ final class WindowToolbarOverlayTests: XCTestCase {
             if showToolbar {
                 WindowToolbarOverlay(content: AnyView(MainWindowToolbar(
                     title: title, sidebarWidth: 280,
-                    toggleSidebar: {}, importRoutines: {}, newRoutine: {}
+                    toggleSidebar: {}, importRoutines: {}, newRoutine: {}, showsActions: true
                 ).environment(\.interfaceScale, InterfaceScale(factor: height / 52))), height: height, title: title)
                     .frame(width: 0, height: 0)
             }
