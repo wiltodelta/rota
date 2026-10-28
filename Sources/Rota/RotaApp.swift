@@ -197,6 +197,7 @@ final class AppModel {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+    private static let log = Logger(subsystem: "com.wiltodelta.rota", category: "app")
     private let model = AppModel.shared
     private var statusItem: NSStatusItem!
     private var panel: MenuBarPanelController!
@@ -208,7 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let id = Bundle.main.bundleIdentifier,
            NSRunningApplication.runningApplications(withBundleIdentifier: id).count > 1 {
-            Logger(subsystem: "com.wiltodelta.rota", category: "app").info("Another instance is running; quitting")
+            Self.log.info("Another instance is running; quitting")
             NSApp.terminate(nil)
             return
         }
@@ -245,7 +246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         if ProcessInfo.processInfo.environment["ROTA_OPEN_PANEL"] != nil, let screen = NSScreen.main {
             panel.show(topLeft: NSPoint(x: screen.visibleFrame.midX - 170, y: screen.visibleFrame.maxY - 40))
-            Logger(subsystem: "com.wiltodelta.rota", category: "app")
+            Self.log
                 .info("Panel window \(self.panel.windowNumber, privacy: .public)")
         }
     }
@@ -284,13 +285,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         controlServer?.stop()
     }
 
-    /// A run lives in Rota's process, or is watched by it, so quitting asks first
-    /// and stops the running sessions the way Stop does: they are recorded as
-    /// stopped and can be continued later.
+    /// A run lives in Rota's process, or is watched by it, so a person's quit asks
+    /// first and stops the running sessions the way Stop does: they are recorded
+    /// as stopped and can be continued later. A shutdown or an update relaunch
+    /// asks nothing and leaves them open for the next launch to follow or continue.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let running = model.scheduler.active.count
-        // A shutdown never waits on Rota: its open runs continue when Rota starts again.
-        guard running > 0, macState?.poweringOff != true else { return .terminateNow }
+        let unattended = macState?.poweringOff == true || Updater.shared.relaunchingForUpdate
+        guard running > 0, !unattended else {
+            if running > 0 { Self.log.info("Quitting unattended; \(running) open runs continue after relaunch") }
+            return .terminateNow
+        }
         let alert = NSAlert()
         if running == 1 {
             alert.messageText = "Stop the running routine and quit?"

@@ -58,14 +58,7 @@ struct SettingsSidebar: View {
 
     var body: some View {
         List(selection: Binding(get: { model.settingsPane }, set: { if let pane = $0 { model.settingsPane = pane } })) {
-            Button { model.closeSettings() } label: {
-                Label("Back", systemImage: "chevron.left")
-                    .interfaceFont(.body)
-                    .foregroundStyle(Color.secondaryText)
-                    .labelStyle(ScaledSidebarLabelStyle())
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
+            Button { model.closeSettings() } label: { SidebarActionLabel(title: "Back", symbol: "chevron.left") }
             .buttonStyle(.plain)
             // Escape leaves Settings wherever focus is, as Back does.
             .keyboardShortcut(.cancelAction)
@@ -95,6 +88,38 @@ struct SettingsSidebar: View {
         }
         .accessibilityIdentifier("settingsSidebar")
         .focused($sidebarFocused)
+    }
+}
+
+/// Settings pinned below the routines and sessions list, on the routine names' edge.
+struct SidebarSettingsButton: View {
+    @Environment(\.interfaceScale) private var metrics
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Button { model.showSettings() } label: { SidebarActionLabel(title: "Settings", symbol: "gearshape") }
+        .buttonStyle(.plain)
+        .padding(.leading, SidebarIconColumn.listInset)
+        .padding(.trailing, metrics.points(12))
+        .padding(.vertical, metrics.points(6))
+        .overlay(alignment: .top) { Divider() }
+        .help("Settings (Command-,)")
+        .accessibilityIdentifier("sidebarSettings")
+    }
+}
+
+/// A secondary sidebar action (Back, Settings) with a full-row target.
+private struct SidebarActionLabel: View {
+    let title: String
+    let symbol: String
+
+    var body: some View {
+        Label(title, systemImage: symbol)
+            .interfaceFont(.body)
+            .foregroundStyle(Color.secondaryText)
+            .labelStyle(ScaledSidebarLabelStyle())
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
     }
 }
 

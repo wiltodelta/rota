@@ -51,7 +51,10 @@ struct MainWindow: View {
                 if model.settingsPane != nil {
                     SettingsSidebar()
                 } else {
-                    MainSidebar(records: records)
+                    VStack(spacing: 0) {
+                        MainSidebar(records: records)
+                        SidebarSettingsButton()
+                    }
                 }
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
@@ -261,6 +264,8 @@ private struct RoutineRow: View {
 enum SidebarIconColumn {
     static let width: CGFloat = 24
     static let gap: CGFloat = 8
+    /// The sidebar list's own leading row inset, which does not follow zoom.
+    static let listInset: CGFloat = 16
 }
 
 /// A sidebar section title, shared by the main and Settings sidebars.

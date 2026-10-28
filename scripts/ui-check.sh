@@ -404,6 +404,11 @@ check_settings() {
     check "$DRIVER" bounds General
     "$DRIVER" press settingsBack
     check wait_exists routineSidebar
+    # Settings at the foot of the sidebar opens the same mode.
+    "$DRIVER" press sidebarSettings
+    check wait_exists settingsSidebar
+    "$DRIVER" press settingsBack
+    check wait_exists routineSidebar
     # Showing the sidebar again takes room from the detail instead of widening the window.
     main_title="$("$DRIVER" value mainWindowTitle)"
     width_before="$("$DRIVER" bounds "$main_title" | awk '{print $3}')"
@@ -701,8 +706,12 @@ PYTHON
 
     # The menu bar panel: each routine is a button that opens its latest session.
     open_rota --env "ROTA_APPEARANCE=$appearance" --env ROTA_OPEN_PANEL=1
-    sleep 4
-    panel_id="$("$DRIVER" wid "")"
+    # The panel closes when another app takes focus, so poll for it as soon as it opens
+    # (`|| true` stops a miss from tripping the ERR trap, which `set -E` passes into the subshell).
+    for _ in {1..40}; do
+        panel_id="$("$DRIVER" wid "" 2>/dev/null || true)"; [[ -n "$panel_id" ]] && break
+        sleep 0.25
+    done
     [[ -n "$panel_id" ]] && screencapture -x -o -l "$panel_id" "$OUT/$appearance-panel.png" \
         && pass "captured $appearance-panel" || fail "captured $appearance-panel"
     "$DRIVER" tree > "$OUT/$appearance-panel-tree.txt"

@@ -200,9 +200,10 @@
 - The sidebar folds away with the button beside the title, View > Hide
   Sidebar or Control-Command-S. Its visibility and resized width are kept across
   launches, so the divider returns to where you left it.
-- Settings… (Command-,) opens Settings inside the main window: the sidebar
-  lists General, Chat and Agents, and Back or Escape returns to your routines
-  and sessions. It reopens on the section you used last.
+- Settings… (Command-,), or Settings at the foot of the sidebar, opens
+  Settings inside the main window: the sidebar lists General, Chat and Agents,
+  and Back or Escape returns to your routines and sessions. It reopens on the
+  section you used last.
 - Menus: File > New Routine… (Command-N) and Import Routines…;
   Routine > Run Now (Command-R), Stop (Command-.) and Edit Routine…
   (Command-E), acting on the selected routine or the selected session's.
@@ -222,7 +223,9 @@ in the app or through its CLI/MCP question tools.
 Point a routine only at a project whose skill you trust.
 
 Rota runs routines only while it is open; turn on **Launch at login** in
-Settings, so runs cut off by a shutdown continue after the Mac starts.
+Settings, so runs cut off by a shutdown continue after the Mac starts. An
+update installs without stopping running routines: they continue after Rota
+relaunches.
 Quitting Rota yourself while routines run asks first and stops them; their
 sessions can be continued later.
 

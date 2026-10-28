@@ -507,7 +507,12 @@ flowchart LR
 - Quitting with runs going asks first (`applicationShouldTerminate`), then
   `stopAll` stops each the way Stop does and the app waits up to five seconds
   for them to end. Without that a Shell run's `screen` outlived Rota while its
-  record read interrupted.
+  record read interrupted. A shutdown (`MacState.poweringOff`) and an update
+  relaunch (Sparkle's `updaterWillRelaunchApplication` sets
+  `Updater.relaunchingForUpdate`) skip both: their runs stay open for the next launch,
+  which follows a surviving screen or daemon and continues the rest as above.
+  A Shell routine killed mid-run with its screen alive finished in the same
+  record after relaunch (2026-10-28).
 - A notification carries its session id (its routine's, for a skip or a
   pause) in `userInfo`; clicking it opens that item.
 - A run has no time limit unless its routine sets `timeLimitMinutes`; each
@@ -605,7 +610,9 @@ the General, Chat and Agents sections (`SettingsMode.swift`) and the detail for
 the selected form, hides the import/new actions and titles the window after the
 section. Back (Escape, as its cancel shortcut, from any focus), picking a session
 from a notification and closing the window leave the mode and restore the
-previous selection; Command-, reopens the last section. Settings shows a hidden
+previous selection; Command-, reopens the last section. `SidebarSettingsButton` sits below the routines
+and sessions list, not over it, so the history never scrolls under it and it needs
+no bar of its own; it shares the section rows' label style and text edge. Settings shows a hidden
 sidebar through `AppModel.sidebarShown` without changing the saved preference.
 The sidebar toggle and View > Hide Sidebar are dimmed in Settings, since its
 sections and Back live there.
