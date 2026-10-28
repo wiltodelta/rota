@@ -609,9 +609,12 @@ previous selection; Command-, reopens the last section. Settings shows a hidden
 sidebar through `AppModel.sidebarShown` without changing the saved preference.
 The sidebar toggle and View > Hide Sidebar are dimmed in Settings, since its
 sections and Back live there.
-Section rows use `ScaledSidebarLabelStyle`: the sidebar row style keeps its own
-icon gap and font at 100%, so the label sets the font, gap and icon column itself,
-and colours the icon with the accent (`SidebarText` on the focused selection).
+Section rows and Back use `ScaledSidebarLabelStyle`: the sidebar row style keeps
+its own icon gap and font at 100%, so the label sets them itself, with a routine
+row's icon column and gap (`SidebarIconColumn`, 16 pt symbols), so every name in both
+sidebars starts on one edge at each zoom level (measured within 1 pt, 80-150%),
+colours the icon with the accent, and on the focused selection gives name and
+icon the routine rows' `SidebarText` foreground.
 SwiftUI widens the window by the sidebar's width whenever a hidden sidebar
 returns, by the toggle or by Settings; neither the split item's
 `collapseBehavior` nor a `setFrame` override in an `NSWindow` subclass stopped

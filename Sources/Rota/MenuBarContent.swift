@@ -152,7 +152,7 @@ private struct MenuRoutineRow: View {
                 model.scheduler.run(routine, trigger: .manual)
             }
         }
-        HStack(spacing: metrics.points(8)) {
+        HStack(spacing: metrics.points(SidebarIconColumn.gap)) {
             HarnessStatusIcon(harness: routine.harness) {
                 StatusDot(routine: routine)
             }

@@ -27,6 +27,7 @@ Shared rules for our macOS apps: `~/Documents/GitHub/claude-config/docs/macos-ap
 - To check the scheduler live, write Shell routines into `routines.json` with a past or next-minute `nextFire` (catch-up, skip, scheduled slot) and launch the app; back up and remove that data after.
 - Notification Center records the path of the first build that posts a notification as the app's source (`apps[…].src` in `~/Library/Group Containers/group.com.apple.usernoted/Library/Preferences/group.com.apple.usernoted.plist`) and draws the banner icon from there; a dev build in `~/Documents` (TCC-protected) or a deleted copy leaves every banner with the blank app icon. It is a system setting: report it, never edit it.
 - Notification banners are not in the Accessibility tree, so they cannot be pressed from a script; read delivery from `/usr/bin/log show --predicate 'process == "usernoted"'` ("Presenting ... as banner").
+- A sidebar `Label` row's AX frame spans icon and title, so check name edges and icon gaps from capture pixels (split the row's ink into runs) at each zoom level, not from AX frames.
 - Check a change that affects layout, sizing or text fit at the minimum window width (`contentMinSize` in `RotaApp.swift`); the layout rules that width taught are in `docs/architecture.md`.
 
 ## Rules

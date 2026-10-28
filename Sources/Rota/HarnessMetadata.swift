@@ -16,7 +16,7 @@ struct HarnessStatusIcon<Status: View>: View {
 
     var body: some View {
         HarnessLogo(harness: harness, size: 20, monochrome: true, foreground: foreground)
-            .frame(width: metrics.points(24), height: metrics.points(24))
+            .frame(width: metrics.points(SidebarIconColumn.width), height: metrics.points(SidebarIconColumn.width))
             .overlay(alignment: .bottomTrailing) {
                 status
                     .padding(metrics.points(1.5))

@@ -59,16 +59,12 @@ struct SettingsSidebar: View {
     var body: some View {
         List(selection: Binding(get: { model.settingsPane }, set: { if let pane = $0 { model.settingsPane = pane } })) {
             Button { model.closeSettings() } label: {
-                // The sidebar tints a label's icon with the accent; Back is one secondary control.
-                Label {
-                    Text("Back")
-                } icon: {
-                    Image(systemName: "chevron.left").foregroundStyle(Color.secondaryText)
-                }
-                .interfaceFont(.body)
-                .foregroundStyle(Color.secondaryText)
-                .frame(maxWidth: .infinity, minHeight: metrics.points(24), alignment: .leading)
-                .contentShape(Rectangle())
+                Label("Back", systemImage: "chevron.left")
+                    .interfaceFont(.body)
+                    .foregroundStyle(Color.secondaryText)
+                    .labelStyle(ScaledSidebarLabelStyle())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             // Escape leaves Settings wherever focus is, as Back does.
@@ -78,18 +74,18 @@ struct SettingsSidebar: View {
             .accessibilityIdentifier("settingsBack")
             Section {
                 ForEach(SettingsPane.allCases) { pane in
-                    // The sidebar row style replaces a font set on the whole label, so set it on the parts.
+                    // On the focused selection, name and icon take the routine rows' contrasting foreground.
+                    let onAccent = appearsActive && sidebarFocused && model.settingsPane == pane
+                    // The sidebar row style replaces a font set on the whole label.
                     Label {
                         Text(pane.title).interfaceFont(.body)
+                            .foregroundStyle(SidebarText.primary(onAccent: onAccent))
                     } icon: {
-                        // Accent icons as in a native sidebar, contrasting on the focused selection.
-                        let onAccent = appearsActive && sidebarFocused && model.settingsPane == pane
-                        Image(systemName: pane.symbol).interfaceFont(.body)
+                        // Accent icons as in a native sidebar, near a harness mark's size.
+                        Image(systemName: pane.symbol).font(.system(size: metrics.points(16)))
                             .foregroundStyle(onAccent ? SidebarText.primary(onAccent: true) : Color.accentColor)
                     }
-                    // The sidebar's own label spacing and row height stay at 100%.
                     .labelStyle(ScaledSidebarLabelStyle())
-                    .frame(minHeight: metrics.points(24))
                     .tag(pane)
                     .accessibilityIdentifier("settingsPane-" + pane.rawValue)
                 }
@@ -102,13 +98,15 @@ struct SettingsSidebar: View {
     }
 }
 
-/// A sidebar label whose icon column and gap follow the interface scale.
+/// A sidebar label in `SidebarIconColumn`, at the interface scale: the sidebar's
+/// own label style keeps its gap and row height at 100%.
 private struct ScaledSidebarLabelStyle: LabelStyle {
     @Environment(\.interfaceScale) private var metrics
 
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: metrics.points(6)) {
-            configuration.icon.frame(width: metrics.points(20))
+        HStack(spacing: metrics.points(SidebarIconColumn.gap)) {
+            let side = metrics.points(SidebarIconColumn.width)
+            configuration.icon.frame(width: side, height: side)
             configuration.title
         }
     }

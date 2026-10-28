@@ -236,7 +236,7 @@ private struct RoutineRow: View {
     let onAccent: Bool
 
     var body: some View {
-        HStack(spacing: metrics.points(8)) {
+        HStack(spacing: metrics.points(SidebarIconColumn.gap)) {
             HarnessStatusIcon(harness: routine.harness, foreground: SidebarText.primary(onAccent: onAccent)) {
                 StatusDot(routine: routine)
             }
@@ -254,6 +254,13 @@ private struct RoutineRow: View {
             }
         }
     }
+}
+
+/// A sidebar row's leading column, a harness mark or a Settings icon, and its gap
+/// to the name: shared, so every name in both sidebars starts on one edge.
+enum SidebarIconColumn {
+    static let width: CGFloat = 24
+    static let gap: CGFloat = 8
 }
 
 /// A sidebar section title, shared by the main and Settings sidebars.
@@ -341,7 +348,7 @@ private struct SessionRow: View {
     @State private var reader = TranscriptSessionReader()
 
     var body: some View {
-        HStack(spacing: metrics.points(8)) {
+        HStack(spacing: metrics.points(SidebarIconColumn.gap)) {
             HarnessStatusIcon(harness: record.harness, foreground: SidebarText.primary(onAccent: onAccent)) {
                 Group {
                     if record.outcome == .running, record.terminalState != .waiting {
