@@ -366,6 +366,23 @@ case "scroll-wheel":
     app.activate()
     guard AXUIElementPerformAction(window, kAXRaiseAction as CFString) == .success else { fail("cannot raise window") }
     Thread.sleep(forTimeInterval: 0.1)
+    // Wheel events go to whatever window is frontmost at the point. Another app's
+    // floating window (a video player, a dictation indicator) stays there after
+    // activation, so name it rather than scroll it. The Dock's own full-screen
+    // window (layer 20) and the menu bar sit above and pass events through.
+    let listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+    if let front = listed.first(where: { info in
+        let layer = info[kCGWindowLayer as String] as? Int ?? 0
+        let alpha = info[kCGWindowAlpha as String] as? Double ?? 1
+        guard layer < Int(CGWindowLevelForKey(.dockWindow)), alpha > 0,
+              let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+              let frame = CGRect(dictionaryRepresentation: bounds) else { return false }
+        return frame.contains(point)
+    }), (front[kCGWindowOwnerPID as String] as? pid_t) != app.processIdentifier {
+        let owner = front[kCGWindowOwnerName as String] as? String ?? "another app"
+        let name = front[kCGWindowName as String] as? String ?? ""
+        fail("\(owner)\(name.isEmpty ? "" : " (\(name))") covers the scroll point; move it away and rerun")
+    }
     let previous = CGEvent(source: nil)?.location
     guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
                              mouseCursorPosition: point, mouseButton: .left) else { fail("no pointer event") }

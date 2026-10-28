@@ -29,6 +29,11 @@ quit_dev() {
     PID=""
 }
 cleanup() {
+    local status=$?
+    # Keep what a failed capture saw before the build quits; diagnose from that folder.
+    if [[ "$status" != 0 && -n "$PID" ]]; then
+        uv run -q "$AUDIT" evidence --pid "$PID" --out "${TMPDIR:-/tmp}/rota-capture-failures" --label capture >/dev/null || true
+    fi
     quit_dev
     defaults delete "$DOMAIN" >/dev/null 2>&1 || true
     if [[ "$HAD_DEFAULTS" == 1 ]]; then

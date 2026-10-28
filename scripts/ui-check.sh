@@ -9,9 +9,11 @@
 #   scripts/ui-check.sh --live    also message a running Codex session
 #   scripts/ui-check.sh --questions-only  finished question and verification states only
 #   scripts/ui-check.sh --harnesses-only  reasoning and CLI/service compatibility states only
+#   scripts/ui-check.sh --settings-only   Settings in the main window only
 #   ROTA_UI_QUESTION_HARNESS=antigravity scripts/ui-check.sh --questions-only
 #   ROTA_UI_TERMINAL=terminal scripts/ui-check.sh  use Terminal in both appearances
-set -euo pipefail
+# A failed check saves the screen, Rota's windows and its AX geometry under $OUT/failures.
+set -Eeuo pipefail  # -E: functions trip the ERR trap too
 cd "$(dirname "$0")/.."
 
 OUT="${ROTA_UI_OUT:-/tmp/rota-ui-check}"
@@ -26,11 +28,16 @@ DRIVER="$WORK/driver"
 LIVE="${1:-}"
 TERMINAL_MODE="${ROTA_UI_TERMINAL:-auto}"
 CACHE="$HOME/Library/Caches/Rota/chat"
+AUDIT="${ROTA_MACAUDIT:-$HOME/Documents/GitHub/claude-config/skills/ui-audit-macos/scripts/macaudit.py}"
+[[ -f "$AUDIT" ]] || { echo "Set ROTA_MACAUDIT to the shared macaudit.py helper." >&2; exit 1; }
 
 pass() { echo "ok    $1"; }
 fail() {
     echo "FAIL  $1"
-    if [[ -x "$DRIVER" ]]; then "$DRIVER" tree > "$OUT/failure-tree.txt" 2>&1 || true; fi
+    # Diagnose from what the failure saw, not from a second run.
+    local pid
+    pid="$(pgrep -f "$APP/Contents/MacOS/Rota" | head -1)" \
+        && uv run -q "$AUDIT" evidence --pid "$pid" --out "$OUT/failures" --label "$1" >/dev/null || true
     exit 1
 }
 check() { if "$@" >/dev/null 2>&1; then pass "${*: -1}"; else fail "${*: -1}"; fi; }
@@ -352,6 +359,69 @@ check_mixed_questions() {
     [[ "$stopped" == 1 ]] || fail "the synthetic shell session stopped"
     quit_rota
 }
+
+# Settings, with each agent's installed copies and versions; the light pass
+# shows the terminal picker on its default, which names the macOS default terminal.
+check_settings() {
+    local appearance="$1" zoom tab main_title width_before
+    [[ "$appearance" == light ]] && { defaults delete "$DOMAIN" terminalApp >/dev/null 2>&1 || true; }
+    open_rota --env "ROTA_APPEARANCE=$appearance" --env ROTA_OPEN_SETTINGS=general
+    sleep 8
+    # Settings is a mode of the main window: its sidebar lists the sections,
+    # so the sidebar toggle is dimmed while it shows.
+    check wait_exists settingsSidebar
+    [[ "$("$DRIVER" enabled toggleSidebar)" == false ]] && pass "sidebar toggle dimmed in Settings" \
+        || fail "sidebar toggle dimmed in Settings"
+    for zoom in "" -zoom; do
+        for tab in General Chat Agents; do
+            [[ "$tab" == General && -z "$zoom" ]] || { "$DRIVER" select "$tab"; sleep 2; }
+            if [[ "$tab" == Chat ]]; then
+                check "$DRIVER" aligned 'Text scale' chatTextScale
+                check "$DRIVER" aligned 'Text scale' chatTextScaleValue
+            fi
+            if [[ "$tab" == General ]]; then
+                "$DRIVER" scroll-wheel General -3000 pixel
+                check wait_visible 'Check for Updates…'
+            fi
+            if [[ "$tab" == Agents ]]; then
+                check_agents_scrolling
+            fi
+            capture "$tab" "$appearance-settings-$(echo "$tab" | tr A-Z a-z)$zoom"
+        done
+        # The second pass repeats every section at 150%.
+        [[ -z "$zoom" ]] && { for _ in 1 2 3; do "$DRIVER" key command-plus; sleep 0.2; done; sleep 1; }
+    done
+    "$DRIVER" key command-zero
+    # Escape leaves Settings for the sessions even from a form control;
+    # Command-comma returns to the last section.
+    "$DRIVER" select General; sleep 1
+    check "$DRIVER" focus interfaceScale
+    "$DRIVER" key escape
+    check wait_exists routineSidebar
+    "$DRIVER" key command-comma
+    check wait_exists settingsSidebar
+    # The window takes the last section's title.
+    check "$DRIVER" bounds General
+    "$DRIVER" press settingsBack
+    check wait_exists routineSidebar
+    # Showing the sidebar again takes room from the detail instead of widening the window.
+    main_title="$("$DRIVER" value mainWindowTitle)"
+    width_before="$("$DRIVER" bounds "$main_title" | awk '{print $3}')"
+    "$DRIVER" press toggleSidebar; sleep 1
+    "$DRIVER" press toggleSidebar; sleep 1.5
+    [[ "$("$DRIVER" bounds "$main_title" | awk '{print $3}')" == "$width_before" ]] \
+        && pass "showing the sidebar keeps the window width" || fail "showing the sidebar keeps the window width"
+}
+
+if [[ "$LIVE" == --settings-only ]]; then
+    for appearance in light dark; do
+        rm -rf "$SUPPORT"
+        check_settings "$appearance"
+        quit_rota
+    done
+    pass "Settings in both appearances"
+    exit 0
+fi
 
 if [[ "$LIVE" == --harnesses-only ]]; then
     # No installed agents are needed to render this protocol-neutral presentation contract.
@@ -717,55 +787,7 @@ PYTHON
 
     check_question_forms "$appearance" "ui-shell-$appearance"
 
-    # Settings, with each agent's installed copies and versions; the light pass
-    # shows the terminal picker on its default, which names the macOS default terminal.
-    [[ "$appearance" == light ]] && { defaults delete "$DOMAIN" terminalApp >/dev/null 2>&1 || true; }
-    open_rota --env "ROTA_APPEARANCE=$appearance" --env ROTA_OPEN_SETTINGS=general
-    sleep 8
-    # Settings is a mode of the main window: its sidebar lists the sections,
-    # so the sidebar toggle is dimmed while it shows.
-    check wait_exists settingsSidebar
-    [[ "$("$DRIVER" enabled toggleSidebar)" == false ]] && pass "sidebar toggle dimmed in Settings" \
-        || fail "sidebar toggle dimmed in Settings"
-    for zoom in "" -zoom; do
-        for tab in General Chat Agents; do
-            [[ "$tab" == General && -z "$zoom" ]] || { "$DRIVER" select "$tab"; sleep 2; }
-            if [[ "$tab" == Chat ]]; then
-                check "$DRIVER" aligned 'Text scale' chatTextScale
-                check "$DRIVER" aligned 'Text scale' chatTextScaleValue
-            fi
-            if [[ "$tab" == General ]]; then
-                "$DRIVER" scroll-wheel General -3000 pixel
-                check wait_visible 'Check for Updates…'
-            fi
-            if [[ "$tab" == Agents ]]; then
-                check_agents_scrolling
-            fi
-            capture "$tab" "$appearance-settings-$(echo "$tab" | tr A-Z a-z)$zoom"
-        done
-        # The second pass repeats every section at 150%.
-        [[ -z "$zoom" ]] && { for _ in 1 2 3; do "$DRIVER" key command-plus; sleep 0.2; done; sleep 1; }
-    done
-    "$DRIVER" key command-zero
-    # Escape leaves Settings for the sessions even from a form control;
-    # Command-comma returns to the last section.
-    "$DRIVER" select General; sleep 1
-    check "$DRIVER" focus interfaceScale
-    "$DRIVER" key escape
-    check wait_exists routineSidebar
-    "$DRIVER" key command-comma
-    check wait_exists settingsSidebar
-    # The window takes the last section's title.
-    check "$DRIVER" bounds General
-    "$DRIVER" press settingsBack
-    check wait_exists routineSidebar
-    # Showing the sidebar again takes room from the detail instead of widening the window.
-    main_title="$("$DRIVER" value mainWindowTitle)"
-    width_before="$("$DRIVER" bounds "$main_title" | awk '{print $3}')"
-    "$DRIVER" press toggleSidebar; sleep 1
-    "$DRIVER" press toggleSidebar; sleep 1.5
-    [[ "$("$DRIVER" bounds "$main_title" | awk '{print $3}')" == "$width_before" ]] \
-        && pass "showing the sidebar keeps the window width" || fail "showing the sidebar keeps the window width"
+    check_settings "$appearance"
     quit_rota
 done
 
