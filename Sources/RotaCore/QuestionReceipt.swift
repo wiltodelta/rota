@@ -28,6 +28,14 @@ public struct QuestionReceipt: Decodable, Equatable, Sendable {
         return receipt
     }
 
+    /// The question a receipt closes: only a well-formed envelope with a final action counts.
+    static func answer(_ text: String) -> (id: String, receipt: QuestionReceipt)? {
+        guard let receipt = decode(text), ["accept", "decline", "cancel"].contains(receipt.action),
+              let boundary = text.range(of: ":\n") else { return nil }
+        let start = text.index(text.startIndex, offsetBy: "Answer to your question ".count)
+        return (String(text[start..<boundary.lowerBound]), receipt)
+    }
+
     public var summary: String {
         let answers = questions.flatMap(\.answers).filter { !$0.isEmpty }
         if !answers.isEmpty { return answers.joined(separator: "\n") }

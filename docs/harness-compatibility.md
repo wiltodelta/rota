@@ -38,6 +38,9 @@ synthetic sessions and requires no installed agent. The full `scripts/ui-check.s
 covers the other application surfaces. Use the native capture notice and preflight
 procedure; the driver also checks the console before delivering a key. Its imported names may be personal; keep captures outside Git.
 
+Run builds, `maintain.sh` and UI checks sequentially. UI scripts also assemble
+and sign `Rota.app`; SwiftPM's build lock does not cover bundle assembly or signing.
+
 ## Recovery and ownership
 
 ```mermaid

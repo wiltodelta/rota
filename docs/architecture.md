@@ -149,9 +149,9 @@ flowchart LR
 - `AgentQuestion` normalizes native questions, plan approvals and MCP forms/URL
   requests. `RunEvents.question` registers the request with the scheduler,
   persists its fields in `RunRecord.questions`, marks the session as needing
-  a reply and posts a notification. `SessionView` owns a `QuestionDraft` shared
-  by `QuestionCard` and `ChatComposer`. The card presents single/multiple
-  numbered option rows and specialized private/numeric fields inside the transcript's
+  a reply and posts a notification. `SessionView` owns a `QuestionDraft` for
+  `QuestionCard`, independently of `ChatComposer`. The card presents single/multiple
+  numbered option rows and its own text/private/numeric fields inside the transcript's
   scroll view, while the composer stays pinned below it. The form never squeezes
   the transcript into a near-zero nested scroll viewport.
   The card registers its own transcript viewport marker and participates in
@@ -159,29 +159,35 @@ flowchart LR
   Its end anchor sits outside the spaced lazy rows, with a compact form tail;
   scrolling to the absolute bottom must leave the final actions visible even
   at minimum height and 150% zoom.
-  While a form is pending, the floating latest-message button is hidden so
-  it cannot cover question fields in that small viewport.
-  Free-text fields, including a selected Other answer, use the existing session
-  composer with an explicit field label. Each field keeps its own text draft;
+  While a form is pending, a pinned Show Question control above the ordinary
+  composer reveals the card after the reader scrolls away. The floating
+  latest-message button stays hidden so it cannot cover the form.
+  Free-text fields, including a selected Other answer, stay inside the card.
+  Each field keeps its own text draft;
   Multiple fields appear one at a time, with a progress count and Back/Next.
   Next validates only the current field and never sends a partial form; the final
   action validates all fields. Going back preserves selections and text.
-  Selecting Something else focuses the shared editor directly, with no
+  Selecting Something else focuses the card's answer field directly, with no
   intermediate edit link. Option rows highlight selection and expose it through
   Accessibility; no option is preselected. Text bindings
   capture their field ID, so late editing events cannot overwrite another field
   or fall through into the ordinary message draft. Ordinary
   message drafts and attachments remain in AppModel and are not sent with a
-  question answer. For a single action, the composer's Send and Return submit
-  the complete validated form on the final field; before that they advance to
-  the next field. Multiple-action forms retain explicit action
-  buttons in the card; typing cannot implicitly pick one of those actions.
+  question answer. Next and the final answer actions stay in the card; typing
+  into an answer field cannot submit the ordinary message draft.
+  The ordinary composer remains editable while questions are pending. Compact
+  spacing and a shorter visible editor preserve room for the scrollable form;
+  longer message drafts scroll inside the editor. Async
+  questions allow independent messages and attachments without resolving the form
+  or clearing its attention. A blocking question disables ordinary sending and
+  explains that the draft is retained. Unblocking never automatically sends it.
+  Multiple-action forms retain explicit action buttons in the card.
   Cancel and Decline stay with the question card's actions. The scroll content reserves
   scaled space on every edge for native field focus rings, which paint outside
   their layout bounds. Check a
   focused first and last input at the minimum window height. Something else is a
   numbered row for a single choice and an independent selectable row for multiple choices.
-  Its shared editor appears only when selected; a hidden draft is retained but never submitted.
+  Its answer field appears only when selected; a hidden draft is retained but never submitted.
   An empty selected Other blocks submission. Only elicitation and permission
   requests show the additional Decline action. Provider dismissal choices are
   not duplicated among approval buttons. When action buttons cannot fit in
@@ -207,16 +213,15 @@ flowchart LR
   completion, cancellation and restart. Their explicit answer is delivered as a
   user message to the active session or resumes the same native session, keeping
   other questions pending. A failed continuation preserves the unanswered form.
-  Shared-composer verification uses a local stream stub and the actual
-  `questions.create`/`questions.poll` socket path. Both appearances were checked
+  Independent-composer verification uses `scripts/fixtures/question-stream.py`,
+  a local synthetic stream peer, and the actual `questions.create` socket path. Both appearances were checked
   at 820 x 520 pt with 100%/150% zoom, plus a larger 1100 x 720 pt window.
   Native Return, Option-Return, field switching, multi-select answers, Cancel,
   explicit multi-action forms and ordinary-draft restoration were exercised.
   A selected custom answer stays separate from ordinary message text. The
   numbered option rows use primary text and a neutral selected background.
   `QuestionDraftTests` reject mutations that drop Other selection, replace
-  selected multiple choices with custom text, or route secret fields into the
-  plain composer.
+  selected multiple choices with custom text, or lose per-field drafts.
 - Codex receives deferred JSON-RPC server requests through `onRequestAsync`;
   the transport keeps reading while the user answers. It handles native input,
   command/file/permission approvals, legacy approvals and standard MCP form/URL
@@ -226,7 +231,15 @@ flowchart LR
   Codex's `request_user_input_async` instead emits an `agentMessage` with
   `questions` metadata. `QuestionRequest.codexMessage` turns that metadata into
   an `AgentQuestion` with `replyViaMessage`, preserving the original message in
-  the journal. `SessionView` presents forms for finished sessions too.
+  the journal. `CodexAsyncQuestions` reconciles all turn pages and deferred
+  events before publishing open questions. Only a valid Rota answer envelope
+  matching the question ID and fields in the same thread closes it; accept,
+  decline and cancel all count. Confirmed answers survive duplicate events,
+  while in-flight answers suppress replay only until delivery succeeds or fails.
+  The scheduler retains Codex forms until the runner acknowledges delivery, so
+  an unavailable daemon or failed continuation leaves the answer retryable.
+  Existing receipt and history formats remain unchanged.
+  `SessionView` presents forms for finished sessions too.
   `QuestionElicitation` also accepts `openai/form` and its `openaiForm` wire alias.
   Device-verification challenges and unsupported extended schemas have a visible
   cancel/decline path, without an ordinary approval standing in for proof or data.

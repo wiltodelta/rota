@@ -96,12 +96,19 @@
   session stays marked as needing your reply until you send an answer or
   explicitly decline/cancel the request. Multiple selections, private input,
   plan approvals and standard MCP forms/URL requests use the same flow.
-  Free-text answers use the session composer, labeled with the current question.
-  Numbered options highlight your selection; Something else moves focus to the composer.
+  Free-text answers use fields inside the question card. The message composer
+  stays available for separate messages and keeps its own draft and attachments.
+  While a blocking question waits, you can write a message but sending waits for
+  your answer to the form. It is never sent automatically. Async questions allow
+  separate messages while the form remains pending. Show Question returns to a
+  card that has scrolled out of view.
+  Numbered options highlight your selection; Something else focuses the card's answer field.
   Multiple questions appear one at a time, with Back/Next and preserved drafts.
   Ordinary message drafts and attachments are kept separately. Codex's asynchronous
   questions and Antigravity questionnaires remain available after the turn ends
-  and after restarting Rota; answering continues the same session. Antigravity's
+  and after restarting Rota; answering continues the same session. Codex keeps
+  the form available until delivery succeeds. Answered questions stay closed
+  when its session is continued or restored. Antigravity's
   headless CLI skips its native questionnaire, so Rota reads its structured
   call from the native archive and sends the explicit answer as a later user turn.
   Device verification and forms Rota cannot

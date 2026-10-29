@@ -15,6 +15,7 @@ struct SessionView: View {
     @State private var pageRequest = 0
     /// Messages sent from this view that the session has not shown yet.
     @State private var outbox: [Outgoing] = []
+    @State private var questionRevealRequest = 0
     @State private var questionDraft: QuestionDraft?
     @State private var questionDrafts: [String: QuestionDraft] = [:]
 
@@ -53,17 +54,25 @@ struct SessionView: View {
                            sending: outbox.filter { !$0.delivered(in: items) }.map(\.text),
                            structured: transcript.structured, hasEarlier: transcript.hasEarlier,
                            loadingEarlier: loadingEarlier, loadEarlier: loadEarlier,
-                           questionDraft: questionDraft,
+                           questionDraft: questionDraft, questionRevealRequest: questionRevealRequest,
                            submitAnswer: { try submitAnswer($0, questionID: questionID) })
-            if let questionDraft {
-                if questionDraft.composerField != nil {
-                    ChatComposer(record: current, questionDraft: questionDraft,
-                                 submitAnswer: { try submitAnswer($0, questionID: questionID) }, sent: { _ in })
+            if questionDraft != nil {
+                HStack {
+                    Text("Needs your reply").interfaceFont(.callout).foregroundStyle(Color.secondaryText)
+                    Spacer(minLength: metrics.points(8))
+                    Button { questionRevealRequest += 1 } label: {
+                        Text("Show Question").interfaceFont(.callout)
+                    }
+                    .controlSize(.small)
+                    .accessibilityIdentifier("showQuestion")
                 }
-            } else {
-                ChatComposer(record: current) { text in
-                    outbox.append(Outgoing(text: text, seen: Outgoing.count(text, in: items)))
-                }
+                .padding(.horizontal, metrics.points(24))
+                .padding(.vertical, metrics.points(6))
+                .frame(maxWidth: metrics.points(760))
+                .frame(maxWidth: .infinity)
+            }
+            ChatComposer(record: current) { text in
+                outbox.append(Outgoing(text: text, seen: Outgoing.count(text, in: items)))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -23,6 +23,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     private var latestRestoredTurn: [String: Any]?
     private var nativeActive = false
     private var nativeStateKnown: Bool
+    private var asyncQuestions: CodexAsyncQuestions
 
     init(spec: LaunchSpec, journal: RunJournal, peer: JSONRPCPeer? = nil) {
         self.spec = spec
@@ -30,6 +31,9 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         threadID = spec.resume
         self.peer = peer
         nativeStateKnown = spec.resume == nil
+        asyncQuestions = CodexAsyncQuestions()
+        // A prompt answering an async question continues the thread whose history still holds it open.
+        if spec.resume != nil, !spec.adopt { asyncQuestions.sending(spec.prompt) }
     }
 
     static func start(_ spec: LaunchSpec, journal: RunJournal) -> CodexDaemonRun {
@@ -45,6 +49,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
     func send(_ message: String) {
         queue.async {
             guard !self.journal.isFinished else { return self.journal.undelivered(message) }
+            self.asyncQuestions.sending(message)
             self.pendingMessages.append(message)
             self.deliverPendingMessages()
         }
@@ -60,6 +65,9 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
                                        "input": HarnessInput.blocks(message, for: .codexDaemon)]) { result in
                 if case .failure(let error) = result {
                     self.journal.line("[rota: message not delivered: \(error.message)]")
+                    if let question = self.asyncQuestions.undelivered(message) { self.ask(question) }
+                } else if let id = self.asyncQuestions.delivered(message) {
+                    self.journal.resolveQuestion(id)
                 }
             }
         }
@@ -71,7 +79,11 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
             guard !self.journal.isFinished else { return }
             guard case .success(let value) = boxed.value,
                   let turn = (value as? [String: Any])?["turn"] as? [String: Any],
-                  let id = turn["id"] as? String else { return self.fail(boxed.value, "turn/start") }
+                  let id = turn["id"] as? String else {
+                if let question = self.asyncQuestions.undelivered(self.spec.prompt) { self.ask(question) }
+                return self.fail(boxed.value, "turn/start")
+            }
+            if let id = self.asyncQuestions.delivered(self.spec.prompt) { self.journal.resolveQuestion(id) }
             self.turnID = id
             self.turnStarting = false
             if let reason = self.stopReason { self.interrupt(as: reason) } else { self.deliverPendingMessages() }
@@ -118,7 +130,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         }
     }
 
-    private func initialized(_ result: Result<Any, JSONRPCError>) {
+    func initialized(_ result: Result<Any, JSONRPCError>) {
         guard !journal.isFinished else { return }
         guard case .success(let value) = result else { return fail(result, "initialize") }
         journal.provenance(server: (value as? [String: Any])?["userAgent"] as? String)
@@ -133,6 +145,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         // A continued session loads its thread back onto the daemon and takes the next turn.
         let method = spec.resume == nil ? "thread/start" : "thread/resume"
         loadingHistory = spec.resume != nil
+        if loadingHistory { asyncQuestions.hold() }
         if let thread = spec.resume { params["threadId"] = thread }
         peer?.request(method, params) { [weak self] result in
             self?.threadStarted(result)
@@ -205,18 +218,14 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         if active { turnID = latestRestoredTurn?["id"] as? String }
         let deferred = deferredEvents
         deferredEvents = []
-        for (method, params) in deferred { handle(method, params) }
+        // A deferred completion must not finish the journal before open questions are published.
+        for (method, params) in deferred where method != "turn/completed" { handle(method, params) }
         guard !journal.isFinished else { return }
-        if active, let turnID {
-            if let reason = stopReason { return interrupt(as: reason) }
-            if !spec.adopt {
-                peer?.request("turn/steer", ["threadId": id, "expectedTurnId": turnID,
-                    "input": HarnessInput.blocks(spec.prompt, for: .codexDaemon)]) { [weak self] result in
-                    if case .failure = result { self?.fail(result, "turn/steer") }
-                }
-            }
-            return deliverPendingMessages()
-        }
+        asyncQuestions.closed.forEach(journal.resolveQuestion)
+        asyncQuestions.restored().forEach(ask)
+        for (method, params) in deferred where method == "turn/completed" { handle(method, params) }
+        guard !journal.isFinished else { return }
+        if active, let turnID { return continueActiveTurn(id, turnID: turnID) }
         guard !nativeActive else {
             journal.line("[error] Codex reports active work without a recoverable turn. No second turn was started.")
             finish(.interrupted)
@@ -228,6 +237,23 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         } else {
             beginTurn(id)
         }
+    }
+
+    private func continueActiveTurn(_ id: String, turnID: String) {
+        if let reason = stopReason { return interrupt(as: reason) }
+        if !spec.adopt {
+            peer?.request("turn/steer", ["threadId": id, "expectedTurnId": turnID,
+                "input": HarnessInput.blocks(spec.prompt, for: .codexDaemon)]) { [weak self] result in
+                guard let self else { return }
+                if case .failure = result {
+                    if let question = self.asyncQuestions.undelivered(self.spec.prompt) { self.ask(question) }
+                    self.fail(result, "turn/steer")
+                } else if let id = self.asyncQuestions.delivered(self.spec.prompt) {
+                    self.journal.resolveQuestion(id)
+                }
+            }
+        }
+        deliverPendingMessages()
     }
 
     private func interrupt(as reason: RunOutcome) {
@@ -269,6 +295,7 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         for message in pendingMessages {
             journal.record(.user, message)
             journal.line("[rota: message not delivered: the turn did not become ready]")
+            if let question = asyncQuestions.undelivered(message) { ask(question) }
         }
         pendingMessages = []
         journal.finish(outcome)
@@ -370,9 +397,12 @@ extension CodexDaemonRun {
         }
         completedReasoning(item, nativeID: nativeID)
         completedOutput(item, nativeID: nativeID)
-        if let question = QuestionRequest.codexMessage(item) {
-            journal.ask(question, recordText: false) { _ in }
-        }
+        asyncQuestions.noteAnswers(in: item).forEach(journal.resolveQuestion)
+        if let question = QuestionRequest.codexMessage(item), let open = asyncQuestions.offer(question) { ask(open) }
+    }
+
+    private func ask(_ question: AgentQuestion) {
+        journal.ask(question, recordText: false) { _ in }
     }
 
     private func completedReasoning(_ item: [String: Any], nativeID: String) {

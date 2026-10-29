@@ -194,15 +194,27 @@ final class LiveQuestionTests: XCTestCase {
         XCTAssertEqual(question.fields.first?.options.map(\.label), ["Blue", "Green"])
         let note = "note-" + UUID().uuidString.prefix(8)
         spec.resume = try XCTUnwrap(session)
-        spec.prompt = "Answer to your question: Which color? Green. Any notes? " + note
+        spec.prompt = QuestionReceipt.message(question, answer: .init(values: ["0": ["Green"], "1": [note]]))
+        nonisolated(unsafe) var reasked: [String] = []
         let secondFinished = expectation(description: "answer consumed in continued session")
         let second = try ProcessLauncher().launch(spec, events: RunEvents(
             session: { _ in }, finished: { outcome in
                 XCTAssertEqual(outcome, .succeeded)
                 secondFinished.fulfill()
-            }))
+            }, question: { question, _ in reasked.append(question.id) }))
         defer { second.stop() }
         wait(for: [secondFinished], timeout: 180)
+        // The next resume replays the question and its answer from the thread's history.
+        spec.prompt = "Reply with OK only."
+        let thirdFinished = expectation(description: "history with the answer restored")
+        let third = try ProcessLauncher().launch(spec, events: RunEvents(
+            session: { _ in }, finished: { outcome in
+                XCTAssertEqual(outcome, .succeeded)
+                thirdFinished.fulfill()
+            }, question: { question, _ in reasked.append(question.id) }))
+        defer { third.stop() }
+        wait(for: [thirdFinished], timeout: 180)
+        XCTAssertEqual(reasked, [], "an answered async question must not come back on resume")
         let text = try String(contentsOf: log, encoding: .utf8)
         // A user log entry cannot satisfy the assertions against the actual assistant transcript.
         let transcript = Transcript.parse(text, shell: false)

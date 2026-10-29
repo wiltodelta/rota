@@ -4,13 +4,12 @@ import XCTest
 
 @MainActor
 final class QuestionDraftTests: XCTestCase {
-    func testOtherUsesSharedInputAndKeepsItsDraftWhenChangingOptions() {
+    func testOtherKeepsItsDraftWhenChangingOptions() {
         let field = QuestionField(id: "color", title: "Color", kind: .choice,
                                   options: [.init(id: "blue", label: "Blue")], required: false)
         let draft = QuestionDraft(question: .init(title: "Choose", fields: [field]))
-        XCTAssertNil(draft.composerField)
         draft.selectOther(true, field: field)
-        XCTAssertEqual(draft.composerField?.id, field.id)
+        XCTAssertEqual(draft.currentField?.id, field.id)
         XCTAssertFalse(draft.canSubmit("accept"))
         XCTAssertFalse(draft.canAdvance)
         draft.other[field.id] = "Green"
@@ -18,7 +17,6 @@ final class QuestionDraftTests: XCTestCase {
         XCTAssertTrue(draft.canSubmit("accept"))
         draft.selectOther(false, field: field)
         draft.values[field.id] = ["blue"]
-        XCTAssertNil(draft.composerField)
         XCTAssertEqual(draft.answer.values[field.id], ["blue"])
         draft.selectOther(true, field: field)
         XCTAssertEqual(draft.other[field.id], "Green")
@@ -30,14 +28,13 @@ final class QuestionDraftTests: XCTestCase {
                                     options: [.init(id: "one", label: "One")])
         let note = QuestionField(id: "note", title: "Note", required: false)
         let draft = QuestionDraft(question: .init(title: "Choose", fields: [choices, note]))
-        XCTAssertNil(draft.composerField)
         draft.values[choices.id] = ["one"]
         draft.selectOther(true, field: choices)
         draft.other[choices.id] = "Two"
         draft.other[note.id] = "Keep this note"
         XCTAssertEqual(draft.answer.values[choices.id], ["one", "Two"])
         draft.edit(note)
-        XCTAssertEqual(draft.composerField?.id, note.id)
+        XCTAssertEqual(draft.currentField?.id, note.id)
         XCTAssertEqual(draft.answer.values[note.id], ["Keep this note"])
         draft.selectOther(false, field: choices)
         XCTAssertEqual(draft.answer.values[choices.id], ["one"])
@@ -57,13 +54,11 @@ final class QuestionDraftTests: XCTestCase {
         draft.moveForward()
         XCTAssertEqual(draft.currentField?.id, note.id)
         XCTAssertTrue(draft.isLastField)
-        XCTAssertEqual(draft.composerField?.id, note.id)
         XCTAssertFalse(draft.canAdvance)
         XCTAssertFalse(draft.canSubmit("accept"))
         draft.other[note.id] = "Additional context"
         draft.moveBack()
         XCTAssertEqual(draft.currentField?.id, first.id)
-        XCTAssertNil(draft.composerField)
         XCTAssertEqual(draft.answer.values[note.id], ["Additional context"])
         draft.moveForward()
         XCTAssertTrue(draft.canSubmit("accept"))
@@ -80,14 +75,13 @@ final class QuestionDraftTests: XCTestCase {
         oldEditor.wrappedValue = "Late first answer"
         XCTAssertEqual(draft.other[first.id], "Late first answer")
         XCTAssertEqual(draft.other[second.id], "Second answer")
-        XCTAssertEqual(draft.composerField?.id, second.id)
+        XCTAssertEqual(draft.currentField?.id, second.id)
     }
 
     func testTypedFieldsRemainSpecializedAndSubmissionPreservesFailures() {
         let secret = QuestionField(id: "token", title: "Token", kind: .secret)
         let number = QuestionField(id: "count", title: "Count", kind: .integer)
         let draft = QuestionDraft(question: .init(title: "Credentials", fields: [secret, number]))
-        XCTAssertNil(draft.composerField)
         draft.other[secret.id] = "synthetic-secret"
         draft.other[number.id] = "3"
         var submitted: QuestionAnswer?

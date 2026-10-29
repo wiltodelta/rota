@@ -62,6 +62,7 @@ extension Scheduler {
         reply: @escaping @Sendable (QuestionAnswer) -> Void
     ) {
         guard var record = current(runID), isActive(record) else { return reply(.init(action: "cancel")) }
+        questionDeliveries[runID]?.remove(question.id)
         guard record.questions?.contains(where: { $0.id == question.id }) != true else { return }
         if question.replyViaMessage != true { questionReplies[runID, default: [:]][question.id] = reply }
         record.questions = (record.questions ?? []) + [question]
@@ -91,11 +92,21 @@ extension Scheduler {
         guard canMessage(record), questionReplies[record.id]?.isEmpty != false else {
             throw ControlError("Answer the blocking question or wait for this session to become available first.")
         }
+        guard questionDeliveries[record.id]?.contains(question.id) != true else {
+            throw ControlError("This answer is still being delivered.")
+        }
         let text = QuestionReceipt.message(question, answer: answer)
         var next = record
-        next.questions?.removeAll { $0.id == question.id }
-        next.attention = next.nextQuestion?.title
+        // Codex acknowledges delivery through questionResolved. Retain the form durably
+        // until then, including failures before the runner has loaded any history.
+        if record.harness == .codex {
+            questionDeliveries[record.id, default: []].insert(question.id)
+        } else {
+            next.questions?.removeAll { $0.id == question.id }
+            next.attention = next.nextQuestion?.title
+        }
         if !deliverMessage(text, to: next) {
+            questionDeliveries[record.id]?.remove(question.id)
             // A failed launch must leave the question available for retry.
             var failed = current(record.id) ?? record
             failed.questions = record.questions
@@ -106,6 +117,7 @@ extension Scheduler {
     }
 
     func resolveQuestion(_ id: String, runID: UUID) {
+        questionDeliveries[runID]?.remove(id)
         questionReplies[runID]?[id] = nil
         guard var record = current(runID), record.questions?.contains(where: { $0.id == id }) == true else { return }
         record.questions?.removeAll { $0.id == id }
@@ -115,6 +127,7 @@ extension Scheduler {
     }
 
     func cancelQuestions(on record: RunRecord) {
+        questionDeliveries[record.id] = nil
         let replies = questionReplies.removeValue(forKey: record.id) ?? [:]
         if !replies.isEmpty, var current = current(record.id) {
             current.questions = current.questions?.filter { $0.replyViaMessage == true }

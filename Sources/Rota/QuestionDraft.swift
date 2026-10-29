@@ -3,7 +3,7 @@ import Observation
 import RotaCore
 import SwiftUI
 
-/// Form values and the field currently using the session's shared text editor.
+/// Form values and navigation, independent of the ordinary message editor.
 /// Ordinary session drafts and attachments stay in AppModel, outside this form.
 @MainActor
 @Observable
@@ -18,21 +18,11 @@ final class QuestionDraft {
 
     init(question: AgentQuestion) { self.question = question }
 
-    func usesComposer(_ field: QuestionField) -> Bool {
-        [.text, .choice, .multiple].contains(field.kind)
-    }
-
     var currentField: QuestionField? {
         question.fields.indices.contains(fieldIndex) ? question.fields[fieldIndex] : nil
     }
 
     var isLastField: Bool { fieldIndex >= question.fields.count - 1 }
-
-    var composerField: QuestionField? {
-        guard let field = currentField, usesComposer(field),
-              field.options.isEmpty || customFields.contains(field.id) else { return nil }
-        return field
-    }
 
     var canAdvance: Bool {
         guard let field = currentField, let action = question.actions.first else { return true }

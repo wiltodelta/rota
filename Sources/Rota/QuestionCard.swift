@@ -67,14 +67,15 @@ struct QuestionCard: View {
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("questionCard")
+        .onChange(of: draft.focusRequest) { focusedField = draft.currentField?.id }
     }
 
     @ViewBuilder private var forwardButtons: some View {
-        if draft.isLastField { answerButtons } else if draft.composerField == nil { nextButton }
+        if draft.isLastField { answerButtons } else { nextButton }
     }
 
     @ViewBuilder private var compactForwardButtons: some View {
-        if draft.isLastField { compactAnswerButtons } else if draft.composerField == nil { nextButton }
+        if draft.isLastField { compactAnswerButtons } else { nextButton }
     }
 
     private var nextButton: some View {
@@ -97,7 +98,7 @@ struct QuestionCard: View {
     }
 
     @ViewBuilder private var answerButtons: some View {
-        ForEach(composerSends ? [] : question.actions) { action in
+        ForEach(question.actions) { action in
             if question.actions.count == 1 {
                 actionButton(action).buttonStyle(.borderedProminent)
             } else {
@@ -134,8 +135,6 @@ struct QuestionCard: View {
         .accessibilityIdentifier("answerQuestion-" + action.id)
     }
 
-    private var composerSends: Bool { draft.isLastField && draft.composerField != nil && question.actions.count == 1 }
-
     private func send(_ action: String) { draft.send(action, submit: submit) }
 
     @ViewBuilder
@@ -161,12 +160,7 @@ struct QuestionCard: View {
                     .accessibilityIdentifier("questionOther-" + field.id)
                 }
                 if field.options.isEmpty || draft.customFields.contains(field.id) {
-                    if draft.usesComposer(field) {
-                        Text("Type your answer below.")
-                            .interfaceFont(.callout).foregroundStyle(Color.secondaryText)
-                    } else {
-                        answerField(field)
-                    }
+                    answerField(field)
                 }
             }
         }
@@ -176,6 +170,9 @@ struct QuestionCard: View {
         Group {
             if field.kind == .secret {
                 SecureField("Your answer", text: draft.text(for: field))
+            } else if [.text, .choice, .multiple].contains(field.kind) {
+                TextField("Your answer", text: draft.text(for: field), axis: .vertical)
+                    .lineLimit(2...6)
             } else {
                 TextField("Your answer", text: draft.text(for: field))
             }
@@ -189,7 +186,7 @@ struct QuestionCard: View {
 
     private func selectOther(_ selected: Bool, field: QuestionField) {
         draft.selectOther(selected, field: field)
-        if selected, !draft.usesComposer(field) { focusedField = field.id }
+        if selected { focusedField = field.id }
     }
 
     private func choiceRows(_ options: [QuestionOption], field: QuestionField) -> some View {

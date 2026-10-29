@@ -176,7 +176,8 @@ case "text-count":
     guard arguments.count == 2 else { fail("text-count <value>") }
     var count = 0
     _ = find({ element in
-        if (attribute(element, kAXRoleAttribute) as String?) == "AXStaticText",
+        let role: String = attribute(element, kAXRoleAttribute) ?? ""
+        if ["AXStaticText", "AXTextArea"].contains(role),
            (attribute(element, kAXValueAttribute) as String?) == arguments[1] { count += 1 }
         return false
     })

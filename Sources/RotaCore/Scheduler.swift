@@ -76,6 +76,7 @@ public final class Scheduler {
     @ObservationIgnored var cachedHistory: [String: [RunRecord]] = [:]
     @ObservationIgnored var cachedSessions: [RunRecord]?
     @ObservationIgnored let launcher: RoutineLaunching
+    @ObservationIgnored var questionDeliveries: [UUID: Set<String>] = [:]
     @ObservationIgnored var questionReplies: [UUID: [String: @Sendable (QuestionAnswer) -> Void]] = [:]
     @ObservationIgnored var hookAnswers: [String: QuestionAnswer] = [:]
     @ObservationIgnored var controls: [String: RunControl] = [:]
@@ -247,9 +248,9 @@ public final class Scheduler {
     @discardableResult
     public func message(_ message: String, to record: RunRecord) -> Bool {
         guard var record = current(record.id, routineID: record.routineID) else { return false }
-        guard record.questions?.isEmpty != false else { return false }
+        guard !record.hasBlockingQuestion else { return false }
         // The delivery path saves this copy, including the cleared attention mark.
-        record.attention = nil
+        record.attention = record.nextQuestion?.title
         return deliverMessage(message, to: record)
     }
 

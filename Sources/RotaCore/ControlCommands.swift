@@ -246,8 +246,8 @@ extension Scheduler {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !paths.isEmpty else {
             throw ControlError("Give a message or attach a file.")
         }
-        guard record.questions?.isEmpty != false else {
-            throw ControlError("Answer the pending question before sending a message.")
+        guard !record.hasBlockingQuestion else {
+            throw ControlError("Answer the blocking question before sending a message.")
         }
         guard paths.isEmpty else { throw ControlError("Attachments require the asynchronous control request handler.") }
         guard message(text, to: record) else {
@@ -285,7 +285,7 @@ extension Scheduler {
         json["needsReconciliation"] = record.needsReconciliation == true
         if let mode = record.launchMode { json["launchMode"] = mode.name }
         json["unread"] = record.isUnread
-        json["canMessage"] = canMessage(record) && record.questions?.isEmpty != false
+        json["canMessage"] = canMessage(record) && !record.hasBlockingQuestion
         json["canDelete"] = canDelete(record)
         json["questions"] = try? questionList(record)
         if let attention = record.attention { json["needsReply"] = attention }

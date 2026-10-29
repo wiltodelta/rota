@@ -20,8 +20,8 @@ extension Scheduler {
         let paths = try value(params, "attachments", as: [String].self)
         let text = try value(params, "text", as: String.self)
         guard !paths.isEmpty else { return try control(ControlMethod.sessionsMessage.rawValue, params).get() }
-        guard canMessage(record), record.questions?.isEmpty != false else {
-            throw ControlError("That session cannot take a message now. Answer any pending question first.")
+        guard canMessage(record), !record.hasBlockingQuestion else {
+            throw ControlError("That session cannot take a message now. Answer the blocking question first.")
         }
         guard paths.allSatisfy({ $0.hasPrefix("/") }) else {
             throw ControlError("Attachments need absolute file paths.")

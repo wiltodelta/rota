@@ -11,16 +11,10 @@ struct ChatComposer: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
-    var questionDraft: QuestionDraft?
-    var submitAnswer: ((QuestionAnswer) throws -> Void)?
     /// Called with each message sent, so the chat can show it until the session does.
     let sent: (String) -> Void
     private var input: Binding<String> {
-        if let draft = questionDraft {
-            guard let field = draft.composerField else { return .constant("") }
-            return draft.text(for: field)
-        }
-        return Binding(get: { model.sessionDrafts[record.id] ?? "" }, set: { value in
+        Binding(get: { model.sessionDrafts[record.id] ?? "" }, set: { value in
             model.sessionDrafts[record.id] = value.isEmpty ? nil : value
         })
     }
@@ -39,22 +33,19 @@ struct ChatComposer: View {
     @State private var dropTargeted = false
 
     private var attachments: [ChatAttachment] {
-        questionDraft == nil ? model.sessionAttachments[record.id] ?? [] : []
+        model.sessionAttachments[record.id] ?? []
     }
 
+    private var hasQuestion: Bool { record.questions?.isEmpty == false }
     private var running: Bool { model.scheduler.isActive(record) }
     private var canSend: Bool {
-        if let draft = questionDraft {
-            return draft.isLastField
-                ? draft.question.actions.count == 1 && draft.canSubmit(draft.question.actions[0].id)
-                : draft.canAdvance
-        }
-        return !staging && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty)
+        model.scheduler.canMessage(record) && !record.hasBlockingQuestion && !staging
+            && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty)
     }
 
     var body: some View {
         Group {
-            if questionDraft != nil || model.scheduler.canMessage(record) {
+            if hasQuestion || model.scheduler.canMessage(record) {
                 box
             } else if let note {
                 Text(note)
@@ -65,12 +56,11 @@ struct ChatComposer: View {
         }
         // The chat's column, so the box lines up with the messages above it.
         .padding(.horizontal, metrics.points(24))
-        .padding(.top, metrics.points(6))
-        .padding(.bottom, metrics.points(16))
+        .padding(.top, metrics.points(hasQuestion ? 2 : 6))
+        .padding(.bottom, metrics.points(hasQuestion ? 8 : 16))
         .frame(maxWidth: metrics.points(760))
         .frame(maxWidth: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
-        .onChange(of: questionDraft?.focusRequest) { focused = true }
         .task(id: record.id) {
             focused = true
             resolvedConfiguration = nil
@@ -97,30 +87,20 @@ struct ChatComposer: View {
         }
     }
 
-    private var sendLabel: String {
-        guard let draft = questionDraft else { return "Send" }
-        return draft.isLastField ? draft.question.actions.first?.label ?? "Send" : "Next"
-    }
-
     private var box: some View {
-        VStack(alignment: .leading, spacing: metrics.points(10)) {
-            if let field = questionDraft?.composerField {
-                Text("Answering: " + field.title)
-                    .interfaceFont(.callout).fontWeight(.semibold)
-                    .accessibilityIdentifier("questionComposerContext")
-            }
+        VStack(alignment: .leading, spacing: metrics.points(hasQuestion ? 6 : 10)) {
             if !attachments.isEmpty {
                 AttachmentChips(attachments: attachments, remove: removeAttachment)
             }
             TextField(placeholder, text: input, axis: .vertical)
                 .font(model.chatText.body)
                 .lineSpacing(model.chatText.bodyLineSpacing)
-                .lineLimit(2...8)
+                .lineLimit(hasQuestion ? 1...3 : 2...8)
                 .textFieldStyle(.plain)
                 .focused($focused)
                 .onSubmit(send)
                 .help(inputHelp)
-                .accessibilityLabel(questionDraft?.composerField.map { "Answer: " + $0.title } ?? "Message")
+                .accessibilityLabel("Message")
                 .accessibilityIdentifier("composer")
             HStack(spacing: metrics.points(8)) {
                 HStack(spacing: metrics.points(6)) {
@@ -141,9 +121,7 @@ struct ChatComposer: View {
                 .accessibilityIdentifier("composerModel")
                 .help("The model and reasoning effort for this session.")
                 Spacer(minLength: 8)
-                if questionDraft != nil {
-                    EmptyView()
-                } else if staging {
+                if staging {
                     ProgressView().controlSize(.small).frame(width: metrics.points(28), height: metrics.points(28))
                 } else {
                     RoundButton(symbol: "paperclip", filled: false, fill: .accentColor,
@@ -155,17 +133,14 @@ struct ChatComposer: View {
                 }
                 // As super.engineering's: while the session works, its clock, and Stop in Send's
                 // place until there is something to send.
-                if questionDraft == nil, running, let since = model.scheduler.runStartedAt(record) {
+                if running, let since = model.scheduler.runStartedAt(record) {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         Text(Self.clock(context.date.timeIntervalSince(since)))
                             .interfaceFont(.callout).monospacedDigit()
                             .foregroundStyle(Color.secondaryText)
                     }
                 }
-                if let draft = questionDraft, draft.isLastField, draft.question.actions.count != 1 {
-                    Text("Choose an action above")
-                        .interfaceFont(.caption).foregroundStyle(Color.secondaryText)
-                } else if questionDraft == nil && running && !canSend {
+                if running && !canSend {
                     StopRingButton { model.scheduler.stop(record.routineID) }
                         .help("Stop the session")
                         .accessibilityLabel("Stop")
@@ -176,9 +151,17 @@ struct ChatComposer: View {
                         .disabled(!canSend)
                         .keyboardShortcut(.return, modifiers: .command)
                         .help("Send (Return)")
-                        .accessibilityLabel(sendLabel)
+                        .accessibilityLabel("Send")
                         .accessibilityIdentifier("send")
                 }
+            }
+            if record.hasBlockingQuestion {
+                Text("Answer the question to send. Your draft is kept.")
+                    .interfaceFont(.caption).foregroundStyle(Color.secondaryText)
+                    .accessibilityIdentifier("composerBlockingNote")
+            }
+            if !model.scheduler.canMessage(record), !record.hasBlockingQuestion, let note {
+                Text(note).interfaceFont(.caption).foregroundStyle(Color.secondaryText)
             }
             if let attachmentError {
                 Text(attachmentError).interfaceFont(.caption).foregroundStyle(Color.errorText)
@@ -186,8 +169,8 @@ struct ChatComposer: View {
             }
         }
         .padding(.horizontal, metrics.points(16))
-        .padding(.top, metrics.points(14))
-        .padding(.bottom, metrics.points(10))
+        .padding(.top, metrics.points(hasQuestion ? 10 : 14))
+        .padding(.bottom, metrics.points(hasQuestion ? 8 : 10))
         .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: metrics.points(20)))
         .overlay {
             RoundedRectangle(cornerRadius: metrics.points(20))
@@ -197,10 +180,10 @@ struct ChatComposer: View {
         .contentShape(RoundedRectangle(cornerRadius: metrics.points(20)))
         .onTapGesture { focused = true }
         .dropDestination(for: URL.self) { urls, _ in
-            guard questionDraft == nil, !urls.isEmpty, !staging else { return false }
+            guard !urls.isEmpty, !staging else { return false }
             addAttachments(urls)
             return true
-        } isTargeted: { dropTargeted = questionDraft == nil && $0 }
+        } isTargeted: { dropTargeted = $0 }
     }
 
     private func chooseAttachments() {
@@ -257,19 +240,15 @@ struct ChatComposer: View {
     }
 
     private var placeholder: String {
-        questionDraft != nil ? "Your answer" : running ? "Message the running session" : "Continue this session"
+        running ? "Message the running session" : "Continue this session"
     }
 
     private var inputHelp: String {
-        if let draft = questionDraft, draft.isLastField, draft.question.actions.count != 1 {
-            return "Choose an action in the question form to send your answer."
-        }
         return "\(effect) Return sends, Option-Return starts a new line."
     }
 
     /// What sending does here, which differs by harness and state.
     private var effect: String {
-        if questionDraft != nil { return "Sends the question form to the agent." }
         guard running else { return "Sends a new turn in this session." }
         return [.grok, .antigravity].contains(record.harness)
             ? "Answered after the current turn." : "Joins the current turn."
@@ -294,10 +273,6 @@ struct ChatComposer: View {
 
     private func send() {
         guard canSend else { return }
-        if let draft = questionDraft, let submitAnswer, let action = draft.question.actions.first {
-            if draft.isLastField { draft.send(action.id, submit: submitAnswer) } else { draft.moveForward() }
-            return
-        }
         do {
             let message = try ChatMessage(text: text.trimmingCharacters(in: .whitespacesAndNewlines),
                                           attachments: attachments).encoded()

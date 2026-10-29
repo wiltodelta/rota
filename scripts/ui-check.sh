@@ -53,6 +53,16 @@ wait_value() {
     return 1
 }
 
+wait_text() {
+    local attempt count
+    for ((attempt = 0; attempt < 150; attempt++)); do
+        count="$("$DRIVER" text-count "$1")" || return 1
+        [[ "$count" -gt 0 ]] && return 0
+        sleep 0.2
+    done
+    fail "text did not appear: $1"
+}
+
 wait_exists() {
     local attempt
     for ((attempt = 0; attempt < 150; attempt++)); do
@@ -269,6 +279,7 @@ PYTHON
     launch "$appearance"
     check "$DRIVER" exists questionCard
     if [[ "$kind" == verification ]]; then
+        "$DRIVER" reveal cancelQuestion
         check "$DRIVER" visible cancelQuestion
         check "$DRIVER" visible declineQuestion
         if "$DRIVER" exists answerQuestion-accept; then fail "unsupported request must not offer approval"; fi
@@ -280,9 +291,17 @@ PYTHON
         quit_rota
         return
     fi
+    "$DRIVER" press showQuestion
     check "$DRIVER" visible questionOption-0-Blue
+    check "$DRIVER" visible composer
+    "$DRIVER" set composer "An unrelated draft"
     capture "UI check $appearance" "$appearance-async-question-finished" 520
+    "$DRIVER" press questionOther-0
+    wait_exists questionField-0
+    "$DRIVER" set questionField-0 "A custom answer"
+    wait_value composer "An unrelated draft" || fail "custom answers keep the ordinary editor independent"
     "$DRIVER" press questionOption-0-Blue
+    "$DRIVER" reveal nextQuestion
     "$DRIVER" press nextQuestion
     if [[ "${ROTA_UI_QUESTION_HARNESS:-codex}" == antigravity ]]; then
         check "$DRIVER" visible questionOption-1-Pear
@@ -291,8 +310,25 @@ PYTHON
         capture "UI check $appearance" "$appearance-async-question-multiple" 520
         "$DRIVER" press nextQuestion
     fi
-    check "$DRIVER" exists questionComposerContext
+    local field=1
+    [[ "${ROTA_UI_QUESTION_HARNESS:-codex}" == antigravity ]] && field=2
+    check "$DRIVER" exists "questionField-$field"
+    "$DRIVER" set "questionField-$field" "A separate answer"
+    wait_value composer "An unrelated draft" || fail "ordinary draft stays separate from the answer"
+    "$DRIVER" scroll-wheel questionCard -3000 pixel
+    check "$DRIVER" visible composer
+    check "$DRIVER" visible showQuestion
+    "$DRIVER" press showQuestion
+    check wait_visible "questionField-$field"
+    "$DRIVER" reveal "answerQuestion-accept"
+    check wait_visible "answerQuestion-accept"
     capture "UI check $appearance" "$appearance-async-question-text" 520
+    for _ in 1 2 3; do "$DRIVER" key command-plus; done
+    "$DRIVER" press showQuestion
+    check "$DRIVER" visible composer
+    "$DRIVER" reveal "answerQuestion-accept"
+    capture "UI check $appearance" "$appearance-async-question-text-zoom" 520
+    "$DRIVER" key command-zero
     quit_rota
 
 }
@@ -330,28 +366,56 @@ PYTHON
 
 check_mixed_questions() {
     local appearance="$1" routine="$2" session stopped=0
+    cp scripts/fixtures/question-stream.py "$WORK/question-stream"
+    chmod 700 "$WORK/question-stream"
+    defaults write "$DOMAIN" executables -dict claude "$WORK/question-stream"
+    defaults write "$DOMAIN" claudeInteractive -bool false
     launch "$appearance"
-    "$APP/Contents/Helpers/rota" update "$routine" --prompt "sleep 60" >/dev/null
+    "$APP/Contents/Helpers/rota" update "$routine" --harness claude --prompt "Synthetic initial message" >/dev/null
     "$DRIVER" menu "Run Now"
     sleep 1
     session="$("$APP/Contents/Helpers/rota" sessions "$routine" --json \
         | python3 -c 'import json,sys; print(next(r["session"] for r in json.load(sys.stdin) if r["running"]))')"
     inject_question "$session" async-draft
-    wait_exists questionComposerContext
-    "$DRIVER" set composer "Keep this draft"
-    wait_value composer "Keep this draft" || fail "the async draft was entered"
+    wait_exists questionField-note
+    "$DRIVER" set questionField-note "Keep this answer"
+    "$DRIVER" set composer "Separate message"
+    "$DRIVER" press send
+    wait_text "Received: Separate message"
+    wait_value composer "" || fail "ordinary send clears only the ordinary editor"
+    "$DRIVER" set composer "Keep this ordinary draft"
+    wait_value questionField-note "Keep this answer" || fail "the answer was entered separately"
+    wait_value composer "Keep this ordinary draft" || fail "the ordinary draft was entered"
     inject_question "$session" blocking
     wait_value questionTitle "Blocking approval" || fail "blocking request takes priority"
+    check "$DRIVER" visible composer
+    check "$DRIVER" exists composerBlockingNote
+    "$DRIVER" focus composer
+    "$DRIVER" key return
+    wait_value composer "Keep this ordinary draft" || fail "blocking input keeps the ordinary draft"
+    "$DRIVER" reveal cancelQuestion
     capture "UI check $appearance" "$appearance-mixed-blocking-question" 520
     "$DRIVER" press cancelQuestion
     wait_value questionTitle "Async note" || fail "async question returns after the RPC answer"
-    wait_value composer "Keep this draft" || fail "the async draft survives interruption"
+    wait_value questionField-note "Keep this answer" || fail "the answer draft survives interruption"
+    wait_value composer "Keep this ordinary draft" || fail "the ordinary draft survives interruption"
+    [[ "$("$DRIVER" text-count 'Received: Keep this ordinary draft')" == 0 ]] \
+        || fail "unblocking must not automatically send the ordinary draft"
     capture "UI check $appearance" "$appearance-mixed-restored-draft" 520
     inject_question "$session" terminal-dialog
     wait_value questionTitle "Claude needs your permission" || fail "a terminal dialog reaches the chat"
     capture "UI check $appearance" "$appearance-terminal-dialog-question" 520
     "$DRIVER" press cancelQuestion
     wait_value questionTitle "Async note" || fail "async question returns after the dialog is canceled"
+    "$DRIVER" reveal answerQuestion-accept
+    "$DRIVER" press answerQuestion-accept
+    wait_value composer "Keep this ordinary draft" || fail "answering must preserve the ordinary draft"
+    [[ "$("$DRIVER" text-count 'Received: Keep this ordinary draft')" == 0 ]] \
+        || fail "answering must not automatically send the ordinary draft"
+    "$DRIVER" focus composer
+    "$DRIVER" key return
+    wait_text "Received: Keep this ordinary draft"
+    wait_value composer "" || fail "ordinary Return sends only after an explicit send"
     "$APP/Contents/Helpers/rota" stop "$routine" >/dev/null
     for _ in {1..60}; do
         if [[ "$(session_value "$routine" cancelled)" == True* ]]; then stopped=1; break; fi

@@ -16,6 +16,7 @@ struct ChatTranscript: View {
     var loadingEarlier = false
     var loadEarlier: () -> Void = {}
     var questionDraft: QuestionDraft?
+    var questionRevealRequest = 0
     var submitAnswer: ((QuestionAnswer) throws -> Void)?
     @State private var expandedTools: Set<Int> = []
     @State private var following = true
@@ -146,10 +147,15 @@ struct ChatTranscript: View {
             }
             .onChange(of: questionDraft.map { "\($0.question.id):\($0.fieldIndex)" }) { _, step in
                 if step != nil {
-                    following = true
+                    following = false
                     viewport.cancel()
                     proxy.scrollTo(Int.min + 1, anchor: .top)
                 }
+            }
+            .onChange(of: questionRevealRequest) {
+                following = false
+                viewport.cancel()
+                proxy.scrollTo(Int.min + 1, anchor: .top)
             }
             .onChange(of: items) {
                 guard !following else { return }
@@ -174,7 +180,11 @@ struct ChatTranscript: View {
             }
             .onDisappear { viewport.cancel() }
             .onChange(of: items.count + sending.count) { if following { proxy.scrollTo(Int.min, anchor: .bottom) } }
-            .onAppear { proxy.scrollTo(Int.min, anchor: .bottom) }
+            .onAppear {
+                following = questionDraft == nil
+                proxy.scrollTo(questionDraft == nil ? Int.min : Int.min + 1,
+                               anchor: questionDraft == nil ? .bottom : .top)
+            }
             .overlay(alignment: .bottom) {
                 // A pending form occupies this viewport; the floating jump button
                 // would cover its fields at the minimum window height.

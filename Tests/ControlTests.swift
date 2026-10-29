@@ -305,6 +305,30 @@ final class ControlCommandTests: XCTestCase {
         XCTAssertNotNil(call("sessions.answer", params).failure)
     }
 
+    func testAsyncQuestionsAllowSeparateMessagesAndAttachmentsButBlockingQuestionsDoNot() async throws {
+        _ = try create().get()
+        _ = try call("routines.run", ["id": "digest"]).get()
+        launcher.events[0].session("native-thread")
+        var question = AgentQuestion(id: "async", title: "A separate question")
+        question.replyViaMessage = true
+        launcher.events[0].question(question) { _ in XCTFail("An async question has no RPC callback") }
+        let state = try XCTUnwrap(try call("sessions.get", ["id": "digest"]).get() as? [String: Any])
+        XCTAssertEqual(state["canMessage"] as? Bool, true)
+        _ = try call("sessions.message", ["id": "digest", "text": "Separate context"]).get()
+        let source = directory.appendingPathComponent("separate.txt")
+        try "Synthetic attachment".write(to: source, atomically: true, encoding: .utf8)
+        _ = try await scheduler.controlRequest("sessions.message",
+            ["id": "digest", "text": "Separate file", "attachments": [source.path]]).get()
+        XCTAssertEqual(launcher.controls[0].messages.count, 2)
+        XCTAssertEqual(scheduler.active["digest"]?.questions, [question])
+        launcher.events[0].question(.init(id: "blocking", title: "Blocking")) { _ in }
+        let blocked = await scheduler.controlRequest("sessions.message",
+            ["id": "digest", "text": "Keep this draft", "attachments": [source.path]])
+        XCTAssertNotNil(blocked.failure)
+        XCTAssertNotNil(call("sessions.message", ["id": "digest", "text": "Keep this draft"]).failure)
+        XCTAssertEqual(launcher.controls[0].messages.count, 2)
+    }
+
     func testAttachmentsAreCopiedAndSentThroughTheRealMessageSeam() async throws {
         _ = try create().get()
         _ = try call("routines.run", ["id": "digest"]).get()

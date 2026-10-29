@@ -4,6 +4,17 @@ Rota distinguishes suspended protocol requests from asynchronous message questio
 An acknowledgment from the agent runtime is not evidence that Rota displayed a form.
 Provider text alone never becomes a question: the adapter requires structured metadata.
 
+Codex restores async question lifetimes from the entire paginated thread history
+before emitting pending forms or notifications. Its existing
+`Answer to your question <id>:\n<JSON>` receipts must match the original fields
+and contain a valid accept, decline or cancel answer. Ordinary text, malformed
+receipts and events from other threads cannot resolve a question. Duplicate
+items do not reopen answered questions. In-flight receipts temporarily suppress
+replay; the scheduler keeps the form until native delivery acknowledgment, so a
+failed start or steer can be retried without losing the question.
+`CodexQuestionRestoreTests` covers pagination, deferred/live events, repeated
+resume, receipt validation and delivery failure with synthetic peers.
+
 ## Protocol inventory
 
 The inventory follows installed Claude hook/control requests, Codex's experimental
@@ -70,6 +81,12 @@ The app does not retain a dead RPC callback for them. A pending blocking request
 is shown before an earlier async question, because steering an answer cannot
 replace its RPC reply. Switching to that request preserves the earlier form draft. Failed continuation leaves
 them pending, and a second question is not cleared by answering the first.
+Answer fields and submission actions stay in the question card; the ordinary
+composer always keeps its own draft. Async questions allow independent messages
+and attachments. Blocking requests prevent sending those messages, while still
+allowing editing; answering the form never automatically sends the ordinary draft.
+Show Question stays pinned outside the transcript so scrolling cannot hide the
+route back to the pending form.
 Native Terminal replies are unstructured and cannot automatically prove which
 persisted async decision was answered; answer the form in Rota for a recorded decision.
 
