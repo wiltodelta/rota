@@ -32,6 +32,9 @@ struct SessionView: View {
                 .padding(.horizontal, metrics.points(20))
                 .padding(.vertical, metrics.points(12))
             Divider()
+            if !running, current.harness.isAgent, SessionRestart.hitUsageLimit(in: transcript.items) {
+                SessionLimitBanner(record: current)
+            }
             if current.questions?.isEmpty != false, let question = current.attention {
                 AttentionBanner(text: question, canReply: model.scheduler.canMessage(current)) {
                     model.scheduler.dismissAttention(current)
@@ -164,6 +167,9 @@ struct SessionView: View {
     /// Labeled actions first, then the icon-only utilities, with Delete last and apart from Stop.
     @ViewBuilder
     private var actionButtons: some View {
+        if current.harness.isAgent {
+            SessionRestartMenu(record: current)
+        }
         // A session that takes messages has Stop beside its field.
         if running && !model.scheduler.canMessage(record) {
             Button(interfaceTitle: "Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }

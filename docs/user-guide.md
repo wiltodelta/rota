@@ -68,6 +68,14 @@
   Each routine's session list shows the last reply or command output beside
   its date, agent, duration and status. Pending questions take precedence over
   earlier replies, and failures show their recorded reason.
+  **Restart with…** starts a finished agent session in another installed harness,
+  with its original request and recent transcript as context. Rota opens the new
+  session and keeps the original in history. The routine's scheduled harness,
+  model, effort and next run stay unchanged; the new session uses the target
+  harness's default model and effort. Stop an active run before restarting it.
+  When the latest turn reports a usage or rate limit, a banner offers the same
+  choice. Shell commands are excluded. A missing or unreadable source log must
+  be resolved before restarting.
   Delete a finished session and its local logs with the trash button or
   **Delete Session…** in its context menu. Confirmation is required; the
   routine and the agent's own history stay unchanged.

@@ -68,6 +68,10 @@ the agent's response, inspect its tool activity, or ask a follow-up. Attach
 files and keep working in the same conversation, while the agent runs or
 after it finishes.
 
+If a session hits a usage limit, **Restart with…** lets you continue in another
+harness with the conversation as context. The same action is available for any
+finished agent session, without changing the routine's scheduled harness.
+
 When an agent needs a decision, supported questions appear with their
 choices or input fields. The session stays marked as needing your reply
 until you answer it or explicitly cancel the request.

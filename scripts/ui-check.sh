@@ -9,6 +9,7 @@
 #   scripts/ui-check.sh --live    also message a running Codex session
 #   scripts/ui-check.sh --questions-only  finished question and verification states only
 #   scripts/ui-check.sh --harnesses-only  reasoning and CLI/service compatibility states only
+#   scripts/ui-check.sh --restart-only   cross-harness restart with synthetic agent output
 #   scripts/ui-check.sh --settings-only   Settings in the main window only
 #   ROTA_UI_QUESTION_HARNESS=antigravity scripts/ui-check.sh --questions-only
 #   ROTA_UI_TERMINAL=terminal scripts/ui-check.sh  use Terminal in both appearances
@@ -425,6 +426,92 @@ if [[ "$LIVE" == --settings-only ]]; then
         quit_rota
     done
     pass "Settings in both appearances"
+    exit 0
+fi
+
+if [[ "$LIVE" == --restart-only ]]; then
+    cat > "$WORK/agy-restart" <<'AGENT'
+#!/bin/bash
+if [[ "${1:-}" == --version ]]; then echo 'agy restart fixture'; exit 0; fi
+IFS= read -r request
+printf '%s\n' '{"event":"init","conversation_id":"rota-ui-restart","init":{}}'
+printf '%s\n' '{"event":"result","result":{"status":"SUCCESS","response":"Continued the synthetic task."}}'
+AGENT
+    chmod +x "$WORK/agy-restart"
+    defaults write "$DOMAIN" executables -dict claude /unavailable/claude codex /unavailable/codex \
+        grok /unavailable/grok antigravity "$WORK/agy-restart"
+    for appearance in light dark; do
+        quit_rota
+        python3 - "$SUPPORT" "$WORK/project" <<'PYTHON'
+from datetime import datetime, timedelta, timezone
+import json
+from pathlib import Path
+import sys
+import uuid
+root = Path(sys.argv[1])
+(root / "runs").mkdir(parents=True, exist_ok=True)
+routine = "restart-check"
+log = root / "Logs" / routine / "source.log"
+log.parent.mkdir(parents=True, exist_ok=True)
+log.write_text("[you] Complete the synthetic task.\nStep one is finished.\n"
+               "[error] You've hit your weekly limit · resets 10pm (America/Los_Angeles)\n")
+now = datetime.now(timezone.utc)
+stamp = lambda value: value.isoformat(timespec="seconds").replace("+00:00", "Z")
+(root / "routines.json").write_text(json.dumps([{
+    "id": routine, "name": "Session restart check", "harness": "claude", "enabled": False,
+    "schedule": "0 15 * * *", "workingDirectory": sys.argv[2], "prompt": "Routine task",
+    "model": "source-only-model", "effort": "high"}]))
+(root / "runs" / (routine + ".json")).write_text(json.dumps([{
+    "id": str(uuid.uuid4()).upper(), "routineID": routine, "trigger": "scheduled", "harness": "claude",
+    "startedAt": stamp(now - timedelta(seconds=20)), "endedAt": stamp(now),
+    "outcome": {"failed": {"exitCode": 1}}, "logPath": str(log)}]))
+PYTHON
+        launch "$appearance"
+        "$DRIVER" key command-zero
+        check wait_exists sessionUsageLimit
+        check "$DRIVER" exists restartSession
+        check "$DRIVER" exists restartSessionAfterLimit
+        capture "Session restart check" "$appearance-restart-limit"
+        "$DRIVER" press restartSession
+        check "$DRIVER" exists Antigravity
+        capture "Session restart check" "$appearance-restart-menu"
+        "$DRIVER" key escape
+        "$DRIVER" press restartSessionAfterLimit
+        "$DRIVER" press Antigravity
+        check wait_exists composer
+        restarted_id="$(python3 - "$SUPPORT/runs/restart-check.json" <<'PYTHON'
+import json
+import sys
+print(next(row["id"] for row in json.load(open(sys.argv[1])) if row["harness"] == "antigravity"))
+PYTHON
+)"
+        check wait_value "sidebarPreview-$restarted_id" 'Continued the synthetic task.'
+        if "$DRIVER" exists sessionUsageLimit; then fail "old usage limit leaked into the new session"; fi
+        python3 - "$SUPPORT" <<'PYTHON'
+import json
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+routine = json.loads((root / "routines.json").read_text())[0]
+assert routine["harness"] == "claude" and routine["model"] == "source-only-model"
+assert routine["effort"] == "high" and not routine["enabled"]
+records = json.loads((root / "runs" / "restart-check.json").read_text())
+assert len(records) == 2
+new = next(row for row in records if row["harness"] == "antigravity")
+assert new["trigger"] == "manual" and new.get("model") is None and new.get("effort") is None
+assert "succeeded" in new["outcome"] and new["originalRequest"] == "Complete the synthetic task."
+text = Path(new["logPath"]).read_text()
+assert "Complete the synthetic task." in text and "Step one is finished." in text
+assert any(row["harness"] == "claude" and "failed" in row["outcome"] for row in records)
+PYTHON
+        capture "Session restart check" "$appearance-restarted-session"
+        # The fallback header must still fit at the maximum interface scale.
+        for _ in 1 2 3; do "$DRIVER" key command-plus; done
+        capture "Session restart check" "$appearance-restarted-session-zoom"
+        "$DRIVER" key command-zero
+        quit_rota
+    done
+    pass "cross-harness restart in both appearances"
     exit 0
 fi
 

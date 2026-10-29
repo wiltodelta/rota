@@ -41,7 +41,9 @@ flowchart LR
   or readable log as described below. Each runner turns the options into its own form, Claude
   `--model`/`--effort` and Grok `--model`/`--reasoning-effort` through
   `LaunchSpec.modelFlags`, Codex fields in `thread/start` and `turn/start`. A
-  session keeps its original harness. `ModelCatalog` lists the choices without
+  session keeps its original harness. `Scheduler.restart` creates a separate manual
+  session on another agent harness, using the target's default model and effort;
+  it never saves the temporary choice to the routine. `ModelCatalog` lists the choices without
   spending quota: Codex `model/list` with each model's efforts, `grok models`,
   and Claude's control initialization with resolved model IDs and efforts.
   Claude, Codex and Grok write the model the CLI actually picked into their
@@ -1346,6 +1348,7 @@ service that may host somebody else's work.
 | Model and effort | native configuration | native configuration | native configuration | native model/options verified | native family/options verified | n/a |
 | Message while running | joins turn | terminal input | steer | queued prompt | queued prompt | Terminal |
 | Continue finished session | yes | yes | yes | yes | yes | n/a |
+| Restart with another agent | new session | new session | new session | new session | new session | n/a |
 | Stop and routine time limit | owned process tree | owned screen/tree | native turn confirmation | native prompt confirmation | owned process tree | owned screen/tree |
 | Native images | image blocks | file references | localImage | ACP image blocks | file references | n/a |
 | Questions | hooks/control | hooks, terminal dialogs | RPC/message | ACP | later message | n/a |
@@ -1357,6 +1360,22 @@ service that may host somebody else's work.
 | Wait for background work | non-ambient tasks | shells/agents | no root wake signal verified | native activity | CLI controls its grace period | n/a |
 | Session identity in Rota MCP | inherited | inherited | per-thread server config | per-session server config | inherited | CLI only |
 | Import schedules | Claude Desktop | Claude Desktop | Codex app, read-only | no verified routine store | store unverified | n/a |
+
+Cross-harness restart is an explicit user action on a finished session. It uses
+`TranscriptReader` off the main actor to carry the first user request and a
+bounded recent excerpt of normalized transcript (`SessionRestart.context`), with
+the readable log path for additional context. It does not translate native session IDs or provider options.
+`RunRecord.originalRequest` preserves the root request across repeated restarts;
+prior handoff prompts are excluded from excerpts. The scheduler rechecks stored
+state after reading and rejects overlapping runs, terminal opens and reserved
+native sessions. Both Claude modes use the current
+interactive preference and folder trust through the existing launch-spec builder.
+Shell sources and destinations are excluded because command text is not an agent
+request. `SessionRestart.hitUsageLimit` recognizes common textual quota/rate-limit
+errors only in the latest turn's agent answer or error notes; it is a UI suggestion,
+not an automatic retry or a structured provider limit signal.
+`scripts/ui-check.sh --restart-only` exercises the choice, context transfer and
+unchanged routine settings with a synthetic Antigravity process in both appearances.
 
 Recovery submits no prompt. Codex loads all turn pages before following the
 active turn; Grok replays `session/load`, including its native running-prompt

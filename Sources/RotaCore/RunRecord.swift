@@ -69,6 +69,8 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     public var logPath: String?
     /// The harness session, for harnesses whose runs can be reopened to chat.
     public var sessionID: String?
+    /// The root request carried across harness restarts, so handoff prompts never nest.
+    public var originalRequest: String?
     /// When the user last looked at the session; it is unread if it ended after that.
     public var readAt: Date?
     /// What the session asked the user through `rota notify --needs-reply`, until
