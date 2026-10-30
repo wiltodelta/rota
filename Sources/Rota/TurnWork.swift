@@ -15,6 +15,7 @@ struct WorkSection: View {
     /// When the live turn's run started; the clock counts from it.
     let since: Date?
     let label: String
+    var willToggle: () -> Void = {}
     @State private var expanded = false
 
     var body: some View {
@@ -32,6 +33,7 @@ struct WorkSection: View {
                         }
                     } else {
                         Button {
+                            willToggle()
                             expanded.toggle()
                         } label: {
                             HStack(spacing: metrics.points(5)) {
@@ -56,8 +58,9 @@ struct WorkSection: View {
                 VStack(alignment: .leading, spacing: metrics.points(4)) {
                     ForEach(rows) { row in
                         switch row {
-                        case .note(let item): WorkNoteView(item: item)
-                        case .tools(let calls): ToolRunRow(calls: calls, live: live && row.id == rows.last?.id)
+                        case .note(let item): WorkNoteView(item: item, willToggle: willToggle)
+                        case .tools(let calls):
+                            ToolRunRow(calls: calls, live: live && row.id == rows.last?.id, willToggle: willToggle)
                         }
                     }
                 }
@@ -118,6 +121,7 @@ private struct ToolRunRow: View {
     let calls: [TranscriptItem]
     /// The run the agent is in now: it shimmers.
     let live: Bool
+    var willToggle: () -> Void = {}
     @State private var expanded = false
 
     var body: some View {
@@ -127,7 +131,10 @@ private struct ToolRunRow: View {
                 // One call reads as itself; there is nothing to unfold.
                 header(lines).help(lines[0])
             } else {
-                Button { expanded.toggle() } label: { header(lines) }
+                Button {
+                    willToggle()
+                    expanded.toggle()
+                } label: { header(lines) }
                     .buttonStyle(.plain)
                     .help(expanded ? "Hide the calls" : "Show the calls")
             }
@@ -178,10 +185,11 @@ private struct WorkNoteView: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let item: TranscriptItem
+    var willToggle: () -> Void = {}
 
     var body: some View {
         switch item.kind {
-        case .reasoning: ReasoningView(text: item.text)
+        case .reasoning: ReasoningView(text: item.text, willToggle: willToggle)
         case .output:
             CodeBox(text: item.text)
         default:
@@ -302,5 +310,15 @@ enum FileChangeTitle {
         case "Write", "write_file", "create_file": return (live ? "Writing " : "Wrote ") + name
         default: return nil
         }
+    }
+}
+
+struct Hairline: View {
+    @Environment(\.interfaceScale) private var metrics
+    var body: some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(height: metrics.points(1))
+            .frame(maxWidth: .infinity)
     }
 }

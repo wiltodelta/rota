@@ -19,7 +19,7 @@ struct ChatTranscript: View {
     var questionRevealRequest = 0
     var submitAnswer: ((QuestionAnswer) throws -> Void)?
     @State private var expandedTools: Set<Int> = []
-    @State private var following = true
+    @State private var scroll = TranscriptScrollState()
     @State private var visibleItem: Int?
     @State private var viewport = TranscriptViewport()
     @State private var pageAnchor: TranscriptViewport.Anchor?
@@ -44,7 +44,7 @@ struct ChatTranscript: View {
                         }
                         if hasEarlier {
                             Button(interfaceTitle: loadingEarlier ? "Loading…" : "Load Earlier Messages") {
-                                following = false
+                                scroll.following = false
                                 pageAnchor = viewport.capture()
                                 loadEarlier()
                             }
@@ -59,20 +59,18 @@ struct ChatTranscript: View {
                                     switch row {
                                     case .note(let item):
                                         // A container, so a table or link inside keeps its own identifier.
-                                        TranscriptRow(item: item, record: record)
+                                        TranscriptRow(item: item, record: record,
+                                                      willToggle: { prepareDisclosure(id: row.id) })
                                             .accessibilityElement(children: .contain)
                                             .accessibilityIdentifier("transcriptItem-\(item.id)")
                                     case .tools(let calls):
                                         ToolCallsView(calls: calls, expanded: Binding(
                                             get: { calls.contains { expandedTools.contains($0.id) } },
                                             set: { expanded in
-                                                following = false
-                                                viewport.cancel()
-                                                let anchor = viewport.capture(id: row.id)
+                                                prepareDisclosure(id: row.id)
                                                 if expanded { expandedTools.insert(row.id) } else {
                                                     expandedTools.subtract(calls.map(\.id))
                                                 }
-                                                if let anchor { viewport.restoreAfterLayout(anchor) }
                                             }))
                                     }
                                 }
@@ -87,7 +85,10 @@ struct ChatTranscript: View {
                         } else {
                             ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
                                 TurnView(turn: turn, isLast: index == turns.count - 1, running: working,
-                                         only: turns.count == 1, record: record)
+                                         only: turns.count == 1, record: record,
+                                         willToggle: { prepareDisclosure(id: turn.id) })
+                                    .id(turn.id)
+                                    .background(TranscriptMarker(id: turn.id, viewport: viewport))
                             }
                         }
                         if !structured && turns.isEmpty && working {
@@ -100,16 +101,19 @@ struct ChatTranscript: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .trailing)
                         }
-                        if let questionDraft, let submitAnswer {
-                            QuestionCard(draft: questionDraft, submit: submitAnswer)
-                                .id(Int.min + 1)
-                                .background(TranscriptMarker(id: Int.min + 1, viewport: viewport))
-                        }
                     }
                     .scrollTargetLayout()
+                    // The form keeps a measured height even when lazy transcript rows are offscreen.
+                    if let questionDraft, let submitAnswer {
+                        QuestionCard(draft: questionDraft, submit: submitAnswer)
+                            .id(Int.min + 1)
+                            .background(TranscriptMarker(id: Int.min + 1, viewport: viewport))
+                            .padding(.top, metrics.points(22))
+                    }
                     Color.clear.frame(height: metrics.points(1))
                         .padding(.top, questionDraft == nil ? metrics.points(22) : 0)
                         .id(Int.min)
+                        .background(TranscriptMarker(id: Int.min, viewport: viewport))
                 }
                 .padding(.horizontal, metrics.points(24))
                 .padding(.top, metrics.points(20))
@@ -121,44 +125,45 @@ struct ChatTranscript: View {
             .scrollPosition(id: $visibleItem, anchor: .top)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .onScrollPhaseChange { _, phase, context in
-                if phase == .interacting { viewport.cancel() }
-                if phase == .interacting || phase == .decelerating || phase == .idle {
-                    let geometry = context.geometry
-                    following = geometry.contentOffset.y + geometry.containerSize.height
-                        >= geometry.contentSize.height - 60
-                    if !following { viewport.remember() }
-                }
+                let wasInteracting = scroll.interacting
+                let geometry = context.geometry
+                let atEnd = geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 60
+                if scroll.changePhase(phase, atEnd: atEnd) { viewport.cancel() }
+                if wasInteracting || scroll.interacting, !scroll.following { viewport.remember() }
             }
             // Follow the session only while the reader is at its end, as super.engineering does;
             // scrolled up to read, they keep their place and get a button back down.
-            .onScrollGeometryChange(for: ScrollSpot.self) { geometry in
-                ScrollSpot(offset: geometry.contentOffset.y, height: geometry.contentSize.height,
-                           atEnd: geometry.contentOffset.y + geometry.containerSize.height
-                               >= geometry.contentSize.height - 60)
+            .onScrollGeometryChange(for: TranscriptScrollSpot.self) { geometry in
+                TranscriptScrollSpot(offset: geometry.contentOffset.y, height: geometry.contentSize.height,
+                                     viewportHeight: geometry.containerSize.height,
+                                     atEnd: geometry.contentOffset.y + geometry.containerSize.height
+                                         >= geometry.contentSize.height - 60)
             } action: { old, new in
-                if new.height != old.height {
-                    // The session wrote more: a reader at the end stays there.
-                    if following { proxy.scrollTo(Int.min, anchor: .bottom) }
+                if viewport.isFollowingEnd {
+                    viewport.layoutChanged()
+                } else if new.height != old.height {
+                    if !scroll.interacting, let anchor = viewport.anchorForUpdate() {
+                        viewport.restoreAfterLayout(anchor)
+                    }
                 } else if new.offset != old.offset {
-                    // The reader scrolled: following resumes only back at the end.
-                    following = new.atEnd
-                    if !following { viewport.remember() }
+                    // Layout estimates are not user scrolls and must not restart following.
+                    scroll.moved(atEnd: new.atEnd)
+                    if !scroll.following { viewport.remember() }
                 }
             }
             .onChange(of: questionDraft.map { "\($0.question.id):\($0.fieldIndex)" }) { _, step in
                 if step != nil {
-                    following = false
-                    viewport.cancel()
-                    proxy.scrollTo(Int.min + 1, anchor: .top)
+                    scroll.following = false
+                    scrollToEnd(proxy)
                 }
             }
             .onChange(of: questionRevealRequest) {
-                following = false
-                viewport.cancel()
-                proxy.scrollTo(Int.min + 1, anchor: .top)
+                scroll.following = false
+                scrollToEnd(proxy)
             }
             .onChange(of: items) {
-                guard !following else { return }
+                if scroll.following { scrollToEnd(proxy) }
+                guard !scroll.following, !viewport.isFollowingEnd else { return }
                 if let anchor = pageAnchor {
                     // Materialize the old row after a prepend, then correct the lazy estimate.
                     let mapped = TranscriptViewport.Anchor(id: WorkRow.visibleID(for: anchor.id, in: rows),
@@ -171,28 +176,26 @@ struct ChatTranscript: View {
                 }
             }
             .onChange(of: metrics) {
-                if following {
-                    proxy.scrollTo(Int.min, anchor: .bottom)
+                if scroll.following || viewport.isFollowingEnd {
+                    scrollToEnd(proxy)
                 } else if let anchor = viewport.anchorForUpdate() {
                     proxy.scrollTo(anchor.id, anchor: anchor.point)
                     viewport.restoreAfterLayout(anchor)
                 }
             }
             .onDisappear { viewport.cancel() }
-            .onChange(of: items.count + sending.count) { if following { proxy.scrollTo(Int.min, anchor: .bottom) } }
+            .onChange(of: sending.count) { if scroll.following { scrollToEnd(proxy) } }
             .onAppear {
-                following = questionDraft == nil
-                proxy.scrollTo(questionDraft == nil ? Int.min : Int.min + 1,
-                               anchor: questionDraft == nil ? .bottom : .top)
+                scroll.following = questionDraft == nil
+                scrollToEnd(proxy)
             }
             .overlay(alignment: .bottom) {
                 // A pending form occupies this viewport; the floating jump button
                 // would cover its fields at the minimum window height.
-                if !following, questionDraft == nil {
+                if !scroll.following, questionDraft == nil {
                     Button {
-                        following = true
-                        viewport.cancel()
-                        proxy.scrollTo(Int.min, anchor: .bottom)
+                        scroll.following = true
+                        scrollToEnd(proxy)
                     } label: {
                         Image(systemName: "arrow.down")
                             .interfaceSystemFont(size: 13, weight: .semibold)
@@ -211,6 +214,17 @@ struct ChatTranscript: View {
         .environment(\.sessionLogURL, record.logPath.map { URL(fileURLWithPath: $0) })
         .background(Color(nsColor: .textBackgroundColor))
     }
+
+    private func prepareDisclosure(id: Int) {
+        scroll.following = false
+        viewport.cancel()
+        if let anchor = viewport.capture(id: id) { viewport.restoreAfterLayout(anchor) }
+    }
+
+    private func scrollToEnd(_ proxy: ScrollViewProxy) {
+        viewport.followEnd()
+        proxy.scrollTo(questionDraft == nil ? Int.min : Int.min + 1, anchor: .bottom)
+    }
 }
 
 /// A normalized transcript keeps the adapter's order. It never infers a final
@@ -220,6 +234,7 @@ private struct TranscriptRow: View {
     @Environment(AppModel.self) private var model
     let item: TranscriptItem
     let record: RunRecord
+    var willToggle: () -> Void = {}
     @State private var hovering = false
 
     var body: some View {
@@ -238,7 +253,7 @@ private struct TranscriptRow: View {
                 .font(model.chatText.small)
                 .foregroundStyle(Color.secondaryText)
             case .plan: PlanCard(steps: PlanStep.parse(item.text))
-            case .reasoning: ReasoningView(text: item.text)
+            case .reasoning: ReasoningView(text: item.text, willToggle: willToggle)
             case .output: CodeBox(text: item.text)
             case .status, .error:
                 if let title = TranscriptService.title(item.text) {
@@ -267,6 +282,7 @@ private struct TurnView: View {
     /// The session's only turn, whose length is the session's.
     let only: Bool
     let record: RunRecord
+    var willToggle: () -> Void = {}
     @State private var hovering = false
 
     private var live: Bool { isLast && running }
@@ -292,7 +308,7 @@ private struct TurnView: View {
                 }
                 if !turn.work.isEmpty || live {
                     WorkSection(items: turn.work, live: live, since: model.scheduler.runStartedAt(record),
-                                label: workLabel)
+                                label: workLabel, willToggle: willToggle)
                 }
                 if let plan = turn.plan {
                     PlanCard(steps: PlanStep.parse(plan.text))
@@ -476,21 +492,4 @@ private struct WorkingLabel: View {
         }
         .font(model.chatText.small)
     }
-}
-
-struct Hairline: View {
-    @Environment(\.interfaceScale) private var metrics
-    var body: some View {
-        Rectangle()
-            .fill(Color(nsColor: .separatorColor))
-            .frame(height: metrics.points(1))
-            .frame(maxWidth: .infinity)
-    }
-}
-
-/// Where the chat is scrolled, to tell the reader scrolling from the session writing.
-private struct ScrollSpot: Equatable {
-    let offset: CGFloat
-    let height: CGFloat
-    let atEnd: Bool
 }

@@ -97,7 +97,10 @@ final class ClaudeInteractiveTests: XCTestCase {
             let input = Pipe()
             process.standardInput = input
             try process.run()
-            try input.fileHandleForWriting.write(contentsOf: Data(payload.utf8))
+            // Without a destination the hook exits immediately and never reads stdin.
+            if environment["ROTA_SESSION_DIALOG"] != nil {
+                try input.fileHandleForWriting.write(contentsOf: Data(payload.utf8))
+            }
             try input.fileHandleForWriting.close()
             process.waitUntilExit()
             return process.terminationStatus

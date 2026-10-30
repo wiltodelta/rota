@@ -7,6 +7,7 @@
 # never quits or reads. Needs Accessibility and Screen Recording for the terminal.
 #   scripts/ui-check.sh           shell routine only, no agent quota spent
 #   scripts/ui-check.sh --live    also message a running Codex session
+#   scripts/ui-check.sh --scroll-only     long transcript and question navigation only
 #   scripts/ui-check.sh --questions-only  finished question and verification states only
 #   scripts/ui-check.sh --harnesses-only  reasoning and CLI/service compatibility states only
 #   scripts/ui-check.sh --restart-only   cross-harness restart with synthetic agent output
@@ -37,7 +38,7 @@ fail() {
     echo "FAIL  $1"
     # Diagnose from what the failure saw, not from a second run.
     local pid
-    pid="$(pgrep -f "$APP/Contents/MacOS/Rota" | head -1)" \
+    pid="$(pgrep -f "^$APP/Contents/MacOS/Rota$" | head -1)" \
         && uv run -q "$AUDIT" evidence --pid "$pid" --out "$OUT/failures" --label "$1" >/dev/null || true
     exit 1
 }
@@ -86,7 +87,7 @@ quit_rota() {
     local app_pid child command
     # Settings inspections can still be running when a pane closes. Stop only
     # this build's read-only MCP children before their parent exits.
-    for app_pid in $(pgrep -f "$APP/Contents/MacOS/Rota" || true); do
+    for app_pid in $(pgrep -f "^$APP/Contents/MacOS/Rota$" || true); do
         for child in $(pgrep -P "$app_pid" || true); do
             command="$(ps -o args= -p "$child")" || continue
             case "$command" in
@@ -94,8 +95,8 @@ quit_rota() {
             esac
         done
     done
-    pkill -f "$APP/Contents/MacOS/Rota" || true
-    while pgrep -f "$APP/Contents/MacOS/Rota" >/dev/null; do sleep 0.5; done
+    pkill -f "^$APP/Contents/MacOS/Rota$" || true
+    while pgrep -f "^$APP/Contents/MacOS/Rota$" >/dev/null; do sleep 0.5; done
 }
 
 cleanup() {
@@ -233,7 +234,17 @@ if history.exists():
 else:
     log = root / "Logs" / routine / "questions.log"
     log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_text("A completed synthetic session with a question awaiting your answer.\n")
+    messages = ["Scroll fixture message %d.\n" % index + "\n\n".join(
+        "A paragraph with enough wrapped text to exercise different transcript row heights. " * 3
+        for _ in range(1 + index % 5)) for index in range(120)]
+    log.write_text("\n".join(messages))
+    size = log.stat().st_size
+    kinds = ["agent", "tool", "output", "status", "agent"]
+    entries = [{"version": 1, "type": "header", "logSize": 0}] + [
+        {"version": 1, "type": "item", "id": index, "kind": kinds[index % len(kinds)],
+         "text": text if kinds[index % len(kinds)] == "agent" else "Synthetic transcript update.", "logSize": size}
+        for index, text in enumerate(messages)]
+    log.with_name(log.name + ".chat.jsonl").write_text("".join(json.dumps(row) + "\n" for row in entries))
     stamp = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     records = [{"id": str(uuid.uuid4()).upper(), "routineID": routine, "trigger": "manual",
                 "harness": "codex", "startedAt": stamp, "endedAt": stamp,
@@ -246,7 +257,8 @@ records[0]["questions"] = [{
         {"id": "0", "title": "Which color?", "detail": "", "kind": "choice", "required": True,
          "allowsOther": True, "options": [{"id": color, "label": color, "detail": ""}
                                            for color in ["Blue", "Green"]]},
-        {"id": "1", "title": "Any notes?", "detail": "", "kind": "text", "options": [],
+        {"id": "1", "title": "Any notes?", "detail": "Explain any additional constraints. " * 12,
+         "kind": "text", "options": [],
          "required": True, "allowsOther": True},
     ],
 }]
@@ -277,7 +289,8 @@ records[0].pop("sessionID", None)
 history.write_text(json.dumps(records))
 PYTHON
     launch "$appearance"
-    check "$DRIVER" exists questionCard
+    "$DRIVER" press showQuestion
+    check wait_visible cancelQuestion
     if [[ "$kind" == verification ]]; then
         "$DRIVER" reveal cancelQuestion
         check "$DRIVER" visible cancelQuestion
@@ -314,19 +327,61 @@ PYTHON
     [[ "${ROTA_UI_QUESTION_HARNESS:-codex}" == antigravity ]] && field=2
     check "$DRIVER" exists "questionField-$field"
     "$DRIVER" set "questionField-$field" "A separate answer"
+    if [[ "$LIVE" == --scroll-only ]]; then
+        local mode amount first window
+        for mode in line pixel; do
+            if [[ "$mode" == line ]]; then amount=2000; else amount=60000; fi
+            "$DRIVER" scroll-wheel "UI check $appearance" "$amount" "$mode"
+            sleep 1
+            if [[ "$mode" == line ]]; then
+                local anchor before after
+                # The tail opens at 70; the next page begins at 20. Keep the old row at its pixel offset.
+                for anchor in 70 20; do
+                    before="$("$DRIVER" bounds "transcriptItem-$anchor")"
+                    "$DRIVER" press loadEarlierMessages
+                    sleep 2
+                    after="$("$DRIVER" bounds "transcriptItem-$anchor")"
+                    python3 - "$before" "$after" <<'PYTHON'
+import sys
+before, after = (list(map(float, value.split())) for value in sys.argv[1:])
+assert abs(before[1] - after[1]) <= 1, f"Paging moved the reading position: {before[1]} -> {after[1]}"
+PYTHON
+                    "$DRIVER" scroll-wheel "UI check $appearance" "$amount" "$mode"
+                    sleep 1
+                done
+            fi
+            first="$("$DRIVER" bounds transcriptItem-0)"
+            window="$("$DRIVER" bounds "UI check $appearance")"
+            python3 - "$first" "$window" <<'PYTHON'
+import sys
+row, window = (list(map(float, value.split())) for value in sys.argv[1:])
+assert window[1] <= row[1] < window[1] + window[3], "First message must remain on screen after wheel input"
+PYTHON
+            capture "UI check $appearance" "$appearance-scroll-start-$mode" 520
+            # Lazy rows replace estimates while scrolling; one fixed gesture may stop short.
+            for _ in 1 2 3; do
+                "$DRIVER" scroll-wheel "UI check $appearance" "-$amount" "$mode"
+                if wait_visible answerQuestion-accept; then break; fi
+            done
+            check "$DRIVER" visible answerQuestion-accept
+        done
+    fi
     wait_value composer "An unrelated draft" || fail "ordinary draft stays separate from the answer"
-    "$DRIVER" scroll-wheel questionCard -3000 pixel
+    "$DRIVER" scroll-wheel questionCard 3000 pixel
+    sleep 1
+    if [[ "$LIVE" == --scroll-only ]] && "$DRIVER" visible answerQuestion-accept >/dev/null 2>&1; then
+        fail "wheel input must leave the question"
+    fi
     check "$DRIVER" visible composer
     check "$DRIVER" visible showQuestion
     "$DRIVER" press showQuestion
     check wait_visible "questionField-$field"
-    "$DRIVER" reveal "answerQuestion-accept"
     check wait_visible "answerQuestion-accept"
     capture "UI check $appearance" "$appearance-async-question-text" 520
     for _ in 1 2 3; do "$DRIVER" key command-plus; done
     "$DRIVER" press showQuestion
     check "$DRIVER" visible composer
-    "$DRIVER" reveal "answerQuestion-accept"
+    check wait_visible "answerQuestion-accept"
     capture "UI check $appearance" "$appearance-async-question-text-zoom" 520
     "$DRIVER" key command-zero
     quit_rota
@@ -537,10 +592,11 @@ PYTHON
         check "$DRIVER" exists restartSessionAfterLimit
         capture "Session restart check" "$appearance-restart-limit"
         "$DRIVER" press restartSession
-        check "$DRIVER" exists Antigravity
+        check wait_exists Antigravity
         capture "Session restart check" "$appearance-restart-menu"
         "$DRIVER" key escape
         "$DRIVER" press restartSessionAfterLimit
+        check wait_exists Antigravity
         "$DRIVER" press Antigravity
         check wait_exists composer
         restarted_id="$(python3 - "$SUPPORT/runs/restart-check.json" <<'PYTHON'
@@ -593,7 +649,9 @@ root = Path(sys.argv[1])
 routine = "harness-presentation"
 log = root / "Logs" / routine / "synthetic.log"
 log.parent.mkdir(parents=True, exist_ok=True)
-reasoning = "Checked the available inputs and kept the answer separate."
+reasoning = "Checked the available inputs and kept the answer separate.\n\n```text\n" + "\n".join(
+    f"Inspection step {index}: preserve the disclosure header while reading the details."
+    for index in range(100)) + "\n```"
 answer = "The harness completed its task."
 body = "[reasoning] " + reasoning + "\n" + answer + "\n"
 log.write_text(body)
@@ -617,7 +675,32 @@ stamp = lambda value: value.isoformat(timespec="seconds").replace("+00:00", "Z")
     "id": str(uuid.uuid4()).upper(), "routineID": routine, "trigger": "manual", "harness": "codex",
     "startedAt": stamp(now - timedelta(seconds=2)), "endedAt": stamp(now), "outcome": {"succeeded": {}},
     "logPath": str(log), "cliVersion": "fixture 1.0.0", "serverVersion": "fixture 1.0.1"}]))
+legacy = "legacy-presentation"
+legacy_log = log.with_name("legacy.log")
+legacy_reasoning = "Preserve the reasoning header while inspecting details. " * 140
+legacy_log.write_text("[you] Inspect the synthetic result.\n[reasoning] " + legacy_reasoning
+                      + "\n-> Inspect example.txt\n[output] Synthetic output.\nThe legacy answer is complete.\n")
+routines = json.loads((root / "routines.json").read_text())
+routines.append({"id": legacy, "name": "Legacy disclosure check", "harness": "codex", "enabled": False,
+                 "schedule": "0 9 * * *", "workingDirectory": sys.argv[2], "prompt": "Synthetic task"})
+(root / "routines.json").write_text(json.dumps(routines))
+(root / "runs" / (legacy + ".json")).write_text(json.dumps([{
+    "id": "44444444-4444-4444-8444-444444444444", "routineID": legacy, "trigger": "manual", "harness": "codex",
+    "startedAt": stamp(now - timedelta(days=1, seconds=2)), "endedAt": stamp(now - timedelta(days=1)),
+    "outcome": {"succeeded": {}}, "logPath": str(legacy_log)}]))
 PYTHON
+    check_reasoning_position() {
+        local before after
+        before="$("$DRIVER" bounds reasoningDetails)"
+        "$DRIVER" disclose reasoningDetails Expanded
+        sleep 1
+        after="$("$DRIVER" bounds reasoningDetails)"
+        python3 - "$before" "$after" <<'PYTHON'
+import sys
+before, after = (list(map(float, value.split())) for value in sys.argv[1:])
+assert abs(before[1] - after[1]) <= 1, f"Disclosure moved its header: {before[1]} -> {after[1]}"
+PYTHON
+    }
     for appearance in light dark; do
         launch "$appearance"
         "$DRIVER" key command-zero
@@ -626,7 +709,7 @@ PYTHON
         "$DRIVER" tree > "$WORK/reasoning-tree.txt"
         [[ "$(grep -c ' | reasoningDetails$' "$WORK/reasoning-tree.txt")" == 1 ]] || fail "empty reasoning is hidden"
         capture "Harness compatibility check" "$appearance-harness-reasoning-collapsed"
-        "$DRIVER" disclose reasoningDetails Expanded
+        check_reasoning_position
         check wait_visible "Checked the available inputs and kept the answer separate."
         capture "Harness compatibility check" "$appearance-harness-reasoning-expanded"
         "$DRIVER" disclose reasoningDetails Collapsed
@@ -634,18 +717,28 @@ PYTHON
         "$DRIVER" reveal toolCall-4
         check wait_visible toolCall-4
         capture "Harness compatibility check" "$appearance-harness-tool-output"
+        "$DRIVER" select sidebarPreview-44444444-4444-4444-8444-444444444444
+        wait_exists workToggle
+        "$DRIVER" press workToggle
+        wait_exists reasoningDetails
+        "$DRIVER" press scrollToLatest
+        check_reasoning_position
+        capture "Legacy disclosure check" "$appearance-legacy-reasoning-expanded"
+        "$DRIVER" disclose reasoningDetails Collapsed
         quit_rota
     done
     pass "harness presentation in both appearances"
     exit 0
 fi
 
-if [[ "$LIVE" == --questions-only ]]; then
+if [[ "$LIVE" == --questions-only || "$LIVE" == --scroll-only ]]; then
     for appearance in light dark; do
         rm -rf "$SUPPORT"
         check_question_forms "$appearance" "ui-shell-$appearance"
-        check_question_forms "$appearance" "ui-shell-$appearance" verification
-        check_mixed_questions "$appearance" "ui-shell-$appearance"
+        if [[ "$LIVE" == --questions-only ]]; then
+            check_question_forms "$appearance" "ui-shell-$appearance" verification
+            check_mixed_questions "$appearance" "ui-shell-$appearance"
+        fi
         quit_rota
     done
     pass "question forms in both appearances"
@@ -730,6 +823,7 @@ PYTHON
     "$DRIVER" set routineName "UI check $appearance"
     "$DRIVER" set routineFolder "$WORK/project"
     "$DRIVER" set routineSchedule "0 9 * * 1"
+    check wait_exists routinePrompt
     "$DRIVER" set routinePrompt 'echo hello from rota; sleep 15; echo done'
     # An agent shows the model and effort its CLI lists; the list loads in the background.
     "$DRIVER" choose routineHarness Codex; sleep 4

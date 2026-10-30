@@ -115,7 +115,10 @@ Agent text, errors and other kinds end the group and stay visible. This is a vie
 Expansion belongs to the session view and survives live appends. Paging preserves
 existing tool groups instead of extending their leading edge. The reading-anchor
 mapping remains defensive for regrouped snapshots; toggling preserves the header
-offset instead of following the end.
+offset instead of following the end. Reasoning and legacy work disclosures use
+the same callback before changing their contents: suspend end following, capture
+the containing row, then restore its pixel offset through layout. Legacy turns
+register viewport markers for their nested disclosures too.
 The ordered presentation does not infer which prose is a final answer from
 the last tool call. Legacy logs
 retain their inferred turn layout. Markdown, typography, copy actions, and
@@ -126,16 +129,32 @@ string end marker with integer message targets can leave the latest-message
 action short of the end after lazy layout changes. At a page boundary the
 load button can be the first visible element, leaving no message target.
 Invisible native row markers capture the first fully visible message's
-actual offset. Keep the ID scroll-position binding alongside the proxy and pixel
+actual offset. SwiftUI can keep offscreen native markers attached to the window
+but hidden, with stale frames inside the visible rectangle. Exclude hidden markers
+and hidden ancestors from both anchor selection and restoration.
+Keep the ID scroll-position binding alongside the proxy and pixel
 correction: removing it in the synthetic prepend check lost the reading position.
 The reading anchor is saved during scrolling, before new data
 changes layout; capturing it only in the update callback can already see the
 moved row. A narrow `TranscriptViewport` bridge restores that offset after
 layout; an ID alone does not correct SwiftUI's changing lazy height estimates.
 A page request captures its anchor before I/O, materializes that row after the
-page arrives, and then corrects the pixel offset. User scrolling and the
+page arrives, and then corrects the pixel offset. Later lazy height recalculations
+repeat the correction while the reader is idle. `TranscriptScrollState` distinguishes
+manual scroll phases from programmatic movement; layout and anchor corrections
+cannot resume following. User scrolling and the
 latest-message action cancel queued corrections. Layout changes do not resume following;
 scrolling back to the end or pressing the latest-message button does.
+An explicit end request also registers the end marker with `TranscriptViewport`.
+After geometry changes it clamps the native scroll view to the document's actual
+bottom, so lazy estimates, delayed transcript loading and zoom cannot leave the
+request short of the end or beyond the rendered content. Manual scrolling cancels
+that request before saving a reading anchor. Height changes alone never restart
+following. Show Question and question-step changes use this end request so the
+current field and final actions remain reachable. The question card lives outside
+the lazy message stack, so it retains a measured height while offscreen; the jump
+addresses the card itself before correcting the document bottom. A lazy form can
+otherwise remain unrendered while the end marker stops at the preceding footer.
 
 New optional metadata should enrich an existing entry without being necessary
 to read basic text or finish a run. Specialized tool cards, arbitrary provider
@@ -172,7 +191,8 @@ the end resumed correctly. Bounds checks and calibrated contrast checks passed.
 These are synthetic GUI updates, not new live-provider conversations.
 `TranscriptPagingTests` verifies bounded journal I/O, page reconstruction,
 write settling and failure recovery. `TranscriptViewportTests` uses real
-`NSScrollView` geometry to pin saved reading offsets and correction cancellation.
+`NSScrollView` geometry to pin saved reading offsets, end requests across
+document growth, and cancellation by manual scrolling.
 Disposable mutation checks reject full-file paging, indefinite write settling,
 disabled pixel correction, and recapturing an already moved reading anchor.
 

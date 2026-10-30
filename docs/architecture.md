@@ -154,13 +154,19 @@ flowchart LR
   numbered option rows and its own text/private/numeric fields inside the transcript's
   scroll view, while the composer stays pinned below it. The form never squeezes
   the transcript into a near-zero nested scroll viewport.
-  The card registers its own transcript viewport marker and participates in
+  The card is measured outside the lazy message stack, even while offscreen.
+  It registers its own transcript viewport marker and participates in
   the same zoom-anchor handling as message rows.
   Its end anchor sits outside the spaced lazy rows, with a compact form tail;
   scrolling to the absolute bottom must leave the final actions visible even
   at minimum height and 150% zoom.
   While a form is pending, a pinned Show Question control above the ordinary
-  composer reveals the card after the reader scrolls away. The floating
+  composer scrolls to the actual document bottom after the reader scrolls away,
+  leaving the card's final actions visible. The end request survives delayed
+  transcript loading and lazy height recalculation until manual scrolling cancels it.
+  Native document-frame and clip-bounds notifications also correct late layout changes,
+  including zoom adjustments that settle after SwiftUI's geometry callback.
+  The floating
   latest-message button stays hidden so it cannot cover the form.
   Free-text fields, including a selected Other answer, stay inside the card.
   Each field keeps its own text draft;
@@ -827,6 +833,10 @@ The UI check uses the native Command-0 and Command-Plus shortcuts for zoom, so
 menu validation runs. A closed SwiftUI menu can retain a stale disabled state
 after zoom resets; direct AXPress may report success while dropping the first
 Zoom In action. Other menu actions remain available through the AX driver.
+Development checkouts share the default app identity. When another development
+copy is open, sign the test copy with a session-specific bundle ID ending in
+`.dev` and set the driver's `ROTA_BUNDLE_ID` to match. Keep `ROTA_DATA_DIR` isolated
+as well: a separate data directory does not isolate app identity.
 It restores development defaults and any existing terminal command files after
 the run, and stops development-owned MCP inspection children before quitting
 their parent. The default terminal coverage includes iTerm2 when installed;
@@ -834,6 +844,10 @@ their parent. The default terminal coverage includes iTerm2 when installed;
 another terminal's shell startup is blocked. This override is printed and does
 not verify iTerm2. A synthetic historical message exercises headings, a wrapping
 nested list and the shipping Markdown table inside the chat at normal and maximum zoom, including horizontal scrolling.
+`scripts/ui-check.sh --scroll-only` exercises a long normalized transcript with
+variable-height messages, collapsed tool groups and status rows, pixel and line
+wheel input, reading-position preservation across earlier-message pages, Show Question, and final
+actions at minimum width and 150% zoom in both appearances.
 Agent access checks wait for asynchronous CLI discovery before requiring its
 Add or Remove buttons; a busy indicator is not the final action to measure.
 Release verification on 2026-10-18 completed the full UI scenario in light before

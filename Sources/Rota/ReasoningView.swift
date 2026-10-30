@@ -5,11 +5,13 @@ struct ReasoningView: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let text: String
+    var willToggle: () -> Void = {}
     @State private var expanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.points(6)) {
             Button {
+                willToggle()
                 expanded.toggle()
             } label: {
                 HStack(spacing: metrics.points(5)) {
