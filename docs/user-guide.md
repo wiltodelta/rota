@@ -18,7 +18,10 @@
   actions in their recorded order. Older sessions retain their folded
   "Worked for …" sections. While a session works, the field shows the clock
   and turns its button into Stop. Its footer shows the session model and reasoning
-  effort as resolved by the CLI. Model choices include their versions, and
+  effort as resolved by the CLI, including Antigravity's concrete default variant.
+  While resolution is pending it says "Resolving model…"; older sessions with no
+  recoverable model say "Model unavailable". Model names match the routine pickers,
+  routine details and session history; effort is shown separately. Model choices include their versions, and
   unsupported or unavailable effort is labeled explicitly. Attach
   files with the paperclip or by dropping them into the composer. Rota keeps
   copies with the session and sends their local paths for the agent to read;

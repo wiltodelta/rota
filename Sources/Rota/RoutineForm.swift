@@ -165,7 +165,7 @@ private struct ModelPickers: View {
         let effortChoices: [InterfaceChoice<String?>] = [
             .item(selected == nil ? (loading ? "Loading…" : "Unavailable")
                 : (efforts.isEmpty ? "Not supported" : "Default"), nil), .separator
-        ] + efforts.map { .item($0.capitalized, $0) } + missingEffort(efforts)
+        ] + efforts.map { .item(ModelLabel.effortTitle($0), $0) } + missingEffort(efforts)
         InterfacePicker(title: "Effort", selection: $draft.effort,
                         choices: effortChoices, identifier: "routineEffort")
         .disabled(selected?.efforts.isEmpty ?? true)
@@ -179,12 +179,12 @@ private struct ModelPickers: View {
 
     private func missingModel(options: [ModelOption]) -> [InterfaceChoice<String?>] {
         guard let current = draft.model, !options.contains(where: { $0.matches(current) }) else { return [] }
-        return [.item(current, current)]
+        return [.item(ModelLabel.title(current, harness: draft.harness, models: model.settings.models), current)]
     }
 
     private func missingEffort(_ efforts: [String]) -> [InterfaceChoice<String?>] {
         guard let current = draft.effort, !efforts.contains(current) else { return [] }
-        return [.item(current.capitalized, current)]
+        return [.item(ModelLabel.effortTitle(current), current)]
     }
 }
 

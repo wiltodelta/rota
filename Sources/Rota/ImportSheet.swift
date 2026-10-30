@@ -202,6 +202,7 @@ struct ImportSheet: View {
 }
 
 private struct ImportRow: View {
+    @Environment(AppModel.self) private var model
     @Environment(\.interfaceScale) private var metrics
     let candidate: ImportCandidate
     let inRota: Bool
@@ -247,7 +248,10 @@ private struct ImportRow: View {
         let routine = candidate.routine
         let schedule = ScheduleText.describe(routine.schedule) ?? routine.schedule
         var parts = [URL(fileURLWithPath: routine.workingDirectory).lastPathComponent, schedule]
-        if let modelID = routine.model { parts.append(modelID) }
+        if let modelID = routine.model {
+            parts.append(ModelLabel.title(modelID, harness: routine.harness, models: model.settings.models))
+        }
+        if let effort = routine.effort { parts.append(ModelLabel.effortTitle(effort)) }
         return parts.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 }

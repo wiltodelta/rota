@@ -101,9 +101,9 @@ struct RoutineDetail: View {
         .modifier(GlassActionStyle())
     }
 
-    /// "Codex gpt-6-sol high": where and on what it runs.
+    /// The same model title and separate effort as the routine's pickers.
     private var harness: String {
-        ([routine.harness.title] + [routine.model, routine.effort].compactMap { $0 }).joined(separator: " ")
+        ModelLabel.configuration(routine, models: model.settings.models)
     }
 
     /// "Next run Mon, Oct 12, 9:00 AM", or why it will not run.

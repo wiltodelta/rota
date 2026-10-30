@@ -6,7 +6,7 @@ final class ComposerTests: XCTestCase {
     func testModelAndEffortUseAppliedSessionValues() {
         var record = RunRecord(routineID: "fixture", trigger: .manual, harness: .claude,
                                startedAt: Date(), outcome: .succeeded)
-        XCTAssertEqual(ModelLabel.model(record: record, models: [:]), "Default model")
+        XCTAssertEqual(ModelLabel.model(record: record, models: [:]), "Model unavailable")
         XCTAssertNil(ModelLabel.effort(record), "An unknown effort is left out, never called Default")
         record.model = "alias"
         record.reportedModel = "resolved-model"
@@ -28,6 +28,30 @@ final class ComposerTests: XCTestCase {
         XCTAssertEqual(ModelLabel.effort(record, fallback: "low"), "Low")
         record.reportedEffort = "low"
         XCTAssertEqual(ModelLabel.effort(record), "Low")
+    }
+
+    func testCatalogTitlesAndSeparateEffortAreSharedByRoutineAndSessionLabels() {
+        for harness in Harness.agents {
+            let option = ModelOption(id: "fixture-v2", title: "Fixture V2", efforts: ["high"],
+                                     isDefault: true, aliases: ["fixture-v2-high", "alias"])
+            let models = [harness: [option]]
+            var routine = Routine(id: "fixture", name: "Fixture", workingDirectory: "/tmp",
+                                  schedule: "0 9 * * *", harness: harness, enabled: false, prompt: "Synthetic")
+            routine.model = "alias"
+            routine.effort = "high"
+            var record = RunRecord(routineID: routine.id, trigger: .manual, harness: harness,
+                                   startedAt: Date(), outcome: .succeeded)
+            record.reportedModel = "fixture-v2-high"
+            record.reportedEffort = "high"
+            XCTAssertEqual(ModelLabel.model(record: record, models: models), option.title)
+            XCTAssertEqual(ModelLabel.name(record: record, models: models), "\(harness.title)  \(option.title)")
+            XCTAssertEqual(ModelLabel.configuration(routine, models: models),
+                           "\(harness.title) · \(option.title) · High")
+            XCTAssertEqual(ModelLabel.effort(record), "High")
+            record.reportedModelTitle = option.title
+            XCTAssertEqual(ModelLabel.model(record: record, models: [:]), option.title,
+                           "A saved native title keeps effort out while the catalog is unavailable")
+        }
     }
 
     func testMissingClaudeExecutableDoesNotInventAnUnversionedCatalog() {

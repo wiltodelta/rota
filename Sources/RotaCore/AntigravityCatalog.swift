@@ -77,8 +77,7 @@ enum AntigravityCatalog {
               !adjustable || effort?["available"] is [String] else {
             return nil
         }
-        let suffix = " (\(tier.capitalized))"
-        let title = label.hasSuffix(suffix) ? String(label.dropLast(suffix.count)) : label
+        let title = ModelOption.title(label, effort: tier)
         let available = adjustable ? effort?["available"] as? [String] ?? [] : []
         return ModelOption(id: candidate, title: title, efforts: available,
                             isDefault: rows.contains { $0.id == current }, aliases: rows.map(\.id))

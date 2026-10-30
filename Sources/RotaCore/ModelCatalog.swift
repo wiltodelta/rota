@@ -17,6 +17,12 @@ public struct ModelOption: Hashable, Identifiable, Sendable {
         self.aliases = aliases
     }
 
+    /// A native variant's label without the separately displayed reasoning tier.
+    static func title(_ label: String, effort: String) -> String {
+        let suffix = " (\(effort.capitalized))"
+        return label.hasSuffix(suffix) ? String(label.dropLast(suffix.count)) : label
+    }
+
     public func matches(_ value: String?) -> Bool {
         guard let value else { return false }
         return id == value || aliases.contains(value)

@@ -42,7 +42,11 @@ extension Scheduler {
     func updateConfiguration(_ configuration: SessionConfiguration, routineID: String, runID: UUID) {
         guard var record = active[routineID], record.id == runID else { return }
         let previous = record
-        if let model = configuration.model { record.reportedModel = model }
+        if let model = configuration.model {
+            if model != record.reportedModel { record.reportedModelTitle = nil }
+            record.reportedModel = model
+        }
+        if let title = configuration.modelTitle { record.reportedModelTitle = title }
         if let effort = configuration.effort { record.reportedEffort = effort }
         guard previous != record else { return }
         active[routineID] = record

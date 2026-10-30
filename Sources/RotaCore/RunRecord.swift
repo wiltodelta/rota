@@ -62,6 +62,7 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     public var effort: String?
     /// The session configuration reported by the harness, rather than a current CLI default.
     public var reportedModel: String?
+    public var reportedModelTitle: String?
     public var reportedEffort: String?
     public var startedAt: Date
     public var endedAt: Date?

@@ -26,13 +26,13 @@ final class SessionConfigurationTests: XCTestCase {
                                configuration: { values.append($0) })
         let journal = RunJournal(output: try FileHandle(forWritingTo: file), events: events)
         journal.configure(SessionConfiguration())
-        journal.configure(SessionConfiguration(model: "fixture", effort: "high"))
+        journal.configure(SessionConfiguration(model: "fixture", effort: "high", modelTitle: "Fixture"))
         journal.configure(SessionConfiguration(model: "fixture"))
         journal.configure(SessionConfiguration(model: "next"))
         journal.finish(.succeeded)
         journal.configure(SessionConfiguration(model: "too late"))
         wait(for: [finished], timeout: 2)
-        XCTAssertEqual(values, [SessionConfiguration(model: "fixture", effort: "high"),
+        XCTAssertEqual(values, [SessionConfiguration(model: "fixture", effort: "high", modelTitle: "Fixture"),
                                 SessionConfiguration(model: "next", effort: "high")])
     }
 }

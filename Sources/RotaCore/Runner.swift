@@ -245,17 +245,17 @@ public final class ProcessLauncher: RoutineLaunching {
     /// for the whole run.
     static func capture(_ executable: String, _ arguments: [String], in directory: String,
                         timeout: TimeInterval? = nil, errors: Bool = true,
-                        loginShell: Bool = true,
+                        loginShell: Bool = true, environment: [String: String] = [:],
                         clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) -> (Int32, String) {
         let process: Process
         if loginShell {
-            process = loginShellProcess(executable, arguments, in: directory, environment: [:])
+            process = loginShellProcess(executable, arguments, in: directory, environment: environment)
         } else {
             process = Process()
             process.executableURL = URL(fileURLWithPath: executable)
             process.arguments = arguments
             process.currentDirectoryURL = URL(fileURLWithPath: directory)
-            process.environment = baseEnvironment()
+            process.environment = baseEnvironment().merging(environment) { $1 }
             process.standardInput = FileHandle.nullDevice
         }
         let pipe = Pipe()

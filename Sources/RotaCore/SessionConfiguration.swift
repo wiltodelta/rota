@@ -4,10 +4,12 @@ import Foundation
 public struct SessionConfiguration: Equatable, Sendable {
     public var model: String?
     public var effort: String?
+    public var modelTitle: String?
 
-    public init(model: String? = nil, effort: String? = nil) {
+    public init(model: String? = nil, effort: String? = nil, modelTitle: String? = nil) {
         self.model = Self.value(model)
         self.effort = Self.value(effort)
+        self.modelTitle = Self.value(modelTitle)
     }
 
     /// Shared ACP configuration shape from live replies and archived updates.

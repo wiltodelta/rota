@@ -105,7 +105,10 @@ struct SessionHistoryRow: View {
 
     private var metadata: String {
         var parts = [record.harness.title]
-        if let model = record.reportedModel ?? record.model { parts.append(model) }
+        if record.reportedModel ?? record.model != nil {
+            parts.append(ModelLabel.model(record: record, models: model.settings.models))
+        }
+        if let effort = ModelLabel.effort(record) { parts.append(effort) }
         if !record.isSkip, let ended = record.endedAt {
             parts.append(Transcript.readable(seconds: max(0, Int(ended.timeIntervalSince(record.startedAt)))))
         }

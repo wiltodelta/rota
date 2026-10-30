@@ -55,7 +55,7 @@ final class LiveHarnessTests: XCTestCase {
         let snapshot = reader.read(log: log, shell: harness == .shell, finished: true)
         XCTAssertNil(snapshot.problem, snapshot.problem ?? "")
         XCTAssertEqual(snapshot.structured, harness != .shell)
-        if harness.isAgent, harness != .antigravity, outcome == .succeeded {
+        if harness.isAgent, outcome == .succeeded {
             XCTAssertNotNil(configuration.model, "The actual runner must report its session model")
             XCTAssertNotNil(configuration.effort, "Every agent must report an explicit resolved effort")
             print("Resolved configuration for \(harness.rawValue): \(configuration)")
@@ -269,6 +269,13 @@ final class LiveHarnessTests: XCTestCase {
         XCTAssertFalse(created.enabled)
         XCTAssertEqual(ProcessLauncher.capture(helper, ["remove", "rota-e2e-created"],
                                               in: folder.path, timeout: 20).0, 0)
+    }
+
+    func testAntigravityReportsConcreteDefaultWithoutModelOverride() throws {
+        let (outcome, log, _) = try run(.antigravity,
+            prompt: "Do not use tools or change files. Reply with exactly: rota test", message: nil)
+        XCTAssertEqual(outcome, .succeeded, log)
+        XCTAssertNotNil(SessionConfiguration.recordedModel(log: folder.appendingPathComponent("antigravity.log")))
     }
 
     func testAntigravityReadsAttachmentOnChosenModel() throws {

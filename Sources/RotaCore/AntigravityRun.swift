@@ -32,7 +32,13 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
 
     static func start(_ spec: LaunchSpec, journal: RunJournal) throws -> AntigravityRun {
         let run = AntigravityRun(spec: spec, journal: journal)
-        if spec.adopt { try run.restore() } else { try run.launch() }
+        if spec.adopt { try run.restore() } else {
+            run.queue.async {
+                do { try run.launch() } catch {
+                    journal.finish(.launchFailed(error.localizedDescription))
+                }
+            }
+        }
         return run
     }
 
@@ -48,8 +54,15 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
     }
 
     private func launch() throws {
-        let capture = try DurableStream(spec: spec,
-            arguments: Self.arguments(resume: spec.resume) + spec.modelFlags(effortFlag: "--effort"))
+        var applied = spec
+        if let configuration = AntigravityConfiguration.read(spec) {
+            // Pin the resolved variant so a later default change cannot alter this launch.
+            applied.model = configuration.model
+            journal.configure(configuration)
+            if let model = configuration.model { journal.line("[session started, \(model)]") }
+        }
+        let capture = try DurableStream(spec: applied,
+            arguments: Self.arguments(resume: applied.resume) + applied.modelFlags(effortFlag: "--effort"))
         self.capture = capture
         input = capture.input
         _ = fcntl(input!.fileDescriptor, F_SETNOSIGPIPE, 1)

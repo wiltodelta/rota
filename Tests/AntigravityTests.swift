@@ -100,6 +100,7 @@ final class AntigravityTests: XCTestCase {
             ? #"{"event":"result","result":{"status":"SUCCESS","response":"second answer"}}"# : ""
         let script = """
         #!/bin/zsh
+        [[ "$1" == -p ]] && exit 1
         IFS= read -r message
         printf '%s\\n' '{"event":"init","conversation_id":"a1","init":{}}'
         IFS= read -r signal < ready
@@ -142,6 +143,7 @@ final class AntigravityTests: XCTestCase {
         let peer = folder.appendingPathComponent("peer")
         let script = """
         #!/bin/zsh
+        [[ "$1" == -p ]] && exit 1
         IFS= read -r message
         printf '%s\\n' '{"event":"init","conversation_id":"a1","init":{}}'
         IFS= read -r message

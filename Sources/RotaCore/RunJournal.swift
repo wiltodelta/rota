@@ -201,7 +201,11 @@ final class RunJournal: @unchecked Sendable {
         defer { lock.unlock() }
         guard !finished else { return }
         var next = reportedConfiguration
-        if let model = configuration.model { next.model = model }
+        if let model = configuration.model {
+            if model != next.model { next.modelTitle = nil }
+            next.model = model
+        }
+        if let title = configuration.modelTitle { next.modelTitle = title }
         if let effort = configuration.effort { next.effort = effort }
         guard next != reportedConfiguration else { return }
         reportedConfiguration = next

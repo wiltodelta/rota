@@ -65,6 +65,7 @@ extension Scheduler {
         var record = reopened.0
         let spec = reopened.1
         record.reportedModel = nil
+        record.reportedModelTitle = nil
         record.reportedEffort = nil
         record.questions = record.questions?.filter { $0.replyViaMessage == true }
         record.terminalState = nil
