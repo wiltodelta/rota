@@ -166,9 +166,9 @@ private struct ToolRunRow: View {
             let change = lines.count == 1 ? FileChangeTitle.title(lines[0], live: live) : nil
             Text(change ?? (lines.count == 1 ? lines[0] : ToolStep.summary(lines).capitalizedFirst))
                 .font(lines.count == 1 && change == nil ? model.chatText.smallCode : model.chatText.small)
+                .shimmering(live)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .shimmering(live)
             if lines.count > 1 {
                 Image(systemName: "chevron.right")
                     .interfaceFont(.caption2).fontWeight(.semibold)
@@ -224,36 +224,6 @@ enum Elapsed {
     static func short(_ interval: TimeInterval) -> String {
         Transcript.readable(seconds: max(0, Int(interval)))
     }
-}
-
-/// A highlight sweeping across text while something is in progress.
-private struct Shimmer: ViewModifier {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let active: Bool
-
-    func body(content: Content) -> some View {
-        if active && !reduceMotion {
-            TimelineView(.animation) { context in
-                let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
-                content.overlay {
-                    GeometryReader { geometry in
-                        LinearGradient(colors: [.clear, Color.primary.opacity(0.55), .clear],
-                                       startPoint: .leading, endPoint: .trailing)
-                            .frame(width: geometry.size.width * 0.4)
-                            .offset(x: (geometry.size.width * 1.4) * phase - geometry.size.width * 0.4)
-                    }
-                    .mask(content)
-                    .allowsHitTesting(false)
-                }
-            }
-        } else {
-            content
-        }
-    }
-}
-
-extension View {
-    func shimmering(_ active: Bool = true) -> some View { modifier(Shimmer(active: active)) }
 }
 
 /// The agent's latest plan in a turn: each step with its state, done ones struck through.

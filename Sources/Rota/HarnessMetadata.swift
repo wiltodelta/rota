@@ -29,21 +29,12 @@ struct HarnessStatusIcon<Status: View>: View {
 struct RunActivityIndicator: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        TimelineView(.animation(paused: reduceMotion)) { context in
-            let turn = reduceMotion ? 0 :
-                context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2
-            Circle()
-                .trim(from: 0, to: 0.72)
-                .stroke(style: StrokeStyle(lineWidth: metrics.points(1.2), lineCap: .round))
-                .rotationEffect(.degrees(turn * 360))
-                .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
-                .padding(metrics.points(0.6))
-                .frame(width: metrics.points(8), height: metrics.points(8))
-        }
-        .accessibilityIdentifier("runActivityIndicator")
+        SpinnerArc(length: 0.72, lineWidth: metrics.points(1.2), color: colorScheme == .dark ? .white : .black)
+            .padding(metrics.points(0.6))
+            .frame(width: metrics.points(8), height: metrics.points(8))
+            .accessibilityIdentifier("runActivityIndicator")
     }
 }
 

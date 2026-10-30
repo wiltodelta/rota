@@ -320,27 +320,19 @@ private struct ComposerSurface: View {
 /// Stop while the session works: a square in a circle, an arc running round it.
 private struct StopRingButton: View {
     @Environment(\.interfaceScale) private var metrics
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            TimelineView(.animation(paused: reduceMotion)) { context in
-                let turn = reduceMotion ? 0 :
-                    context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2
-                ZStack {
-                    Image(systemName: "stop.fill")
-                        .interfaceSystemFont(size: 11, weight: .bold)
-                        .foregroundStyle(Color.errorText)
-                    Circle()
-                        .trim(from: 0, to: 0.28)
-                        .stroke(Color.orange, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                        .rotationEffect(.degrees(turn * 360))
-                        .padding(metrics.points(1))
-                }
-                .frame(width: metrics.points(28), height: metrics.points(28))
-                .modifier(ControlSurface(shape: Circle()))
+            ZStack {
+                Image(systemName: "stop.fill")
+                    .interfaceSystemFont(size: 11, weight: .bold)
+                    .foregroundStyle(Color.errorText)
+                SpinnerArc(length: 0.28, lineWidth: 2, color: .orange)
+                    .padding(metrics.points(1))
             }
+            .frame(width: metrics.points(28), height: metrics.points(28))
+            .modifier(ControlSurface(shape: Circle()))
         }
         .buttonStyle(.plain)
     }

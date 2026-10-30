@@ -664,6 +664,11 @@ than their natural height, and the window frame stays inside the visible screen.
 Unsent composer drafts live in `AppModel.sessionDrafts`, keyed by session ID,
 until sent or the app quits. The chat's base fonts never fall below 10 pt before interface scaling. Reduce
 Motion stops the stop-ring rotation and suppresses shimmer.
+Progress animations (`ActivityAnimations.swift`: the spinners and the shimmer) run as Core
+Animation on their own layers. A SwiftUI-driven animation, whether a per-frame `TimelineView`
+or a repeating animation, made SwiftUI re-rasterize every text in the same hosting view on each
+frame, so an open running session cost most of a core, more the longer its transcript.
+A `CAGradientLayer` `locations` animation stayed still on screen, so the shimmer moves its band.
 The File menu holds New Routine and Import, the Routine menu Run Now, Stop and
 Edit Routine for `AppModel.selectedRoutine`; sheets open from `AppModel`
 flags so menus and buttons share them. The session header's Show Routine action

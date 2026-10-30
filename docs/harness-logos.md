@@ -23,8 +23,8 @@ When focus leaves the list, titles and marks return to the primary text color
 and captions to the secondary color on the gray selection.
 
 `RunActivityIndicator` rotates an asymmetric 8 pt arc once every 1.2 seconds
-using `TimelineView`, matching the composer's stop ring. The open arc makes
-motion visible at badge size; Reduce Motion pauses the timeline. Its light/dark foreground stays legible
+as a Core Animation `SpinnerArc`, matching the composer's stop ring. The open arc makes
+motion visible at badge size; Reduce Motion leaves it still. Its light/dark foreground stays legible
 on the badge halo even when the row is selected; the native mini progress
 view became white on its light halo in a selected row.
 
