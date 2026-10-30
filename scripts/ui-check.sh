@@ -131,7 +131,8 @@ launch() {
     open_rota --env "ROTA_APPEARANCE=$1"
     sleep 4
     open_rota
-    sleep 2
+    # LaunchServices can return before the main window is available to Accessibility.
+    wait_exists newRoutine
 }
 
 check_layout() {
