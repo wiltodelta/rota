@@ -200,8 +200,7 @@ struct ChatTranscript: View {
                         Image(systemName: "arrow.down")
                             .interfaceSystemFont(size: 13, weight: .semibold)
                             .frame(width: metrics.points(30), height: metrics.points(30))
-                            .background(.regularMaterial, in: Circle())
-                            .overlay { Circle().strokeBorder(Color.primary.opacity(0.1)) }
+                            .modifier(ControlSurface(shape: Circle()))
                     }
                     .buttonStyle(.plain)
                     .padding(.bottom, metrics.points(12))

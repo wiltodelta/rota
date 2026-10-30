@@ -2,8 +2,8 @@ import AppKit
 import RotaCore
 import SwiftUI
 
-/// The field under the chat, as super.engineering draws it: one rounded gray
-/// box holding the message and, under it, what the session runs on, Stop while
+/// The field under the chat: a rounded glass shell with a dense reading backing,
+/// holding the message and, under it, what the session runs on, Stop while
 /// it runs, and Send. Return sends, Option-Return starts a new line. It talks to
 /// the live session where the harness allows it, continues a finished session
 /// otherwise, and says where to go when neither works.
@@ -102,57 +102,59 @@ struct ChatComposer: View {
                 .help(inputHelp)
                 .accessibilityLabel("Message")
                 .accessibilityIdentifier("composer")
-            HStack(spacing: metrics.points(8)) {
-                HStack(spacing: metrics.points(6)) {
-                    HarnessLogo(harness: record.harness)
-                    Text(ModelLabel.model(record: record, models: model.settings.models,
-                                          fallback: resolvedConfiguration?.model ?? legacyModel))
-                        .truncationMode(.middle)
-                    if let effort = resolvingConfiguration ? "Resolving…"
-                        : ModelLabel.effort(record, fallback: resolvedConfiguration?.effort) {
-                        Text("·")
-                        Text(effort).fixedSize()
+            GlassControls(spacing: metrics.points(8)) {
+                HStack(spacing: metrics.points(8)) {
+                    HStack(spacing: metrics.points(6)) {
+                        HarnessLogo(harness: record.harness)
+                        Text(ModelLabel.model(record: record, models: model.settings.models,
+                                              fallback: resolvedConfiguration?.model ?? legacyModel))
+                            .truncationMode(.middle)
+                        if let effort = resolvingConfiguration ? "Resolving…"
+                            : ModelLabel.effort(record, fallback: resolvedConfiguration?.effort) {
+                            Text("·")
+                            Text(effort).fixedSize()
+                        }
                     }
-                }
-                .interfaceFont(.callout)
-                .foregroundStyle(Color.secondaryText)
-                .lineLimit(1)
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("composerModel")
-                .help("The model and reasoning effort for this session.")
-                Spacer(minLength: 8)
-                if staging {
-                    ProgressView().controlSize(.small).frame(width: metrics.points(28), height: metrics.points(28))
-                } else {
-                    RoundButton(symbol: "paperclip", filled: false, fill: .accentColor,
-                                foreground: Color.secondaryText, action: chooseAttachments)
-                        .disabled(choosingFiles)
-                        .help("Attach files, or drag them into this message")
-                        .accessibilityLabel("Attach Files")
-                        .accessibilityIdentifier("attachFiles")
-                }
-                // As super.engineering's: while the session works, its clock, and Stop in Send's
-                // place until there is something to send.
-                if running, let since = model.scheduler.runStartedAt(record) {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text(Self.clock(context.date.timeIntervalSince(since)))
-                            .interfaceFont(.callout).monospacedDigit()
-                            .foregroundStyle(Color.secondaryText)
+                    .interfaceFont(.callout)
+                    .foregroundStyle(Color.secondaryText)
+                    .lineLimit(1)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("composerModel")
+                    .help("The model and reasoning effort for this session.")
+                    Spacer(minLength: 8)
+                    if staging {
+                        ProgressView().controlSize(.small).frame(width: metrics.points(28), height: metrics.points(28))
+                    } else {
+                        RoundButton(symbol: "paperclip", filled: false, fill: .accentColor,
+                                    foreground: Color.secondaryText, action: chooseAttachments)
+                            .disabled(choosingFiles)
+                            .help("Attach files, or drag them into this message")
+                            .accessibilityLabel("Attach Files")
+                            .accessibilityIdentifier("attachFiles")
                     }
-                }
-                if running && !canSend {
-                    StopRingButton { model.scheduler.stop(record.routineID) }
-                        .help("Stop the session")
-                        .accessibilityLabel("Stop")
-                        .accessibilityIdentifier("composerStop")
-                } else {
-                    RoundButton(symbol: "arrow.up", filled: canSend, fill: Color.accentColor,
-                                foreground: canSend ? .white : Color.secondaryText, action: send)
-                        .disabled(!canSend)
-                        .keyboardShortcut(.return, modifiers: .command)
-                        .help("Send (Return)")
-                        .accessibilityLabel("Send")
-                        .accessibilityIdentifier("send")
+                    // As super.engineering's: while the session works, its clock, and Stop in Send's
+                    // place until there is something to send.
+                    if running, let since = model.scheduler.runStartedAt(record) {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            Text(Self.clock(context.date.timeIntervalSince(since)))
+                                .interfaceFont(.callout).monospacedDigit()
+                                .foregroundStyle(Color.secondaryText)
+                        }
+                    }
+                    if running && !canSend {
+                        StopRingButton { model.scheduler.stop(record.routineID) }
+                            .help("Stop the session")
+                            .accessibilityLabel("Stop")
+                            .accessibilityIdentifier("composerStop")
+                    } else {
+                        RoundButton(symbol: "arrow.up", filled: canSend, fill: Color.accentColor,
+                                    foreground: canSend ? .white : Color.secondaryText, action: send)
+                            .disabled(!canSend)
+                            .keyboardShortcut(.return, modifiers: .command)
+                            .help("Send (Return)")
+                            .accessibilityLabel("Send")
+                            .accessibilityIdentifier("send")
+                    }
                 }
             }
             if record.hasBlockingQuestion {
@@ -171,7 +173,11 @@ struct ChatComposer: View {
         .padding(.horizontal, metrics.points(16))
         .padding(.top, metrics.points(hasQuestion ? 10 : 14))
         .padding(.bottom, metrics.points(hasQuestion ? 8 : 10))
-        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: metrics.points(20)))
+        .background {
+            ComposerSurface(shape: RoundedRectangle(cornerRadius: metrics.points(20)))
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
         .overlay {
             RoundedRectangle(cornerRadius: metrics.points(20))
                 .strokeBorder(focused || dropTargeted ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.08),
@@ -290,6 +296,27 @@ struct ChatComposer: View {
     }
 }
 
+/// Decoration stays separate from the editor so appearance changes preserve its draft and focus.
+private struct ComposerSurface: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+    let shape: RoundedRectangle
+
+    var body: some View {
+        if #available(macOS 26, *), !reduceTransparency, contrast != .increased {
+            ZStack {
+                shape.fill(Color(nsColor: .textBackgroundColor).opacity(0.9))
+                Color.clear.glassEffect(.regular, in: shape)
+            }
+        } else {
+            shape.fill(Color(nsColor: .controlBackgroundColor))
+                .overlay {
+                    if contrast == .increased { shape.strokeBorder(Color.primary.opacity(0.5)) }
+                }
+        }
+    }
+}
+
 /// Stop while the session works: a square in a circle, an arc running round it.
 private struct StopRingButton: View {
     @Environment(\.interfaceScale) private var metrics
@@ -302,7 +329,6 @@ private struct StopRingButton: View {
                 let turn = reduceMotion ? 0 :
                     context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2
                 ZStack {
-                    Circle().fill(Color.primary.opacity(0.08))
                     Image(systemName: "stop.fill")
                         .interfaceSystemFont(size: 11, weight: .bold)
                         .foregroundStyle(Color.errorText)
@@ -313,14 +339,14 @@ private struct StopRingButton: View {
                         .padding(metrics.points(1))
                 }
                 .frame(width: metrics.points(28), height: metrics.points(28))
+                .modifier(ControlSurface(shape: Circle()))
             }
         }
         .buttonStyle(.plain)
     }
 }
 
-/// A 28 pt circular icon button, as the composer's Send and Stop: filled when
-/// it acts, an outlined circle when it waits, as super.engineering's Send does.
+/// A compact circular control, with an accent tint when a message is ready to send.
 private struct RoundButton: View {
     @Environment(\.interfaceScale) private var metrics
     let symbol: String
@@ -335,8 +361,7 @@ private struct RoundButton: View {
                 .interfaceSystemFont(size: 13, weight: .bold)
                 .foregroundStyle(foreground)
                 .frame(width: metrics.points(28), height: metrics.points(28))
-                .background(filled ? fill : .clear, in: Circle())
-                .overlay { if !filled { Circle().strokeBorder(Color.secondary.opacity(0.5)) } }
+                .modifier(ControlSurface(shape: Circle(), tint: filled ? fill : nil))
         }
         .buttonStyle(.plain)
     }

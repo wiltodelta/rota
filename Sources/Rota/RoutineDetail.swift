@@ -69,33 +69,36 @@ struct RoutineDetail: View {
     }
 
     private var actions: some View {
-        HStack(spacing: metrics.points(12)) {
-            // Labeled, so the switch says what it pauses rather than reading as "On".
-            Toggle(isOn: Binding(
-                get: { routine.enabled },
-                set: { model.scheduler.setEnabled($0, for: routine.id) }
-            )) {
-                Text("Scheduled").interfaceFont(.body)
-            }
-            .toggleStyle(.switch)
-            .help(routine.enabled ? "Runs on schedule; turn off to pause" : "Paused; turn on to run on schedule")
-            .accessibilityIdentifier("routineEnabled")
-            if model.scheduler.active[routine.id] != nil {
-                Button(interfaceTitle: "Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }
-                    .accessibilityIdentifier("stopRoutine")
-            } else {
-                Button(interfaceTitle: "Run Now", systemImage: "play.fill") {
-                    model.scheduler.run(routine, trigger: .manual)
-                    model.selection = model.latest(of: routine.id)
+        GlassControls(spacing: metrics.points(12)) {
+            HStack(spacing: metrics.points(12)) {
+                // Labeled, so the switch says what it pauses rather than reading as "On".
+                Toggle(isOn: Binding(
+                    get: { routine.enabled },
+                    set: { model.scheduler.setEnabled($0, for: routine.id) }
+                )) {
+                    Text("Scheduled").interfaceFont(.body)
                 }
-                .accessibilityIdentifier("runNow")
+                .toggleStyle(.switch)
+                .help(routine.enabled ? "Runs on schedule; turn off to pause" : "Paused; turn on to run on schedule")
+                .accessibilityIdentifier("routineEnabled")
+                if model.scheduler.active[routine.id] != nil {
+                    Button(interfaceTitle: "Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }
+                        .accessibilityIdentifier("stopRoutine")
+                } else {
+                    Button(interfaceTitle: "Run Now", systemImage: "play.fill") {
+                        model.scheduler.run(routine, trigger: .manual)
+                        model.selection = model.latest(of: routine.id)
+                    }
+                    .accessibilityIdentifier("runNow")
+                }
+                Button(interfaceTitle: "Edit\u{2026}", systemImage: "slider.horizontal.3") {
+                    model.editingRoutineID = routine.id
+                }
+                .help("Edit the routine's settings (Command-E)")
+                .accessibilityIdentifier("editRoutine")
             }
-            Button(interfaceTitle: "Edit\u{2026}", systemImage: "slider.horizontal.3") {
-                model.editingRoutineID = routine.id
-            }
-            .help("Edit the routine's settings (Command-E)")
-            .accessibilityIdentifier("editRoutine")
         }
+        .modifier(GlassActionStyle())
     }
 
     /// "Codex gpt-6-sol high": where and on what it runs.

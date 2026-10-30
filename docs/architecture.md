@@ -781,6 +781,21 @@ content must reflow or truncate instead of expanding the window. A native title-
 additional height. Do not insert a separate row above the sidebar or move the
 controls to the window's leading edge. Both glass surfaces use real interactive
 Liquid Glass on macOS 26+, with a material fallback on older systems.
+Compact chat controls reuse native Liquid Glass through `ControlSurface`: Attach,
+Send, Stop, the latest-message arrow, and Show Question. Nearby composer controls
+share a `GlassEffectContainer`; the foreground belongs inside each effect so
+shared glass compositing cannot cover its icon. The composer's `ComposerSurface`
+adds a quiet regular-glass shell over a dense adaptive text backing. It decorates
+only the background, keeping editor identity, focus, and draft storage stable.
+The transcript retains its neutral reading surface. Reduce Transparency and Increase Contrast
+select opaque adaptive control backgrounds, with stronger outlines for increased
+contrast; older macOS versions also use the opaque fallback.
+Session header push buttons and routine Run Now/Stop and Edit buttons use native
+glass through `GlassActionStyle`, with bordered buttons on older macOS versions. Their `GlassControls` groups share a sampling region;
+macOS owns button sizing, keyboard feedback, and accessibility appearance.
+Restart menus apply the shared `ControlSurface` directly to a combined accessible
+label. A plain native menu button supplies menu behavior, with an explicit chevron
+inside the same glass surface. This also covers the usage-limit banner.
 An empty native toolbar preserves window chrome; it must use `iconOnly`, because
 its default display mode adds 14 pt even without visible items. Position the
 overlay in window coordinates: the hosting view's alignment rectangle can extend
@@ -833,6 +848,8 @@ The UI check uses the native Command-0 and Command-Plus shortcuts for zoom, so
 menu validation runs. A closed SwiftUI menu can retain a stale disabled state
 after zoom resets; direct AXPress may report success while dropping the first
 Zoom In action. Other menu actions remain available through the AX driver.
+The driver's press action re-resolves invalidated AX elements before retrying;
+other action errors remain failures, so a changed menu item does not hide a failed command.
 Development checkouts share the default app identity. When another development
 copy is open, sign the test copy with a session-specific bundle ID ending in
 `.dev` and set the driver's `ROTA_BUNDLE_ID` to match. Keep `ROTA_DATA_DIR` isolated

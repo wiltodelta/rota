@@ -117,9 +117,15 @@ case "menu":
     guard result == .success else { fail("menu action failed: \(result.rawValue)") }
 case "press":
     guard arguments.count == 2 else { fail("press <id-or-title>") }
-    guard let button = find({ matches($0, arguments[1]) && (attribute($0, kAXRoleAttribute) as String?) != "AXWindow" })
-    else { fail("no element \(arguments[1])") }
-    let result = AXUIElementPerformAction(button, kAXPressAction as CFString)
+    var result = AXError.invalidUIElement
+    for attempt in 0..<3 {
+        guard let button = find({ matches($0, arguments[1]) && (attribute($0, kAXRoleAttribute) as String?) != "AXWindow" })
+        else { fail("no element \(arguments[1])") }
+        result = AXUIElementPerformAction(button, kAXPressAction as CFString)
+        // SwiftUI can replace a menu item between discovery and its action.
+        guard result == .invalidUIElement, attempt < 2 else { break }
+        Thread.sleep(forTimeInterval: 0.1)
+    }
     guard result == .success else { fail("press failed: \(result.rawValue)") }
 case "disclose":
     guard arguments.count == 3, ["Expanded", "Collapsed"].contains(arguments[2]),

@@ -4,6 +4,7 @@ import SwiftUI
 /// A one-session harness choice, shared by the header and the usage-limit suggestion.
 struct SessionRestartMenu: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.interfaceScale) private var metrics
     let record: RunRecord
     var identifier = "restartSession"
     @State private var restarting = false
@@ -24,8 +25,19 @@ struct SessionRestartMenu: View {
                 .accessibilityIdentifier("restartWith-\(harness.rawValue)")
             }
         } label: {
-            InterfaceButtonLabel(title: "Restart with…", symbol: "arrow.triangle.2.circlepath")
+            HStack(spacing: metrics.points(10)) {
+                InterfaceButtonLabel(title: "Restart with…", symbol: "arrow.triangle.2.circlepath")
+                Image(systemName: "chevron.down").interfaceSystemFont(size: 10, weight: .semibold)
+            }
+            .padding(.horizontal, metrics.points(12))
+            .frame(minHeight: metrics.points(28))
+            .modifier(ControlSurface(shape: Capsule()))
+            .accessibilityElement(children: .combine)
         }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .accessibilityLabel("Restart with…")
         .disabled(restarting || !model.scheduler.canRestart(record))
         .help("Start a new session with this conversation's context. Uses the chosen harness's default model.")
         .accessibilityIdentifier(identifier)

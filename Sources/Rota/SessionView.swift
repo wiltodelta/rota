@@ -62,8 +62,11 @@ struct SessionView: View {
                     Spacer(minLength: metrics.points(8))
                     Button { questionRevealRequest += 1 } label: {
                         Text("Show Question").interfaceFont(.callout)
+                            .padding(.horizontal, metrics.points(10))
+                            .frame(minHeight: metrics.points(28))
+                            .modifier(ControlSurface(shape: Capsule()))
                     }
-                    .controlSize(.small)
+                    .buttonStyle(.plain)
                     .accessibilityIdentifier("showQuestion")
                 }
                 .padding(.horizontal, metrics.points(24))
@@ -127,25 +130,28 @@ struct SessionView: View {
     }
 
     private var header: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: metrics.points(12)) {
-                sessionSummary
-                Spacer(minLength: 12)
-                showRoutine
-                sessionActions
-            }
-            VStack(alignment: .leading, spacing: metrics.points(8)) {
+        GlassControls(spacing: metrics.points(12)) {
+            ViewThatFits(in: .horizontal) {
                 HStack(spacing: metrics.points(12)) {
                     sessionSummary
                     Spacer(minLength: 12)
                     showRoutine
-                }
-                HStack(spacing: metrics.points(12)) {
-                    Spacer(minLength: 0)
                     sessionActions
+                }
+                VStack(alignment: .leading, spacing: metrics.points(8)) {
+                    HStack(spacing: metrics.points(12)) {
+                        sessionSummary
+                        Spacer(minLength: 12)
+                        showRoutine
+                    }
+                    HStack(spacing: metrics.points(12)) {
+                        Spacer(minLength: 0)
+                        sessionActions
+                    }
                 }
             }
         }
+        .modifier(GlassActionStyle())
     }
 
     private var sessionSummary: some View {
