@@ -12,7 +12,7 @@ enum GrokToolOutput {
             let before = block["oldText"] as? String ?? ""
             let after = block["newText"] as? String ?? ""
             return path + "\nBefore:\n" + before + "\nAfter:\n" + after
-        default: return nil
+        default: return ToolOutput.unsupported(block)
         }
     }
 }

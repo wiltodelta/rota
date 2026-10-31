@@ -43,6 +43,7 @@ final class InstalledHarnessContractTests: XCTestCase {
         }
         XCTAssertFalse(checked.isEmpty, "The schema walk must reach interaction requests")
         print("Codex interaction methods checked: \(checked.sorted())")
+        try checkDynamicOutputBlocksRemainVisible(schema: schema)
     }
 
     private func flags(_ harness: Harness, arguments: [String] = ["--help"], required: [String]) throws {
@@ -51,6 +52,29 @@ final class InstalledHarnessContractTests: XCTestCase {
         let result = ProcessLauncher.capture(path, arguments, in: folder.path, timeout: 15)
         XCTAssertEqual(result.0, 0, result.1)
         for flag in required { XCTAssertTrue(result.1.contains(flag), "Missing \(harness.title) contract: \(flag)") }
+    }
+
+    private func checkDynamicOutputBlocksRemainVisible(schema: URL) throws {
+        let data = try Data(contentsOf: schema.appendingPathComponent("v2/ThreadItemsListResponse.json"))
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let definitions = try XCTUnwrap(root["definitions"] as? [String: [String: Any]])
+        let variants = try XCTUnwrap(definitions["DynamicToolCallOutputContentItem"]?["oneOf"] as? [[String: Any]])
+        XCTAssertFalse(variants.isEmpty)
+        for variant in variants {
+            let properties = try XCTUnwrap(variant["properties"] as? [String: [String: Any]])
+            let type = try XCTUnwrap((properties["type"]?["enum"] as? [String])?.first)
+            var block: [String: Any] = ["type": type]
+            for (key, property) in properties where key != "type" && property["type"] as? String == "string" {
+                block[key] = key == "imageUrl" ? "file:///tmp/synthetic-output.png" : "Synthetic output"
+            }
+            let entries = CodexItemOutput.entries(["type": "dynamicToolCall", "contentItems": [block]])
+            XCTAssertEqual(entries.count, 1, "Installed output block disappeared: \(type)")
+            XCTAssertFalse(entries.first?.text.isEmpty ?? true, type)
+            if type == "inputText" { XCTAssertEqual(entries.first?.text, "Synthetic output") }
+            if type == "inputImage" {
+                XCTAssertEqual(entries.first.flatMap { ToolOutput.decode($0.text) }?.parts.first?.kind, .image)
+            }
+        }
     }
 
     func testClaudeFlags() throws {
@@ -74,6 +98,8 @@ final class InstalledHarnessContractTests: XCTestCase {
     func testInstalledModelMetadataWithoutGeneration() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["ROTA_PROTOCOL_CHECK"] == "1",
                           "Set ROTA_PROTOCOL_CHECK=1 for account-backed metadata reads without generation")
+        let exportPath = ProcessInfo.processInfo.environment["ROTA_HARNESS_REVIEW_OUTPUT"]
+        var catalogs: [String: Any] = [:]
         for harness in Harness.agents {
             let path = try executable(harness)
             let models: [ModelOption]
@@ -85,6 +111,18 @@ final class InstalledHarnessContractTests: XCTestCase {
             XCTAssertFalse(models.isEmpty, "\(harness.title) metadata unavailable")
             XCTAssertEqual(Set(models.map(\.id)).count, models.count)
             XCTAssertTrue(models.contains(where: \.isDefault), "\(harness.title) did not resolve its default")
+            if exportPath != nil {
+                catalogs[harness.rawValue] = [
+                    "version": ExecutableDiscovery.version(of: path) ?? "unreported",
+                    "models": models.sorted { $0.id < $1.id }.map { model -> [String: Any] in
+                        ["id": model.id, "title": model.title, "efforts": model.efforts,
+                         "aliases": model.aliases, "isDefault": model.isDefault]
+                    }]
+            }
+        }
+        if let output = exportPath {
+            try JSONSerialization.data(withJSONObject: catalogs, options: [.sortedKeys, .prettyPrinted])
+                .write(to: URL(fileURLWithPath: output), options: .atomic)
         }
     }
 }

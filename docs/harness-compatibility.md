@@ -5,6 +5,9 @@ Rota integrates execution modes, not interchangeable command-line programs.
 image support, text streaming, reasoning and background-work behavior. The
 coverage matrix and remaining gaps live in
 [Architecture](architecture.md#feature-coverage-across-harnesses).
+Native output sources, event-to-presentation mapping, regression tests and
+unsupported-content boundaries live in the
+[Harness output contract](harness-output-contract.md).
 
 ## Check levels
 
@@ -31,6 +34,9 @@ coverage matrix and remaining gaps live in
 
 `ROTA_LIVE`, `ROTA_LIVE_QUESTIONS`, `ROTA_PROTOCOL_CHECK` and
 `ROTA_INTERACTIVE_TEST_DIR` are test inputs, not saved application settings.
+`ROTA_HARNESS_REVIEW_OUTPUT` optionally exports native model catalogs to a local
+JSON file during the installed metadata check. The weekly review hashes that
+evidence; raw account catalogs and CLI logs are never published.
 Run `scripts/ui-check.sh --harnesses-only` for Reasoning expansion, hidden empty
 reasoning, tool image previews, collapsed/expanded diffs and version warnings in both appearances at the minimum
 window width. It uses disabled

@@ -57,15 +57,35 @@ public struct ToolOutput: Codable, Equatable, Sendable {
             }
             let image = block["image_url"] as? [String: Any]
             let url = source["url"] as? String ?? block["imageUrl"] as? String
-                ?? block["image_url"] as? String ?? image?["url"] as? String
+                ?? block["image_url"] as? String ?? image?["url"] as? String ?? block["uri"] as? String
             if let url {
                 return [.init(kind: .image, text: url, path: "Tool image")]
             }
-            return []
+            return [.init(kind: .text, text: unsupported(block))]
         case "resource":
             return ((block["resource"] as? [String: Any])?["text"] as? String)
-                .map { [.init(kind: .text, text: $0)] } ?? []
-        default: return []
+                .map { [.init(kind: .text, text: $0)] }
+                ?? [.init(kind: .text, text: unsupported(block))]
+        case "resource_link":
+            let metadata = details(block)
+            return [.init(kind: .text, text: metadata.isEmpty ? unsupported(block) : metadata.joined(separator: "\n"))]
+        default: return [.init(kind: .text, text: unsupported(block))]
+        }
+    }
+
+    /// Preserve display metadata without serializing opaque binary data or provider-private fields.
+    static func unsupported(_ block: [String: Any]) -> String {
+        let type = block["type"] as? String ?? "unknown"
+        let resource = block["resource"] as? [String: Any] ?? block
+        return (["Couldn't display tool content (\(type))."] + details(resource)).joined(separator: "\n")
+    }
+
+    private static func details(_ block: [String: Any]) -> [String] {
+        var seen = Set<String>()
+        return ["title", "name", "mimeType", "uri", "text"].compactMap { key in
+            guard let value = block[key] as? String, !value.isEmpty, seen.insert(value).inserted else { return nil }
+            if key == "uri", value.lowercased().hasPrefix("data:") { return nil }
+            return value
         }
     }
 }

@@ -687,7 +687,11 @@ entries = [{"version": 1, "type": "header", "logSize": 0},
            {"version": 1, "type": "item", "id": 3, "kind": "tool", "text": "Inspect example.txt", "logSize": size},
            {"version": 1, "type": "item", "id": 4, "kind": "output",
             "text": tool_output, "logSize": size},
-           {"version": 1, "type": "item", "id": 5, "kind": "agent", "text": answer, "logSize": size}]
+           {"version": 1, "type": "item", "id": 5, "kind": "output",
+            "text": "Couldn't display tool content (audio).\naudio/wav", "logSize": size},
+           {"version": 1, "type": "item", "id": 6, "kind": "output",
+            "text": "Report\nreport.txt\ntext/plain\nhttps://example.com/report", "logSize": size},
+           {"version": 1, "type": "item", "id": 7, "kind": "agent", "text": answer, "logSize": size}]
 log.with_name(log.name + ".chat.jsonl").write_text("".join(json.dumps(row) + "\n" for row in entries))
 now = datetime.now(timezone.utc)
 stamp = lambda value: value.isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -743,6 +747,11 @@ PYTHON
         check wait_visible markdownImage
         check "$DRIVER" exists toolDiff-4-1
         capture "Harness compatibility check" "$appearance-harness-tool-output"
+        "$DRIVER" reveal toolCall-5
+        check wait_visible $'Couldn\'t display tool content (audio).\naudio/wav'
+        "$DRIVER" reveal toolCall-6
+        check wait_visible $'Report\nreport.txt\ntext/plain\nhttps://example.com/report'
+        capture "Harness compatibility check" "$appearance-harness-tool-fallback"
         "$DRIVER" disclose toolDiff-4-1 Expanded
         "$DRIVER" reveal toolDiff-4-1-body
         check wait_visible toolDiff-4-1-body

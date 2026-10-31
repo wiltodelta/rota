@@ -4,7 +4,8 @@ Rota supports a small common presentation subset: user and agent messages,
 provider-exposed reasoning, generic tool activity, and informational or error notices. Plans are optional
 existing metadata. Runner adapters select these kinds; provider event names
 and tool schemas never reach the view. Unknown auxiliary provider events are
-ignored, while supported text in neighboring blocks is retained. Transport
+ignored, while unsupported tool-result content gets a visible notice and
+supported neighboring content is retained. Transport
 and execution failures remain runner failures.
 
 ## Storage and ownership
@@ -261,3 +262,10 @@ content share the block decoder. Unsupported blocks cannot suppress adjacent
 text or images. Codex native file-change, image-view and image-generation RPC
 items keep durable native IDs through replay. Child-agent lifecycle notes stay
 status entries, separate from the parent's answer.
+
+Resource links retain their display metadata as literal text. Unknown tool-result
+blocks and unreadable images display a notice with available type, title, name,
+MIME type, URI and text, excluding opaque bytes and private metadata. Binary
+resource bodies are not decoded. Codex standalone `functionCallOutput` items
+use the same decoder. The supported native shapes, primary sources and regression
+tests are mapped in the [Harness output contract](harness-output-contract.md).

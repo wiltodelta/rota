@@ -25,6 +25,8 @@ enum CodexItemOutput {
 
     private static func specialized(_ item: [String: Any]) -> [Entry] {
         switch item["type"] as? String {
+        case "functionCallOutput":
+            return ToolOutput.content(item["output"]).map { [.init(text: $0, suffix: "/output")] } ?? []
         case "fileChange": return fileChanges(item)
         case "imageView":
             return (item["path"] as? String).map {

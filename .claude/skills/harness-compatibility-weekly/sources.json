@@ -1,0 +1,15 @@
+[
+  {"id":"codex-protocol","url":"https://learn.chatgpt.com/docs/app-server.md","marker":"item/completed"},
+  {"id":"codex-models","url":"https://developers.openai.com/codex/models/","marker":"Codex"},
+  {"id":"codex-release","url":"https://api.github.com/repos/openai/codex/releases/latest","format":"release","marker":"tag_name"},
+  {"id":"claude-stream","url":"https://code.claude.com/docs/en/agent-sdk/streaming-output.md","marker":"content_block"},
+  {"id":"claude-models","url":"https://code.claude.com/docs/en/model-config.md","marker":"effort"},
+  {"id":"claude-release","url":"https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md","marker":"##"},
+  {"id":"grok-protocol","url":"https://raw.githubusercontent.com/xai-org/grok-build/refs/heads/main/crates/codegen/xai-grok-pager/docs/user-guide/15-agent-mode.md","marker":"session/update"},
+  {"id":"grok-release","url":"https://x.ai/changelog/build","marker":"Grok"},
+  {"id":"acp-content","url":"https://agentclientprotocol.com/protocol/v1/content.md","marker":"Content"},
+  {"id":"acp-tools","url":"https://agentclientprotocol.com/protocol/v1/tool-calls.md","marker":"tool_call"},
+  {"id":"antigravity-protocol","url":"https://antigravity.google/docs/cli/headless/","marker":"step_update"},
+  {"id":"antigravity-models","url":"https://antigravity.google/docs/models/","marker":"model"},
+  {"id":"antigravity-release","url":"https://raw.githubusercontent.com/google-antigravity/antigravity-cli/refs/heads/main/CHANGELOG.md","marker":"##"}
+]

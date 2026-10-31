@@ -1106,6 +1106,9 @@ row's 8 pt inset and up or down as far as the list (a pinned section header
 floats over the rows). Every
 capture runs it. `choose` reads the pop-up back and retries,
 because SwiftUI can redraw the form while its menu is open and drop the pick.
+Before wheel input, the driver polls the window stack briefly after raising Rota.
+Activation and the window-server list can settle at different times. A persistent
+foreign window at the target point still stops the check before any event is sent.
 
 Initial transcript rendering needs a window capture before walking the
 Accessibility tree. An AX walk can materialize lazy rows and hide a blank first
@@ -1160,6 +1163,10 @@ each path and full diff. `ToolOutputView` reuses the local image preview and
 opens diffs in bounded, initially collapsed disclosures. Plain output stays
 literal code text. External URLs are not fetched, missing files have an explicit
 placeholder, and unsupported audio/document/video formats are not decoded.
+Unsupported tool-result blocks show an explicit notice with available display
+metadata; resource links retain their metadata as literal text. Opaque bytes
+and private metadata are excluded from this fallback. Native sources and tests
+are mapped in the [Harness output contract](harness-output-contract.md).
 
 Draft text and attachment references are keyed by session ID in `AppModel`, so
 switching sessions preserves both. Removing a draft chip deletes only its owned
@@ -1460,6 +1467,7 @@ service that may host somebody else's work.
 | Questions | hooks/control | hooks, terminal dialogs | RPC/message | ACP | later message | n/a |
 | Reasoning/tool output | exposed blocks | native archive | exposed RPC items | ACP thought/tool content | native archive/stream | log |
 | Tool images | result blocks | result blocks | RPC/native output blocks | ACP/archive images | no verified image result block | n/a |
+| Unsupported tool-result blocks | notice with details | notice with details | notice with details | notice with details | string output, no verified block format | n/a |
 | Subagent activity | native task notifications | native task notifications | root lifecycle/status items | spawn/finish updates | confirmed launch only | n/a |
 | Live answer text | partial events | transcript entries | deltas | chunks | deltas | log |
 | Retry progress | api_retry status | api_error status | willRetry status | live retry payload unverified | CLI owns retries | n/a |

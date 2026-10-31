@@ -218,8 +218,10 @@
   shows its schedule and next run, the switch that pauses it, **Run Now** and its
   sessions; **Edit…** opens its settings, Delete included. A new routine runs
   on its schedule from the start.
-- Chat shows messages and basic tool activity. Unsupported optional output is
-  omitted; if chat history cannot be read, Rota shows a warning and uses the
+- Chat shows messages and basic tool activity. Unsupported tool-result content
+  shows a notice with its type and available details. Resource links retain
+  their name and URI as text; binary formats have no dedicated viewer. Optional
+  control events are omitted. If chat history cannot be read, Rota shows a warning and uses the
   readable log. Long chats initially load about 50 entries; tool calls and their
   output stay together even when the group is larger. Load Earlier Messages
   brings in previous entries without splitting those groups. See [Transcript format](transcript-format.md) for the

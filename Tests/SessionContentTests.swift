@@ -38,7 +38,7 @@ final class SessionContentTests: XCTestCase {
                 ["type": "input_text", "text": "first"], ["type": "future_kind"],
                 ["type": "input_text", "text": "last"]]]]
             XCTAssertEqual(try NativeTranscript.events(JSONSerialization.data(withJSONObject: row), harness: .codex),
-                           [.item(.output, "first\nlast")])
+                           [.item(.output, "first\nCouldn't display tool content (future_kind).\nlast")])
         }
     }
 

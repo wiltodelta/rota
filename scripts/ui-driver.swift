@@ -377,15 +377,24 @@ case "scroll-wheel":
     // floating window (a video player, a dictation indicator) stays there after
     // activation, so name it rather than scroll it. The Dock's own full-screen
     // window (layer 20) and the menu bar sit above and pass events through.
-    let listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
-    if let front = listed.first(where: { info in
-        let layer = info[kCGWindowLayer as String] as? Int ?? 0
-        let alpha = info[kCGWindowAlpha as String] as? Double ?? 1
-        guard layer < Int(CGWindowLevelForKey(.dockWindow)), alpha > 0,
-              let bounds = info[kCGWindowBounds as String] as? NSDictionary,
-              let frame = CGRect(dictionaryRepresentation: bounds) else { return false }
-        return frame.contains(point)
-    }), (front[kCGWindowOwnerPID as String] as? pid_t) != app.processIdentifier {
+    var blocker: [String: Any]?
+    for attempt in 0..<10 {
+        if attempt > 0 { Thread.sleep(forTimeInterval: 0.1) }
+        let listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+        blocker = listed.first(where: { info in
+            let layer = info[kCGWindowLayer as String] as? Int ?? 0
+            let alpha = info[kCGWindowAlpha as String] as? Double ?? 1
+            guard layer < Int(CGWindowLevelForKey(.dockWindow)), alpha > 0,
+                  let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+                  let frame = CGRect(dictionaryRepresentation: bounds) else { return false }
+            return frame.contains(point)
+        })
+        if blocker == nil || (blocker?[kCGWindowOwnerPID as String] as? pid_t) == app.processIdentifier {
+            blocker = nil
+            break
+        }
+    }
+    if let front = blocker {
         let owner = front[kCGWindowOwnerName as String] as? String ?? "another app"
         let name = front[kCGWindowName as String] as? String ?? ""
         fail("\(owner)\(name.isEmpty ? "" : " (\(name))") covers the scroll point; move it away and rerun")

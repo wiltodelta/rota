@@ -72,6 +72,9 @@ jobs:
     - name: Run Tests
       run: swift test
 
+    - name: Test weekly review state handling
+      run: python3 -B -m unittest discover -s scripts/tests -p 'test_harness_review.py' -v
+
     # Tag builds only: a temporary keychain with the Developer ID Application
     # identity and the notarytool profile, so create-app.sh signs with it
     # (hardened runtime, timestamp) and notarize.sh notarizes
