@@ -6,9 +6,9 @@
       "action": "Authorize a separate native-contract verification and implementation task for finished_reason",
       "source": ".claude/harness-compatibility-weekly.md#agy-finished-reason-учитывать-досрочное-завершение",
       "first_seen_at": "2026-10-31T01:11:56Z",
-      "updated_at": "2026-10-31T01:11:56Z",
-      "question_asked_at": null,
-      "question_source": null,
+      "updated_at": "2026-10-31T01:17:32Z",
+      "question_asked_at": "2026-10-31T01:17:32Z",
+      "question_source": "Codex session: harness-compatibility-weekly, request_user_input_async accepted 2026-10-31T01:17:32Z",
       "resolution": null,
       "resolved_at": null
     }
