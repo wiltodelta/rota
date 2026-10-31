@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "sources": {
+    "codex-protocol": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "7e0c30b305c7f2303ca057dfec184a5d129aa8016d57e727ebb01201afb644dc",
+      "url": "https://learn.chatgpt.com/docs/app-server.md",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "codex-models": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "f070e59f91a3acf6c6666ccc8dc9f930faf731fce4217bf67f64f55326f31b9a",
+      "url": "https://developers.openai.com/codex/models/",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "codex-release": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "e4d70cfae858434b657fa6d248db488bffa9dd2da2d45ba62ffcf3cff008fc59",
+      "url": "https://api.github.com/repos/openai/codex/releases/latest",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "claude-stream": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "e2f6640e078f3770d37250bf01301c748ff42daa4bf229dcf0ffb8835f869319",
+      "url": "https://code.claude.com/docs/en/agent-sdk/streaming-output.md",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "claude-models": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "97a274e6602bb831eb816b0347f4f2e1f5129e6ffdd99aa15f0aedd679a648b4",
+      "url": "https://code.claude.com/docs/en/model-config.md",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "claude-release": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "41745d8b9ce7fdf3b0106e2eac8a9e2f85b4f168e87091c8097be4952c832133",
+      "url": "https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "grok-protocol": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "954bece1b5055cd21926c826f79bb1e2e2e6e3fc42d80c65dff87b90cc250a6e",
+      "url": "https://raw.githubusercontent.com/xai-org/grok-build/refs/heads/main/crates/codegen/xai-grok-pager/docs/user-guide/15-agent-mode.md",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "grok-release": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "6d1331604af9681586460c9f86070951289bf59c811c6d854aa31e0c1042ab1f",
+      "url": "https://x.ai/changelog/build",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "acp-content": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "5e0b457a3069799ebf2482eb97c6ae5a3a0ae5cfeb0aaa03356425fc6c455c2a",
+      "url": "https://agentclientprotocol.com/protocol/v1/content.md",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "acp-tools": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "7cae149e46ee3488bd99d03b116fc8b136b806442fe2623fe342b69b95017e36",
+      "url": "https://agentclientprotocol.com/protocol/v1/tool-calls.md",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "antigravity-protocol": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "0d49f29d988c2610afab4e6ad8b69396b148702c5924d5ca242bdd8510f59602",
+      "url": "https://antigravity.google/docs/cli/headless/",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "antigravity-models": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "d5829074a50c0b0e6fcec6f0c2bd4b9df6261f15bbe55b44e26f1d16181c69e4",
+      "url": "https://antigravity.google/docs/models/",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "antigravity-release": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "86abf3cab6cfb25c22f82568ee87252c132ec293c3c7d93dbbe611b419295ca3",
+      "url": "https://raw.githubusercontent.com/google-antigravity/antigravity-cli/refs/heads/main/CHANGELOG.md",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "installed-claude": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "fa06a14224d182a35bfc8857d307c5591b369f9a85a15ba42f21a7828dda21ff",
+      "version": "2.1.314",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "installed-codex": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "485507f18693efea3218aa000b0f9a4ee65763f52efc437733edc2764dcd92d8",
+      "version": "0.166.0",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "installed-grok": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "5cc91c87ad3af026e94b78058eebe924278af7325d11533cb1f2980361b85425",
+      "version": "1.0.70",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    },
+    "installed-antigravity": {
+      "checked_at": "2026-10-31T01:10Z",
+      "sha256": "5b47d77722f38ad9a08f4bf8d7be10b32aec7d3c1758b2dc588fd07cdb7c2e75",
+      "version": "1.4.12",
+      "status": "reviewed",
+      "failures": 0,
+      "reviewed_at": "2026-10-31T01:10Z"
+    }
+  },
+  "runs": [
+    {
+      "checked_at": "2026-10-31T01:10Z",
+      "reviewed": [
+        "acp-content",
+        "acp-tools",
+        "antigravity-models",
+        "antigravity-protocol",
+        "antigravity-release",
+        "claude-models",
+        "claude-release",
+        "claude-stream",
+        "codex-models",
+        "codex-protocol",
+        "codex-release",
+        "grok-protocol",
+        "grok-release",
+        "installed-antigravity",
+        "installed-claude",
+        "installed-codex",
+        "installed-grok"
+      ]
+    }
+  ]
+}
