@@ -45,6 +45,28 @@ final class AntigravityTests: XCTestCase {
         """#, stream: &stream), [.result(.interrupted)])
     }
 
+    /// Shapes observed from agy 1.4.12: a print timeout reports SUCCESS, an interruption ERROR.
+    func testFinishedReasonOutranksStatusAndKeepsThePartialAnswer() {
+        let cases: [(String, [AntigravityStream.Event])] = [
+            (#"{"status":"SUCCESS","response":"1 one","finished_reason":"print_timeout"}"#,
+             [.text("1 one"), .item(.error, "Antigravity's print time limit expired. The answer is partial."),
+              .result(.timedOut)]),
+            (#"{"status":"ERROR","response":"1 one","error":"interrupted","finished_reason":"interrupted"}"#,
+             [.text("1 one"), .item(.error, "Antigravity interrupted the turn. The answer is partial."),
+              .result(.interrupted)]),
+            (#"{"status":"ERROR","response":"","error":"invalid model","finished_reason":"error"}"#,
+             [.item(.error, "invalid model"), .result(.failed(exitCode: 1))]),
+            (#"{"status":"SUCCESS","response":"1 one","finished_reason":"future"}"#,
+             [.text("1 one"), .item(.error, "Antigravity ended the turn early (future). The answer may be incomplete."),
+              .result(.failed(exitCode: 1))]),
+            (#"{"status":"SUCCESS","response":"done","finished_reason":""}"#, [.text("done"), .result(.succeeded)]),
+        ]
+        for (result, expected) in cases {
+            var stream = AntigravityStream()
+            XCTAssertEqual(events(#"{"event":"result","result":"# + result + "}", stream: &stream), expected, result)
+        }
+    }
+
     func testToolActivityOutputAndError() {
         var stream = AntigravityStream()
         let active = #"""
@@ -172,15 +194,21 @@ final class AntigravityTests: XCTestCase {
         try checkRunner(status: "ERROR", exit: 0, expected: .failed(exitCode: 1))
         try checkRunner(status: "SUCCESS", exit: 7, expected: .failed(exitCode: 7))
         try checkRunner(status: nil, exit: 0, expected: .interrupted)
+        try checkRunner(status: "ERROR", reason: "interrupted", exit: 1, expected: .interrupted)
+        try checkRunner(status: "SUCCESS", reason: "print_timeout", exit: 0, expected: .timedOut)
+        try checkRunner(status: "SUCCESS", reason: "print_timeout", exit: 1, expected: .timedOut)
+        try checkRunner(status: "ERROR", reason: "error", exit: 1, expected: .failed(exitCode: 1))
+        try checkRunner(status: "CANCELED", exit: 1, expected: .cancelled)
     }
 
-    private func checkRunner(status: String?, exit: Int, expected: RunOutcome) throws {
+    private func checkRunner(status: String?, reason: String? = nil, exit: Int, expected: RunOutcome) throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("rota-peer-\(UUID())")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let peer = folder.appendingPathComponent("peer")
         let result = status.map {
-            "{\"event\":\"result\",\"result\":{\"status\":\"\($0)\",\"response\":\"answer\"}}"
+            "{\"event\":\"result\",\"result\":{\"status\":\"\($0)\",\"response\":\"answer\""
+                + (reason.map { ",\"finished_reason\":\"\($0)\"" } ?? "") + "}}"
         } ?? ""
         let script = """
         #!/bin/zsh

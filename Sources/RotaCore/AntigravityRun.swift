@@ -217,7 +217,12 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
         switch status {
         case 0: nativeOutcome = outcome ?? .interrupted
         case -1: nativeOutcome = .interrupted
-        default: nativeOutcome = .failed(exitCode: status)
+        // A turn that ended early explains its own nonzero exit; success, failure and no result take the exit code.
+        default:
+            switch outcome {
+            case .none, .succeeded?, .failed?: nativeOutcome = .failed(exitCode: status)
+            case let early?: nativeOutcome = early
+            }
         }
         journal.finish(stopReason ?? (questionReadFailed ? .failed(exitCode: 1) : nativeOutcome))
     }

@@ -17,7 +17,9 @@ Live-модельные, интерактивные и UI-пробы не зап
 
 ### AGY-FINISHED-REASON: учитывать досрочное завершение
 
-Статус: ожидает решения. Приоритет: корректность финального результата. [Первичный источник](https://github.com/google-antigravity/antigravity-cli/blob/main/CHANGELOG.md) описывает новое поле `finished_reason` с причинами `print_timeout`, `interrupted`, `error`; при обычном завершении поле отсутствует.
+Статус: реализовано 2026-10-30 по решению оператора, ожидает коммита. Нативные пробы agy 1.4.12: `print_timeout` приходит с `SUCCESS` и кодом 0, `interrupted` с `ERROR` и кодом 1, `error` с `ERROR` и кодом 1. `AntigravityStream.outcome` ставит причину выше статуса, `AntigravityRun.exited` не превращает досрочное завершение в сбой по коду выхода. Регрессии в `AntigravityTests` падают на старом коде.
+
+Исходная заявка. Приоритет: корректность финального результата. [Первичный источник](https://github.com/google-antigravity/antigravity-cli/blob/main/CHANGELOG.md) описывает новое поле `finished_reason` с причинами `print_timeout`, `interrupted`, `error`; при обычном завершении поле отсутствует.
 
 Наблюдение: `Sources/RotaCore/AntigravityStream.swift`, функция `result`, читает только `status`. Отдельная временная Swift-проба выполнила текущий декодер на синтетических result с `status: SUCCESS` и каждой из трёх причин. Во всех случаях получены текст и `.succeeded`, без диагностики причины. Это подтверждает поведение декодера, но НЕ подтверждает, что установленный CLI выдаёт именно такое сочетание полей в рабочей сессии. Headless-примеры не уточняют соответствие `status` и `finished_reason`; нативный сценарий требует отдельной разрешённой проверки.
 
@@ -25,4 +27,4 @@ Live-модельные, интерактивные и UI-пробы не зап
 
 Регрессии: обычный SUCCESS без причины; все известные причины с частичным текстом; нативные сочетания status/reason; неизвестная причина; очередь двух сообщений; Stop; replay после рестарта. Файлы: `Tests/AntigravityTests.swift`, `Tests/ReliabilityRegressionTests.swift`, `docs/architecture.md`, `docs/harness-output-contract.md`, `docs/harness-compatibility.md`. Перед доверием новым assertions подтвердить падение на старом декодере. Required verification: установленный CLI и нативные payload без личной истории; затем разрешённые live Antigravity lifecycle/recovery tests, контрактный gate и UI результата/ошибки в обеих темах на минимальной ширине. Claude stream/interactive, Codex, Grok и Shell сохраняют собственную семантику, поле Antigravity на них не переносится.
 
-Решение: разрешить отдельную задачу проверки нативного контракта и реализации обработки `finished_reason`. Приложение в этом fire не менялось.
+Решение: разрешить отдельную задачу проверки нативного контракта и реализации обработки `finished_reason`. Приложение в этом fire не менялось. Решение принято 2026-10-30, задача выполнена (см. статус выше).

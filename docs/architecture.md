@@ -1277,10 +1277,17 @@ local peer pins message queuing without timing assumptions.
 the existing transcript journal. Text deltas retain each response's `step_index`;
 `DONE`, including an event without a text delta, closes that response. The
 result's full response is a fallback, never a second copy. Tool steps retain
-their name, parameters, output and error when supplied. Only `SUCCESS` succeeds;
+their name, parameters, output and error when supplied. A result's
+`finished_reason`, present only when a turn ended early, outranks its status:
+agy 1.4.12 reports `print_timeout` with `SUCCESS` and exit 0, `interrupted`
+with `ERROR` and exit 1, and `error` with `ERROR` and exit 1 (probed
+2026-10-30). They map to timed out, interrupted and failed, keep the partial
+answer and add a readable error; an unknown reason fails. Rota passes no
+`--print-timeout`, so its own time limit still governs routines. Without a
+reason, only `SUCCESS` succeeds;
 `CANCELED` and `INTERRUPTED` retain their meanings, other statuses fail, and a
 zero exit without a result is interrupted. A nonzero process exit still fails
-a run whose result said success. Every queued turn needs its own result: a
+a run whose result said success, but not one the result already ended early. Every queued turn needs its own result: a
 missing follow-up result cannot reuse the first turn's success. Stop and time
 limits terminate the owned CLI
 and escalate to SIGKILL after three seconds if needed.

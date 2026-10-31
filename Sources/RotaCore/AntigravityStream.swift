@@ -106,18 +106,27 @@ struct AntigravityStream {
         if !hadText, let response = result["response"] as? String, !response.isEmpty { events.append(.text(response)) }
         hadText = false
         writingText = false
-        let status = result["status"] as? String
-        let outcome: RunOutcome
-        switch status {
-        case "SUCCESS": outcome = .succeeded
-        case "CANCELED": outcome = .cancelled
-        case "INTERRUPTED": outcome = .interrupted
-        default:
-            outcome = .failed(exitCode: 1)
-            let error = result["error"] as? String ?? "Antigravity ended with status \(status ?? "missing")."
-            events.append(.item(.error, error))
-        }
+        let (outcome, error) = Self.outcome(result)
+        if let error { events.append(.item(.error, error)) }
         events.append(.result(outcome))
         return events
+    }
+
+    /// finished_reason, present only when a turn ended early, outranks status:
+    /// agy reports a print timeout as SUCCESS and an interruption as ERROR.
+    private static func outcome(_ result: [String: Any]) -> (RunOutcome, error: String?) {
+        let status = result["status"] as? String
+        let error = result["error"] as? String
+        switch (result["finished_reason"] as? String ?? "", status) {
+        case ("", "SUCCESS"): return (.succeeded, nil)
+        case ("", "CANCELED"): return (.cancelled, nil)
+        case ("", "INTERRUPTED"): return (.interrupted, nil)
+        case ("", _): return (.failed(exitCode: 1), error ?? "Antigravity ended with status \(status ?? "missing").")
+        case ("print_timeout", _): return (.timedOut, "Antigravity's print time limit expired. The answer is partial.")
+        case ("interrupted", _): return (.interrupted, "Antigravity interrupted the turn. The answer is partial.")
+        case ("error", _): return (.failed(exitCode: 1), error ?? "Antigravity ended the turn with an error.")
+        case (let reason, _):
+            return (.failed(exitCode: 1), "Antigravity ended the turn early (\(reason)). The answer may be incomplete.")
+        }
     }
 }
