@@ -37,6 +37,8 @@
     is typed in and joins the current turn, and **Open in Terminal** shows the
     live session. A choice Claude asks for in its terminal, such as which apps
     computer use may control, appears in the chat with Claude's own options.
+    If those options are not readable yet, Rota keeps checking and updates the
+    card when they appear. Technical tool input is collapsed under **Tool details**.
     Afterwards the session continues with `--resume`. A folder
     Claude Code has not been trusted in, or Settings > Agents with the switch
     off, runs `claude -p` with stream-json instead. Computer use acts as Rota,
@@ -59,7 +61,10 @@
   session preview, with **Working in Terminal** or **Waiting in Terminal** as
   the turn progresses. Type replies and approve actions in Terminal; Rota's
   composer returns after the CLI exits. Closing the terminal window detaches;
-  **Open in Terminal** reconnects, and **Stop** ends the owned session. Terminal
+  **Open in Terminal** reconnects, and **Stop** ends the owned session.
+  Codex continuation also finds compressed and archived native sessions; Codex
+  itself restores the writable journal while Rota follows new entries.
+  Continuing an archived Codex session restores it from the archive first. Terminal
   continuations have no routine time limit and are not automatically resumed
   after an interruption. After a Rota restart, it reconnects to the surviving terminal session. Sessions
   open in the terminal app picked in Settings (Terminal, iTerm2, Ghostty or
@@ -157,6 +162,10 @@
 - **Agent Markdown as it is meant to read:** headings, lists, code blocks and
   tables with wrapping, content-based column widths and horizontal scrolling.
   Local images appear as clickable previews; new sessions keep copies with their attachments.
+  Tool screenshots and Codex generated images use the same previews. Codex file
+  changes show each filename with an expandable diff. Large diffs scroll within
+  the expanded section. Subagent activity appears as brief status notes when the
+  harness supplies it; Antigravity reports confirmed launches.
 - **Notifications** when a run fails, times out or cannot start, and when a
   missed slot is skipped; click one to open its session or routine. Completed runs notify too if you ask for it. A routine
   whose last five scheduled runs failed pauses itself and says so.

@@ -27,6 +27,9 @@ struct QuestionCard: View {
                 if !question.detail.isEmpty {
                     Text(question.detail).interfaceFont(.body).textSelection(.enabled)
                 }
+                if let context = question.context, !context.isEmpty {
+                    QuestionContext(text: context)
+                }
                 if let text = question.url, let url = URL(string: text), ["https", "http"].contains(url.scheme) {
                     Link(destination: url) { Text("Open in Browser").interfaceFont(.body) }
                 }
@@ -240,5 +243,38 @@ struct QuestionCard: View {
         .accessibilityHint(option.detail)
         .accessibilityValue(selected ? "Selected" : "Not selected")
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+private struct QuestionContext: View {
+    @Environment(\.interfaceScale) private var metrics
+    let text: String
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: metrics.points(6)) {
+            Button { expanded.toggle() } label: {
+                HStack(spacing: metrics.points(5)) {
+                    Image(systemName: "chevron.right")
+                        .interfaceFont(.caption2).fontWeight(.semibold)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                    Text("Tool details").interfaceFont(.callout)
+                }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.secondaryText)
+            .help(expanded ? "Hide tool details" : "Show tool details")
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .accessibilityIdentifier("questionContext")
+            if expanded {
+                ScrollView {
+                    Text(text).interfaceFont(.callout).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("questionContextText")
+                }
+                .frame(maxHeight: metrics.points(220))
+            }
+        }
+        .accessibilityElement(children: .contain)
     }
 }

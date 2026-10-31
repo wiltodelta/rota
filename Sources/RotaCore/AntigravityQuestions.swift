@@ -56,11 +56,23 @@ struct AntigravityQuestionArchive {
     private var pending = Data()
     private var seen = Set<String>()
     private var reasoningSteps = Set<Int>()
-    private var reasoning: [(String, String)] = []
+    private struct Reasoning {
+        let step: Int
+        let id: String
+        let text: String
+    }
+    private var reasoning: [Reasoning] = []
+    private var errors: [(String, String)] = []
 
-    mutating func takeReasoning() -> [(String, String)] {
-        defer { reasoning.removeAll() }
-        return reasoning
+    mutating func takeErrors() -> [(String, String)] {
+        defer { errors = [] }
+        return errors
+    }
+
+    mutating func takeReasoning(through step: Int? = nil) -> [(String, String)] {
+        let ready = reasoning.filter { $0.step <= (step ?? Int.max) }
+        reasoning.removeAll { $0.step <= (step ?? Int.max) }
+        return ready.map { ($0.id, $0.text) }
     }
 
     init?(session: String, home: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -100,10 +112,18 @@ struct AntigravityQuestionArchive {
     private mutating func parse(_ line: Data) throws -> [AgentQuestion] {
         guard !line.isEmpty else { return [] }
         let object = try JSONSerialization.jsonObject(with: line)
-        guard let row = object as? [String: Any], row["type"] as? String == "PLANNER_RESPONSE",
-              row["status"] as? String == "DONE", let step = row["step_index"] as? Int else { return [] }
+        guard let row = object as? [String: Any],
+              ["DONE", "ERROR"].contains(row["status"] as? String ?? ""),
+              let step = row["step_index"] as? Int else { return [] }
+        if row["type"] as? String == "ERROR_MESSAGE"
+            || (row["type"] as? String == "GENERIC" && row["status"] as? String == "ERROR") {
+            let id = "antigravity/\(session)/\(step)/error"
+            if let text = AntigravityTranscript.errorText(row),
+               !text.isEmpty, seen.insert(id).inserted { errors.append((id, text)) }
+        }
+        guard row["type"] as? String == "PLANNER_RESPONSE" else { return [] }
         if let text = row["thinking"] as? String, !text.isEmpty, reasoningSteps.insert(step).inserted {
-            reasoning.append(("antigravity/\(session)/\(step)/thinking", text))
+            reasoning.append(Reasoning(step: step, id: "antigravity/\(session)/\(step)/thinking", text: text))
         }
         let calls = row["tool_calls"] as? [[String: Any]] ?? []
         return calls.enumerated().compactMap { index, call in

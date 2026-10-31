@@ -5,24 +5,31 @@ import Foundation
 struct NativeTranscript {
     enum Event: Equatable {
         case item(TranscriptItem.Kind, String)
-        case chunk(String, kind: TranscriptItem.Kind = .agent)
+        case chunk(String, kind: TranscriptItem.Kind = .agent, nativeID: String? = nil)
         case configuration(SessionConfiguration)
         case state(TerminalState)
     }
 
-    let url: URL
+    private(set) var url: URL
+    let since: Date?
+    private let home: URL
+    private var awaitingExpansion: Bool
     let harness: Harness
     private var offset: UInt64
     private var partial = Data()
     private var antigravityDecoder = AntigravityTranscript()
     private var primed = false
 
-    init(url: URL, harness: Harness, offset: UInt64? = nil) throws {
+    init(url: URL, harness: Harness, offset: UInt64? = nil, since: Date? = nil,
+         home: URL = FileManager.default.homeDirectoryForCurrentUser) throws {
         self.url = url
         self.harness = harness
+        self.home = home
+        awaitingExpansion = harness == .codex && url.pathExtension == "zst"
+        self.since = since ?? (awaitingExpansion ? Date() : nil)
         let file = try FileHandle(forReadingFrom: url)
         defer { try? file.close() }
-        self.offset = try offset ?? file.seekToEnd()
+        self.offset = try offset ?? (awaitingExpansion ? 0 : file.seekToEnd())
     }
 
     /// Revisions after a checkpoint may repeat a step already finalized before the host stopped.
@@ -46,6 +53,18 @@ struct NativeTranscript {
     var checkpoint: UInt64 { offset - UInt64(partial.count) }
 
     mutating func read(receive: (([Event], String) -> Void)? = nil) throws -> [Event] {
+        if awaitingExpansion {
+            let expanded = url.deletingPathExtension()
+            let session = String(expanded.deletingPathExtension().lastPathComponent.suffix(36))
+            guard let source = FileManager.default.fileExists(atPath: expanded.path) ? expanded
+                : Self.locate(.codex, session: session, home: home, includeCompressed: false) else { return [] }
+            url = source
+            awaitingExpansion = false
+        }
+        if harness == .codex, !FileManager.default.fileExists(atPath: url.path) {
+            let session = String(url.deletingPathExtension().lastPathComponent.suffix(36))
+            if let moved = Self.locate(.codex, session: session, home: home, includeCompressed: false) { url = moved }
+        }
         let file = try FileHandle(forReadingFrom: url)
         defer { try? file.close() }
         // TerminalRun reads on its queue; do not scan an archive during its main-actor launch.
@@ -75,25 +94,51 @@ struct NativeTranscript {
     }
 
     private mutating func decode(_ data: Data) throws -> [Event] {
+        if harness == .codex, let since {
+            guard let row = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let stamp = row["timestamp"] as? String,
+                  let date = try? Date(stamp, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)),
+                  date >= since else { return [] }
+            return Self.codex(row)
+        }
         guard harness == .antigravity else { return try Self.events(data, harness: harness) }
         guard let row = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
         return antigravityDecoder.read(row)
     }
 
     static func locate(_ harness: Harness, session: String) -> URL? {
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        locate(harness, session: session, home: FileManager.default.homeDirectoryForCurrentUser)
+    }
+
+    static func locate(_ harness: Harness, session: String,
+                       home: URL,
+                       includeCompressed: Bool = true) -> URL? {
         if harness == .claude { return ClaudeInteractiveRun.transcriptFile(session) }
         if harness == .antigravity { return AntigravityQuestionArchive(session: session)?.file }
         guard harness == .codex || harness == .grok else { return nil }
-        let root = home.appendingPathComponent(harness == .codex ? ".codex/sessions" : ".grok/sessions")
-        guard let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil,
-                                                        options: [.skipsHiddenFiles]) else { return nil }
-        for case let url as URL in files {
-            if harness == .codex, url.lastPathComponent.hasSuffix("-\(session).jsonl") { return url }
-            if harness == .grok, url.lastPathComponent == "updates.jsonl",
-               url.deletingLastPathComponent().lastPathComponent == session { return url }
+        return locateStore(harness, session: session, home: home, includeCompressed: includeCompressed)
+    }
+
+    private static func locateStore(_ harness: Harness, session: String, home: URL,
+                                    includeCompressed: Bool) -> URL? {
+        let paths = harness == .codex ? [".codex/sessions", ".codex/archived_sessions"] : [".grok/sessions"]
+        var compressed: URL?
+        for path in paths {
+            let root = home.appendingPathComponent(path)
+            guard let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil,
+                                                            options: [.skipsHiddenFiles]) else { continue }
+            for case let url as URL in files {
+                if matches(url, harness: harness, session: session) { return url }
+                if harness == .codex, includeCompressed,
+                   url.lastPathComponent.hasSuffix("-\(session).jsonl.zst") { compressed = url }
+            }
         }
-        return nil
+        return compressed
+    }
+
+    private static func matches(_ url: URL, harness: Harness, session: String) -> Bool {
+        if harness == .codex { return url.lastPathComponent.hasSuffix("-\(session).jsonl") }
+        return url.lastPathComponent == "updates.jsonl" && url.deletingLastPathComponent().lastPathComponent == session
     }
 
     /// Grok keys session/load by its archived directory, which can differ from
@@ -166,7 +211,7 @@ struct NativeTranscript {
                 (block["text"] as? String).map { .item(.reasoning, $0) }
             }
         case "function_call_output", "custom_tool_call_output":
-            return (payload["output"] as? String).map { [.item(.output, $0)] } ?? []
+            return ToolOutput.content(payload["output"]).map { [.item(.output, $0)] } ?? []
         case "message" where payload["role"] as? String == "assistant":
             return text(payload).map { [.item(.agent, $0)] } ?? []
         case "function_call", "custom_tool_call":
@@ -191,7 +236,11 @@ struct NativeTranscript {
                         .item(.user, text), .state(.working)]
             }
             let thought = update["sessionUpdate"] as? String == "agent_thought_chunk"
-            return [.chunk(text, kind: thought ? .reasoning : .agent)]
+            let nativeID = GrokACPRun.textID(params: params, session: params["sessionId"] as? String,
+                                           kind: thought ? .reasoning : .agent)
+            return [.chunk(text, kind: thought ? .reasoning : .agent, nativeID: nativeID)]
+        case "subagent_spawned", "subagent_finished":
+            return SubagentStatus.grok(update).map { [.item(.status, $0)] } ?? []
         case "config_option_update":
             return [.configuration(.acp(update))]
         case "turn_completed": return [.state(.waiting)]

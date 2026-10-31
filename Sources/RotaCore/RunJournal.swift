@@ -89,11 +89,22 @@ final class RunJournal: @unchecked Sendable {
         let source = nextSource()
         if let source, !sourceIDs.insert(source).inserted { return }
         flushText()
-        let item = TranscriptItem(id: 0, kind: kind, text: text).presented
+        var body = text
+        var imageWarning: String?
+        if kind == .output {
+            do { body = try images?.preserveOutput(text, itemID: transcript?.nextID) ?? text } catch {
+                imageWarning = "Couldn't preserve a tool image: " + error.localizedDescription
+            }
+        }
+        let item = TranscriptItem(id: 0, kind: kind, text: body).presented
         if item.kind == .agent { captureImages(item.text, itemID: transcript?.nextID) }
         write(Self.readable(item.kind, item.text))
         appendItem(item.kind, item.text, sourceID: source, nativeID: nativeID)
         if let nativeID { nativeItems[nativeID] = text }
+        if let imageWarning {
+            write(Self.readable(.status, imageWarning))
+            appendItem(.status, imageWarning)
+        }
     }
 
     /// Partial text is visible immediately; the readable log gets one completed message.
@@ -150,6 +161,7 @@ final class RunJournal: @unchecked Sendable {
                 .map { PlanStep.prefix + $0 }).joined(separator: "\n")
         case .agent: return text
         case .reasoning, .output:
+            let text = kind == .output ? ToolOutput.decode(text)?.readable ?? text : text
             return text.components(separatedBy: "\n").map { "[\(kind.rawValue)] " + $0 }.joined(separator: "\n")
         }
     }

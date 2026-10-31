@@ -42,13 +42,17 @@ public struct ChatAttachmentStore: Sendable {
     public init(log: URL) { folder = Self.folder(for: log) }
     public static func folder(for log: URL) -> URL { log.appendingPathExtension("attachments") }
 
-    public func stage(_ urls: [URL]) throws -> [ChatAttachment] {
-        let manager = FileManager.default
+    private func validateFolder() throws {
         guard (try? folder.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
               folder.resolvingSymlinksInPath().deletingLastPathComponent().path
                 == folder.deletingLastPathComponent().resolvingSymlinksInPath().path else {
             throw AttachmentError.unsafeFolder
         }
+    }
+
+    public func stage(_ urls: [URL]) throws -> [ChatAttachment] {
+        let manager = FileManager.default
+        try validateFolder()
         var created: [URL] = []
         do {
             return try urls.map { source in
@@ -68,6 +72,19 @@ public struct ChatAttachmentStore: Sendable {
             for directory in created { try? manager.removeItem(at: directory) }
             throw error
         }
+    }
+
+    /// Inline tool images are owned by this session from the moment they are saved.
+    func stage(_ data: Data, name: String) throws -> ChatAttachment {
+        let directory = folder.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try validateFolder()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let target = directory.appendingPathComponent(name)
+        do { try data.write(to: target, options: .atomic) } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw error
+        }
+        return ChatAttachment(name: name, path: target.path)
     }
 
     /// Only a draft's own UUID folder may be discarded, never the selected original.

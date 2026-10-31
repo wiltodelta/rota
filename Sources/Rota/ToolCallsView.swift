@@ -31,7 +31,7 @@ struct ToolCallsView: View {
                     ForEach(calls) { call in
                         VStack(alignment: .leading) {
                             if call.kind == .output {
-                                CodeBox(text: call.text)
+                                ToolOutputView(item: call)
                             } else {
                                 Text(call.text)
                                     .font(model.chatText.smallCode)
@@ -40,6 +40,7 @@ struct ToolCallsView: View {
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("toolCall-\(call.id)")
                     }
                 }

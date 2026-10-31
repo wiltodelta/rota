@@ -322,6 +322,14 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
         peer?.close()
         process?.terminate()
     }
+
+    static func textID(params: [String: Any], session: String?, kind: TranscriptItem.Kind) -> String? {
+        let metadata = params["_meta"] as? [String: Any] ?? [:]
+        let suffix = kind == .reasoning ? "/thought" : "/text"
+        return (metadata["promptId"] as? String).flatMap { prompt in
+            (metadata["streamStartMs"] as? NSNumber).map { "grok/\(session ?? "")/\(prompt)/\($0)" + suffix }
+        }
+    }
 }
 
 private extension GrokACPRun {
@@ -348,11 +356,7 @@ private extension GrokACPRun {
 
     private func renderText(_ update: [String: Any], params: [String: Any], kind: TranscriptItem.Kind) {
         guard let text = (update["content"] as? [String: Any])?["text"] as? String else { return }
-        let metadata = params["_meta"] as? [String: Any] ?? [:]
-        let suffix = kind == .reasoning ? "/thought" : "/text"
-        let nativeID = (metadata["promptId"] as? String).flatMap { prompt in
-            (metadata["streamStartMs"] as? NSNumber).map { "grok/\(sessionID ?? "")/\(prompt)/\($0)" + suffix }
-        }
+        let nativeID = Self.textID(params: params, session: sessionID, kind: kind)
         if loading, let nativeID {
             journal.reconcileText(text, kind: kind, nativeID: nativeID)
         } else {
@@ -381,6 +385,10 @@ private extension GrokACPRun {
             journal.record(.status, "Grok updated its request retry state")
         }
         guard let sessionID, activity.read(method, params, session: sessionID) else { return }
+        if let update = params["update"] as? [String: Any], let text = SubagentStatus.grok(update),
+           let id = update["subagent_id"] as? String, let kind = update["sessionUpdate"] as? String {
+            journal.record(.status, text, nativeID: "grok/" + sessionID + "/" + id + "/" + kind)
+        }
         // A woken turn's text arrives as ordinary updates; its end closes that message.
         if (params["update"] as? [String: Any])?["sessionUpdate"] as? String == "turn_completed" {
             journal.endText()

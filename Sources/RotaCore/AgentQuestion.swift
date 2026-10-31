@@ -5,6 +5,8 @@ public struct AgentQuestion: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var title: String
     public var detail: String
+    /// Optional technical context, collapsed independently of instructions and choices.
+    public var context: String?
     public var fields: [QuestionField]
     public var actions: [QuestionOption]
     public var url: String?
@@ -15,11 +17,12 @@ public struct AgentQuestion: Codable, Equatable, Identifiable, Sendable {
     public init(
         id: String = UUID().uuidString, title: String, detail: String = "",
         fields: [QuestionField] = [], actions: [QuestionOption] = [.init(id: "accept", label: "Send Answer")],
-        url: String? = nil, allowsDecline: Bool = false
+        url: String? = nil, allowsDecline: Bool = false, context: String? = nil
     ) {
         self.id = id
         self.title = title
         self.detail = detail
+        self.context = context
         self.fields = fields
         self.actions = actions
         self.url = url

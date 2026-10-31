@@ -6,6 +6,7 @@ struct RunLease: Codable {
     var id: String
     var screenName: String?
     var nativeOffset: UInt64?
+    var nativeSince: Date?
 
     static func url(_ log: URL) -> URL { log.appendingPathExtension("runtime.json") }
     static func read(_ log: URL) -> RunLease? {

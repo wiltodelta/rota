@@ -3,6 +3,35 @@ import XCTest
 import Darwin
 
 final class TerminalRunTests: XCTestCase {
+    func testGrokTerminalKeepsAdjacentNativeMessagesSeparate() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let native = folder.appendingPathComponent("updates.jsonl")
+        try Data().write(to: native)
+        let texts = ["First answer.", "Second answer."]
+        let commands = try texts.enumerated().map { index, text in
+            let row: [String: Any] = ["method": "session/update", "params": ["sessionId": "session",
+                "_meta": ["promptId": "prompt", "streamStartMs": index + 1],
+                "update": ["sessionUpdate": "agent_message_chunk", "content": ["type": "text", "text": text]]]]
+            let json = try XCTUnwrap(String(data: JSONSerialization.data(withJSONObject: row), encoding: .utf8))
+            return "print -r -- \(shellQuote(json)) >> \(shellQuote(native.path))"
+        }
+        let log = folder.appendingPathComponent("session.log")
+        var spec = LaunchSpec(executable: "/bin/zsh", prompt: "", arguments: ["-c", commands.joined(separator: "; ")],
+            workingDirectory: folder.path, environment: [:], mode: .terminal(.grok), timeout: nil, log: log)
+        spec.terminalTranscript = native
+        let done = expectation(description: "synthetic native terminal exited")
+        let control = try ProcessLauncher().launch(spec, events: .init(session: { _ in }, finished: {
+            XCTAssertEqual($0, .succeeded)
+            done.fulfill()
+        }))
+        defer { control.stop() }
+        wait(for: [done], timeout: 15)
+        var reader = TranscriptReader()
+        XCTAssertEqual(reader.read(log: log, finished: true).items.filter { $0.kind == .agent }.map(\.text), texts)
+    }
+
     func testStopClosesOwnedScreenExactlyOnce() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

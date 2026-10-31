@@ -151,7 +151,9 @@ flowchart LR
   persists its fields in `RunRecord.questions`, marks the session as needing
   a reply and posts a notification. `SessionView` owns a `QuestionDraft` for
   `QuestionCard`, independently of `ChatComposer`. The card presents single/multiple
-  numbered option rows and its own text/private/numeric fields inside the transcript's
+  numbered option rows. Optional `AgentQuestion.context` keeps technical tool input
+  in a collapsed Tool details disclosure with a bounded scroll area. The card presents
+  its own text/private/numeric fields inside the transcript's
   scroll view, while the composer stays pinned below it. The form never squeezes
   the transcript into a near-zero nested scroll viewport.
   The card is measured outside the lazy message stack, even while offscreen.
@@ -368,7 +370,10 @@ flowchart LR
   then Return if an option that takes text is still shown; Cancel types Escape.
   Nothing is typed unless the screen still shows the same options; a dialog
   answered at the terminal closes its question. A dialog without readable
-  options can only be canceled from the chat. Until 2026-10-27 the hook marked
+  options can only be canceled from the chat. The bridge keeps retrying an
+  unreadable dialog without another notification, replacing its fallback card
+  with the native choices when they become readable, without sending input.
+  Until 2026-10-27 the hook marked
   every such session "Open in Terminal", even when the chat already held the
   permission question. Claude shows a folder-trust dialog nobody could answer,
   so a folder without `hasTrustDialogAccepted` (itself or its repository) runs
@@ -919,8 +924,17 @@ Codex's rollout (user `item_completed` events and assistant `response_item`
 messages, excluding injected user-role instructions), Grok's persisted ACP
 updates including `_x.ai/session/update` turn boundaries, or Antigravity's
 completed native steps. Provider-exposed reasoning and tool output remain
-separate from answers. Native offsets are checkpointed with the process lease
-for adoption after restart. Provider stores are
+separate from answers. Grok text retains `promptId`/`streamStartMs` identities
+in both transports, so adjacent messages of the same kind stay separate.
+Codex lookup includes active and archived `.jsonl` and `.jsonl.zst` rollouts.
+For compressed sources, Rota waits for the native CLI to expand or move the
+rollout, then follows the writable JSONL file. The pre-launch timestamp boundary
+filters expanded old history; that boundary and byte offsets survive adoption
+in the process lease. Rota does not decompress or move provider files. Explicit continuation of an
+archived Codex session first calls native `unarchive` (RPC in Rota, CLI in
+Terminal); a failed restore prevents resume. Recovery never unarchives a thread.
+Native offsets are checkpointed with the process lease for adoption after
+restart. Provider stores are
 read-only. Partial UTF-8 lines are buffered; old history is not imported again.
 Grok resumes over ACP using the directory encoded in that archive's group
 (or its `.cwd` file for long paths). The routine's spelling can name the same
@@ -1123,6 +1137,18 @@ working directory. Archiving warnings follow the completed streamed entry, so
 even one-entry pages remain replayable after a copy failure. The Markdown and source files are preserved; old references
 fall back to their original absolute paths. Missing source files cannot be recovered.
 
+Tool results use `ToolOutput` inside ordinary output entries: ordered literal
+text, image references and per-file diffs. Claude tool-result blocks (both
+hosts), Codex RPC/terminal blocks and Grok ACP/archive blocks share the content
+adapter. Inline image data is saved into session attachments before journaling, with a
+filename extension detected from its actual bytes for native Open;
+local tool images use the existing per-item image index. Codex image-view and
+image-generation items preserve their saved image, and file-change items retain
+each path and full diff. `ToolOutputView` reuses the local image preview and
+opens diffs in bounded, initially collapsed disclosures. Plain output stays
+literal code text. External URLs are not fetched, missing files have an explicit
+placeholder, and unsupported audio/document/video formats are not decoded.
+
 Draft text and attachment references are keyed by session ID in `AppModel`, so
 switching sessions preserves both. Removing a draft chip deletes only its owned
 copy; normal app termination discards remaining draft copies. Accepted messages
@@ -1229,7 +1255,8 @@ after restart. A FIFO-coordinated
 local peer pins message queuing without timing assumptions.
 
 `AntigravityStream` normalizes `init`, `step_update` and `result` events into
-the existing transcript journal. Text deltas stream into one response; the
+the existing transcript journal. Text deltas retain each response's `step_index`;
+`DONE`, including an event without a text delta, closes that response. The
 result's full response is a fallback, never a second copy. Tool steps retain
 their name, parameters, output and error when supplied. Only `SUCCESS` succeeds;
 `CANCELED` and `INTERRUPTED` retain their meanings, other statuses fail, and a
@@ -1298,6 +1325,11 @@ questions do not return. Partial lines wait for completion; duplicate native
 rows are ignored, and corrupt/truncated sources report that question sync paused
 and fail the Rota run even when the model process exits successfully.
 No model reasoning or prose is converted to a form. Exposed reasoning is stored separately from the answer.
+Reasoning already available at a response's start precedes its text. Reasoning
+that arrives from the archive during streaming is deferred until that response
+ends, with its native step identity retained, so it cannot split a word or sentence.
+Tool-only steps drain reasoning through their own wire step index before the
+tool is recorded, rather than waiting behind an earlier text response.
 
 Antigravity's execution permissions retain the unattended policy. Archived
 `ask_permission` and `ask_custom_permission` calls, as well as unsupported
@@ -1415,6 +1447,8 @@ service that may host somebody else's work.
 | Native images | image blocks | file references | localImage | ACP image blocks | file references | n/a |
 | Questions | hooks/control | hooks, terminal dialogs | RPC/message | ACP | later message | n/a |
 | Reasoning/tool output | exposed blocks | native archive | exposed RPC items | ACP thought/tool content | native archive/stream | log |
+| Tool images | result blocks | result blocks | RPC/native output blocks | ACP/archive images | no verified image result block | n/a |
+| Subagent activity | native task notifications | native task notifications | root lifecycle/status items | spawn/finish updates | confirmed launch only | n/a |
 | Live answer text | partial events | transcript entries | deltas | chunks | deltas | log |
 | Retry progress | api_retry status | api_error status | willRetry status | live retry payload unverified | CLI owns retries | n/a |
 | Recover after Rota restart | durable spool | surviving screen | native thread/turn history | load replay/active prompt | durable spool | surviving screen |
@@ -1422,6 +1456,20 @@ service that may host somebody else's work.
 | Wait for background work | non-ambient tasks | shells/agents | no root wake signal verified | native activity | CLI controls its grace period | n/a |
 | Session identity in Rota MCP | inherited | inherited | per-thread server config | per-session server config | inherited | CLI only |
 | Import schedules | Claude Desktop | Claude Desktop | Codex app, read-only | no verified routine store | store unverified | n/a |
+
+Codex subagent activity and collaboration states show brief parent-session
+status notes; child messages and results never become root answers. Grok
+summarizes native spawn/finish updates in live and terminal modes. Antigravity's
+`subagent` step with `DONE` confirms the invocation, not child completion, so
+it shows "started" only. Its free-form worker messages do not provide a verified
+completion/failure lifecycle, and terminal archives have no equivalent structured
+launch event. Claude retains its native task notifications. These display notes
+do not change any harness's background-wait behavior.
+
+Antigravity tool steps preserve output and errors in both `DONE` and `ERROR`
+states. Its archive reader also preserves `ERROR_MESSAGE` and failed `GENERIC`
+steps, including diagnostic content. Archive-only errors reach the stream host;
+identical error text from a result summary and its native archive appears once.
 
 Cross-harness restart is an explicit user action on a finished session. It uses
 `TranscriptReader` off the main actor to carry the first user request and a
@@ -1460,7 +1508,8 @@ without a durable lease cannot be reconstructed from a spool that never existed.
 These limitations do not authorize sending an implicit Continue at startup.
 
 Transcript adapters preserve exposed reasoning separately from answers. Claude
-stream suppresses completed copies only for the kind actually streamed. Grok
+stream closes content blocks and messages explicitly and suppresses completed
+copies only for the kind actually streamed. Grok
 preserves text and textual file diffs on both ACP and terminal continuation;
 Antigravity checks its native archive before recording subsequent tool activity.
 Empty reasoning has no disclosure row. These are new-event and presentation

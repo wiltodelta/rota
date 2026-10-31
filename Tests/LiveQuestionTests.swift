@@ -131,7 +131,8 @@ final class LiveQuestionTests: XCTestCase {
         } else {
             XCTAssertEqual(dialogs.count, 1, log)
             XCTAssertEqual(dialogs.first?.actions.last?.label, "No")
-            XCTAssertTrue(dialogs.first?.detail.contains("touch \(file)") == true, dialogs.first?.detail ?? "")
+            XCTAssertTrue(dialogs.first?.context?.contains("touch \(file)") == true,
+                          dialogs.first?.context ?? "")
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory + "/" + file), log)
         XCTAssertTrue(log.contains("REFUSED"), log)

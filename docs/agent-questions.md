@@ -53,6 +53,12 @@ dynamic tool execution are not user-question protocols.
 
 ## Form shapes and explicit limits
 
+`AgentQuestion.context` is optional technical tool input, displayed separately
+under a collapsed Tool details disclosure. The instructions and answer controls
+stay outside its bounded scroll area. Interactive Claude retries unreadable
+terminal choices after a notification; once readable, they replace the fallback
+question without submitting an answer.
+
 Native questionnaires preserve multiple questions, single/multiple selection,
 option descriptions and previews, custom text, and Codex private input. The
 async Codex wire format supplies titles and optional string options, without

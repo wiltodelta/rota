@@ -1,4 +1,6 @@
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 public struct MarkdownImageReference: Equatable, Sendable {
     public var url: URL
@@ -78,6 +80,29 @@ public struct SessionImageStore: Sendable {
         guard url.scheme == nil else { return nil }
         if url.path.hasPrefix("/") { return URL(fileURLWithPath: url.path) }
         return workingDirectory?.appendingPathComponent(url.path)
+    }
+
+    /// Replace inline image bytes with a durable local reference before journaling.
+    func preserveOutput(_ text: String, itemID: Int?) throws -> String {
+        guard var output = ToolOutput.decode(text) else { return text }
+        var references: [MarkdownImageReference] = []
+        for index in output.parts.indices where output.parts[index].kind == .image {
+            let value = output.parts[index].text
+            if value.hasPrefix("data:image/"), let comma = value.firstIndex(of: ","),
+               value[..<comma].hasSuffix(";base64"),
+               let data = Data(base64Encoded: String(value[value.index(after: comma)...])) {
+                let image = CGImageSourceCreateWithData(data as CFData, nil)
+                let suffix = image.flatMap { CGImageSourceGetType($0) }
+                    .flatMap { UTType($0 as String)?.preferredFilenameExtension }
+                let name = "tool-image" + (suffix.map { "." + $0 } ?? "")
+                let file = try attachments.stage(data, name: name)
+                output.parts[index].text = file.url.absoluteString
+            } else if let url = URL(string: value) {
+                references.append(.init(url: url, alt: output.parts[index].path ?? "Tool image"))
+            }
+        }
+        try capture(references, itemID: itemID)
+        return output.encoded
     }
 
     public func capture(_ references: [MarkdownImageReference], itemID: Int? = nil) throws {

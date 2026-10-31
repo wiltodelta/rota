@@ -240,3 +240,22 @@ folder and follow its retention. Claude stream, Codex and Grok additionally rece
 inputs through `HarnessInput`. Other modes and other files use local tool
 access; this does not promise native document uploads. Invalid manifests remain
 literal text. Original files are never removed by session cleanup.
+
+## Tool result content
+
+An output item's text may contain a `[Rota tool output v1]` JSON envelope.
+`ToolOutput` preserves ordered text, image references and per-file diffs without
+changing the journal schema or item kind. Ordinary tool text remains literal
+text. The renderer shows local image previews and initially collapsed diff
+sections. Inline base64 images are saved to session-owned attachments before
+writing the envelope. Saved filenames keep the extension detected from the image
+bytes so opening a preview selects an image viewer, even if the provider MIME
+label is wrong. Local source images use `SessionImageStore`'s existing
+per-item index. The readable log contains image labels and full diff text,
+without inline image bytes. Invalid envelopes remain ordinary output text.
+
+Claude's two hosts, Codex RPC and terminal output arrays, and Grok live/archive
+content share the block decoder. Unsupported blocks cannot suppress adjacent
+text or images. Codex native file-change, image-view and image-generation RPC
+items keep durable native IDs through replay. Child-agent lifecycle notes stay
+status entries, separate from the parent's answer.

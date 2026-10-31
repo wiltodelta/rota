@@ -32,11 +32,16 @@ coverage matrix and remaining gaps live in
 `ROTA_LIVE`, `ROTA_LIVE_QUESTIONS`, `ROTA_PROTOCOL_CHECK` and
 `ROTA_INTERACTIVE_TEST_DIR` are test inputs, not saved application settings.
 Run `scripts/ui-check.sh --harnesses-only` for Reasoning expansion, hidden empty
-reasoning, tool text/diffs and version warnings in both appearances at the minimum
+reasoning, tool image previews, collapsed/expanded diffs and version warnings in both appearances at the minimum
 window width. It uses disabled
 synthetic sessions and requires no installed agent. The full `scripts/ui-check.sh`
 covers the other application surfaces. Use the native capture notice and preflight
 procedure; the driver also checks the console before delivering a key. Its imported names may be personal; keep captures outside Git.
+
+Codex continuation restores archived sessions through native `unarchive` before
+resume; automatic recovery must never do that. Compressed rollout verification
+must cover native expansion and relocation, rather than tailing a decompressed
+copy. `SessionArchiveTests` checks restore failure and recovery boundaries.
 
 Run builds, `maintain.sh` and UI checks sequentially. UI scripts also assemble
 and sign `Rota.app`; SwiftPM's build lock does not cover bundle assembly or signing.

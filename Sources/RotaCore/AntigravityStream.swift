@@ -7,13 +7,18 @@ struct AntigravityStream {
         case session(String)
         case configuration(SessionConfiguration)
         case text(String)
-        case item(TranscriptItem.Kind, String)
+        case textStarted(Int?)
+        case textEnded(Int?)
+        case item(TranscriptItem.Kind, String, step: Int? = nil)
         case result(RunOutcome)
         case unknownStep
     }
 
     private var hadText = false
     private var tools = Set<Int>()
+    private var subagents = Set<String>()
+    private var textStep: Int?
+    private var writingText = false
 
     mutating func events(_ data: Data) -> [Event] {
         guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
@@ -38,9 +43,11 @@ struct AntigravityStream {
 
     private mutating func step(_ step: [String: Any]) -> [Event] {
         if step["step_type"] as? String == "unknown" { return [.unknownStep] }
-        if step["step_type"] as? String == "agent_response", let delta = step["text_delta"] as? String {
-            hadText = hadText || !delta.isEmpty
-            return [.text(delta)]
+        if step["step_type"] as? String == "agent_response" {
+            return response(step)
+        }
+        if step["step_type"] as? String == "subagent" {
+            return subagent(step)
         }
         guard step["step_type"] as? String == "tool", let index = step["step_index"] as? Int else { return [] }
         let info = step["tool_info"] as? [String: Any] ?? [:]
@@ -48,15 +55,49 @@ struct AntigravityStream {
         if tools.insert(index).inserted {
             let name = step["tool_name"] as? String ?? info["name"] as? String ?? "tool"
             let parameters = info["parameters"].map(QuestionRequest.json) ?? ""
-            events.append(.item(.tool, name + (parameters.isEmpty ? "" : " " + parameters)))
+            events.append(.item(.tool, name + (parameters.isEmpty ? "" : " " + parameters), step: index))
         }
-        if step["state"] as? String == "DONE" {
-            if let output = info["output"] as? String, !output.isEmpty { events.append(.item(.output, output)) }
+        if ["DONE", "ERROR"].contains(step["state"] as? String ?? "") {
+            if let output = info["output"] as? String, !output.isEmpty {
+                events.append(.item(.output, output, step: index))
+            }
             if let error = info["error"] as? [String: Any], let message = error["message"] as? String {
-                events.append(.item(.error, message))
+                events.append(.item(.error, message, step: index))
             }
         }
         return events
+    }
+
+    private mutating func response(_ step: [String: Any]) -> [Event] {
+        let index = step["step_index"] as? Int
+        var events: [Event] = []
+        if !writingText || textStep != index {
+            events.append(.textStarted(index))
+            textStep = index
+            writingText = true
+        }
+        if let delta = step["text_delta"] as? String, !delta.isEmpty {
+            hadText = true
+            events.append(.text(delta))
+        }
+        if step["state"] as? String == "DONE" {
+            writingText = false
+            events.append(.textEnded(index))
+        }
+        return events
+    }
+
+    private mutating func subagent(_ step: [String: Any]) -> [Event] {
+        let info = step["subagent_info"] as? [String: Any] ?? [:]
+        let agents = info["subagents"] as? [[String: Any]] ?? []
+        // DONE completes invoke_subagent, not the child conversation.
+        let status = step["state"] as? String == "ERROR" ? "failed to start" : "started"
+        return agents.compactMap { agent in
+            guard let id = agent["conversation_id"] as? String,
+                  subagents.insert(id + "/" + status).inserted else { return nil }
+            return .item(.status, "Agent \(agent["role"] as? String ?? id): \(status)",
+                         step: step["step_index"] as? Int)
+        }
     }
 
     private mutating func result(_ result: [String: Any]) -> [Event] {
@@ -64,6 +105,7 @@ struct AntigravityStream {
         if let id = result["conversation_id"] as? String, !id.isEmpty { events.append(.session(id)) }
         if !hadText, let response = result["response"] as? String, !response.isEmpty { events.append(.text(response)) }
         hadText = false
+        writingText = false
         let status = result["status"] as? String
         let outcome: RunOutcome
         switch status {

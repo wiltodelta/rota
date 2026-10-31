@@ -10,10 +10,10 @@ final class AntigravityTests: XCTestCase {
         var stream = AntigravityStream()
         XCTAssertEqual(events(#"""
         {"event":"step_update","step_update":{"step_type":"agent_response","state":"ACTIVE","text_delta":"hello"}}
-        """#, stream: &stream), [.text("hello")])
+        """#, stream: &stream), [.textStarted(nil), .text("hello")])
         XCTAssertEqual(events(#"""
         {"event":"step_update","step_update":{"step_type":"agent_response","state":"DONE","text_delta":" world"}}
-        """#, stream: &stream), [.text(" world")])
+        """#, stream: &stream), [.text(" world"), .textEnded(nil)])
         XCTAssertEqual(events(#"""
         {"event":"result","result":{"status":"SUCCESS","response":"hello world","conversation_id":"a1"}}
         """#, stream: &stream), [.session("a1"), .result(.succeeded)])
@@ -50,11 +50,11 @@ final class AntigravityTests: XCTestCase {
         let active = #"""
         {"event":"step_update","step_update":{"step_index":4,"step_type":"tool","state":"ACTIVE","tool_name":"run_command"}}
         """#
-        XCTAssertEqual(events(active, stream: &stream), [.item(.tool, "run_command")])
+        XCTAssertEqual(events(active, stream: &stream), [.item(.tool, "run_command", step: 4)])
         XCTAssertEqual(events(active, stream: &stream), [])
         XCTAssertEqual(events(#"""
         {"event":"step_update","step_update":{"step_index":4,"step_type":"tool","state":"DONE","tool_info":{"output":"hello","error":{"message":"failed"}}}}
-        """#, stream: &stream), [.item(.output, "hello"), .item(.error, "failed")])
+        """#, stream: &stream), [.item(.output, "hello", step: 4), .item(.error, "failed", step: 4)])
     }
 
     func testDiscoveryAndAccessUseTheAgyContracts() throws {

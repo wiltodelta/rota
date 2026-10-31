@@ -191,7 +191,7 @@ private struct WorkNoteView: View {
         switch item.kind {
         case .reasoning: ReasoningView(text: item.text, willToggle: willToggle)
         case .output:
-            CodeBox(text: item.text)
+            ToolOutputView(item: item)
         default:
             Text(item.text)
                 .font(model.chatText.small)

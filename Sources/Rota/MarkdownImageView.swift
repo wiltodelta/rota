@@ -25,7 +25,7 @@ struct MarkdownInlineView: View {
     }
 }
 
-private struct MarkdownImageView: View {
+struct MarkdownImageView: View {
     @Environment(\.sessionLogURL) private var log
     @Environment(\.sessionImageItemID) private var itemID
     @Environment(\.interfaceScale) private var metrics

@@ -147,8 +147,22 @@ final class CodexDaemonRun: RunControl, @unchecked Sendable {
         loadingHistory = spec.resume != nil
         if loadingHistory { asyncQuestions.hold() }
         if let thread = spec.resume { params["threadId"] = thread }
+        requestThread(method, params)
+    }
+
+    private func requestThread(_ method: String, _ params: [String: Any], restoringArchive: Bool = true) {
         peer?.request(method, params) { [weak self] result in
-            self?.threadStarted(result)
+            guard let self else { return }
+            guard restoringArchive, !self.spec.adopt, let id = self.spec.resume,
+                  case .failure(let error) = result,
+                  error.message.hasPrefix("session \(id) is archived.") else { return self.threadStarted(result) }
+            // Explicit continuation restores the archive through Codex, never by moving its files.
+            self.peer?.request("thread/unarchive", ["threadId": id]) { [weak self] restored in
+                guard let self else { return }
+                guard case .success = restored else { return self.fail(restored, "thread/unarchive") }
+                self.journal.record(.status, "Restored archived Codex session")
+                self.requestThread(method, params, restoringArchive: false)
+            }
         }
     }
 
@@ -415,19 +429,16 @@ extension CodexDaemonRun {
     }
 
     private func completedOutput(_ item: [String: Any], nativeID: String) {
-        if let output = item["aggregatedOutput"] as? String, !output.isEmpty {
-            journal.record(.output, output, nativeID: nativeID + "/output")
-        }
-        let result = item["result"] as? [String: Any]
-        let content = result?["content"] as? [[String: Any]] ?? item["contentItems"] as? [[String: Any]] ?? []
-        for (index, block) in content.enumerated() {
-            if let text = block["text"] as? String {
-                journal.record(.output, text, nativeID: nativeID + "/content/\(index)")
-            }
+        for entry in CodexItemOutput.entries(item) {
+            journal.record(entry.kind, entry.text, nativeID: nativeID + entry.suffix)
         }
     }
 
     private func itemStarted(_ item: [String: Any]?) {
+        if let item, item["type"] as? String == "subAgentActivity",
+           let text = CodexItemOutput.activity(item), let id = item["id"] as? String {
+            journal.record(.status, text, nativeID: "codex/" + id + "/activity")
+        }
         if let item, item["type"] as? String == "fileChange", let id = item["id"] as? String {
             approvalItems[id] = item
         }
@@ -456,6 +467,8 @@ extension CodexDaemonRun {
         case "dynamicToolCall": return item?["tool"] as? String
         case "collabAgentToolCall": return "agent " + (item?["tool"] as? String ?? "collaboration")
         case "fileChange": return "edit files"
+        case "imageView": return "view image"
+        case "imageGeneration": return "generate image"
         case "webSearch": return (item?["query"] as? String).map { "search \($0)" }
         default: return nil
         }

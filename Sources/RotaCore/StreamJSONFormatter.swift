@@ -35,8 +35,7 @@ public enum StreamJSONFormatter {
             let blocks = (event["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
             return blocks.enumerated().compactMap { index, block in
                 guard block["type"] as? String == "tool_result" else { return nil }
-                let text = block["content"] as? String ?? (block["content"] as? [[String: Any]])?
-                    .compactMap { $0["text"] as? String }.joined(separator: "\n")
+                let text = ToolOutput.content(block["content"])
                 return text.map { TranscriptItem(id: index, kind: .output, text: $0) }
             }
         }

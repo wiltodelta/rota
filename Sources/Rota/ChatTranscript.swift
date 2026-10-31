@@ -253,7 +253,7 @@ private struct TranscriptRow: View {
                 .foregroundStyle(Color.secondaryText)
             case .plan: PlanCard(steps: PlanStep.parse(item.text))
             case .reasoning: ReasoningView(text: item.text, willToggle: willToggle)
-            case .output: CodeBox(text: item.text)
+            case .output: ToolOutputView(item: item)
             case .status, .error:
                 if let title = TranscriptService.title(item.text) {
                     DisclosureGroup(title) {
@@ -417,7 +417,7 @@ private struct AnswerView: View {
 
     var body: some View {
         switch item.kind {
-        case .output: CodeBox(text: item.text)
+        case .output: ToolOutputView(item: item)
         default: MarkdownText(source: item.text).environment(\.sessionImageItemID, item.id)
         }
     }

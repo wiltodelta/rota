@@ -135,7 +135,8 @@ final class ClaudeInteractiveTests: XCTestCase {
         XCTAssertEqual(dialog.key(for: "cancel"), "\u{1B}")
         XCTAssertNil(dialog.key(for: "Maybe"))
         let question = ClaudeDialog.question(for: dialog, title: "Claude needs your permission", tool: "Bash\n{}")
-        XCTAssertEqual(question.detail, "Do you want to proceed?\n\nBash\n{}")
+        XCTAssertEqual(question.detail, "Do you want to proceed?")
+        XCTAssertEqual(question.context, "Bash\n{}")
         XCTAssertEqual(question.actions.map(\.id), dialog.options)
         XCTAssertNoThrow(try question.validate(QuestionAnswer(action: "Yes")))
     }

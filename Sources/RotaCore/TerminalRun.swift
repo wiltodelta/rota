@@ -58,7 +58,8 @@ final class TerminalRun: RunControl, @unchecked Sendable {
         }
         journal.record(.status, "Continued in Terminal")
         run.lease = RunLease(process: ScreenRun.pid(name).flatMap(OwnedProcess.init),
-                             id: UUID().uuidString, screenName: name, nativeOffset: transcript.checkpoint)
+                             id: UUID().uuidString, screenName: name, nativeOffset: transcript.checkpoint,
+                             nativeSince: transcript.since)
         try run.lease?.write(spec.log)
         run.queue.async { run.poll() }
         return run
@@ -75,7 +76,8 @@ final class TerminalRun: RunControl, @unchecked Sendable {
             .appendingPathComponent("Rota/screen")
         let run = TerminalRun(journal: journal, name: name, script: folder.appendingPathComponent(name + ".zsh"),
             exitFile: folder.appendingPathComponent(name + ".exit"),
-            transcript: try NativeTranscript(url: source, harness: harness, offset: offset), log: spec.log)
+            transcript: try NativeTranscript(url: source, harness: harness, offset: offset, since: lease.nativeSince),
+            log: spec.log)
         run.lease = lease
         run.queue.async { run.poll() }
         return run
@@ -84,7 +86,13 @@ final class TerminalRun: RunControl, @unchecked Sendable {
     /// The wrapper writes its PID and parent before exec, preserving the original
     /// PTY descriptors. Rota captures its kernel birth time before taking ownership.
     static func scriptText(_ spec: LaunchSpec, exitFile: URL, childFile: URL) -> String {
-        let wrapper = "print -r -- \"$$ $PPID\" > \"$0\"; exec \"$@\""
+        var wrapper = "print -r -- \"$$ $PPID\" > \"$0\"; "
+        if spec.mode == .terminal(.codex), let source = spec.terminalTranscript,
+           source.deletingLastPathComponent().lastPathComponent == "archived_sessions", let session = spec.resume {
+            wrapper += "\"$1\" unarchive " + shellQuote(session) + " || exit $?; "
+        }
+        wrapper += "exec \"$@\""
+
         let command = (["/bin/zsh", "-c", wrapper, childFile.path, spec.executable] + spec.arguments)
             .map(shellQuote).joined(separator: " ")
         return """
@@ -142,7 +150,7 @@ final class TerminalRun: RunControl, @unchecked Sendable {
         case .item(let kind, let text):
             journal.record(kind, text)
             if kind == .user { journal.terminalInput() }
-        case .chunk(let text, let kind): journal.text(text, kind: kind)
+        case .chunk(let text, let kind, let nativeID): journal.text(text, kind: kind, nativeID: nativeID)
         case .configuration(let configuration): journal.configure(configuration)
         case .state(let state):
             if state == .waiting { journal.endText() }

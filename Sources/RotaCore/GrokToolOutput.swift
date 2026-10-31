@@ -6,7 +6,7 @@ enum GrokToolOutput {
     static func text(_ block: [String: Any]) -> String? {
         switch block["type"] as? String {
         case "content":
-            return (block["content"] as? [String: Any])?["text"] as? String
+            return (block["content"] as? [String: Any]).flatMap { ToolOutput.content([$0]) }
         case "diff":
             guard let path = block["path"] as? String else { return nil }
             let before = block["oldText"] as? String ?? ""

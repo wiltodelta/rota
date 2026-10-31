@@ -18,12 +18,16 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
     private var questions: AntigravityQuestionArchive?
     private var questionReadFailed = false
     private var sawUnknownStep = false
+    private var reportedErrors = Set<String>()
+    private var writingText = false
+    private var textStep: Int?
+    private var completedTextStep: Int?
 
     private var questionHome: URL {
         URL(fileURLWithPath: spec.environment["HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.path)
     }
 
-    private init(spec: LaunchSpec, journal: RunJournal) {
+    init(spec: LaunchSpec, journal: RunJournal) {
         self.spec = spec
         self.journal = journal
         questions = spec.resume.flatMap { AntigravityQuestionArchive(session: $0, home: questionHome,
@@ -110,7 +114,7 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
         }
     }
 
-    private func handle(_ line: Data) {
+    func handle(_ line: Data) {
         guard !journal.isFinished else { return }
         for event in stream.events(line) { handle(event) }
     }
@@ -126,26 +130,49 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
             sawUnknownStep = true
             readQuestions()
         case .configuration(let configuration): journal.configure(configuration)
+        case .textStarted(let step):
+            journal.endText()
+            writingText = false
+            textStep = step
+            readQuestions(reasoningThrough: step)
+            writingText = true
+        case .textEnded(let step):
+            journal.endText()
+            writingText = false
+            completedTextStep = step
+            readQuestions(reasoningThrough: step)
+            textStep = nil
         case .text(let text):
             readQuestions()
-            journal.text(text)
-        case .item(let kind, let text):
-            readQuestions()
-            journal.record(kind, text)
-        case .result(let result):
-            readQuestions()
-            journal.endText()
-            if outcome == nil || result.isFailure { outcome = result }
-            if spec.adopt { return }
-            if !pending.isEmpty, stopReason == nil {
-                write(pending.removeFirst())
-            } else {
-                closeInput()
+            let nativeID = textStep.flatMap { step in
+                questions.map { "antigravity/\($0.session)/\(step)/text" }
             }
+            journal.text(text, nativeID: nativeID)
+        case .item(let kind, let text, let step):
+            journal.endText()
+            writingText = false
+            readQuestions(reasoningThrough: step)
+            if kind != .error || reportedErrors.insert(text).inserted { journal.record(kind, text) }
+        case .result(let result):
+            finishTurn(result)
         }
     }
 
-    private func readQuestions(final: Bool = false) {
+    private func finishTurn(_ result: RunOutcome) {
+        journal.endText()
+        writingText = false
+        completedTextStep = nil
+        readQuestions()
+        if outcome == nil || result.isFailure { outcome = result }
+        if spec.adopt { return }
+        if !pending.isEmpty, stopReason == nil {
+            write(pending.removeFirst())
+        } else {
+            closeInput()
+        }
+    }
+
+    private func readQuestions(final: Bool = false, reasoningThrough step: Int? = nil) {
         guard !questionReadFailed else { return }
         do {
             if final, sawUnknownStep,
@@ -155,8 +182,13 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
             for question in try questions?.read(final: final) ?? [] {
                 journal.ask(question, recordText: false) { _ in }
             }
-            for (id, text) in questions?.takeReasoning() ?? [] {
-                journal.record(.reasoning, text, nativeID: id)
+            if !writingText {
+                for (id, text) in questions?.takeErrors() ?? [] where reportedErrors.insert(text).inserted {
+                    journal.record(.error, text, nativeID: id)
+                }
+                for (id, text) in questions?.takeReasoning(through: step ?? completedTextStep) ?? [] {
+                    journal.record(.reasoning, text, nativeID: id)
+                }
             }
         } catch {
             questionReadFailed = true
@@ -174,6 +206,9 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
     private func exited(_ status: Int32) {
         if capture?.alive == true { journal.requireReconciliation() }
         closeInput()
+        journal.endText()
+        writingText = false
+        completedTextStep = nil
         readQuestions(final: true)
         if outcome == nil, stopReason == nil {
             journal.record(.error, "Antigravity exited without a result. The session may be incomplete.")

@@ -143,6 +143,9 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
 
     private func partial(_ event: [String: Any]) {
         let event = event["event"] as? [String: Any] ?? [:]
+        if ["content_block_stop", "message_stop"].contains(event["type"] as? String ?? "") {
+            journal.endText()
+        }
         let delta = event["delta"] as? [String: Any] ?? [:]
         if let text = delta["text"] as? String, !text.isEmpty {
             streamedText = true
@@ -161,6 +164,7 @@ final class ClaudeStreamRun: RunControl, @unchecked Sendable {
             if !alreadyStreamed { journal.record(item.kind, item.text) }
         }
         if type == "assistant" {
+            journal.endText()
             streamedText = false
             streamedReasoning = false
         }

@@ -99,10 +99,11 @@ struct ClaudeDialog: Equatable {
     static func question(for dialog: ClaudeDialog?, title: String, tool: String?) -> AgentQuestion {
         let unreadable = "Rota cannot read the choices of this dialog. Open the session in Terminal to answer it, "
             + "or cancel it here."
-        let parts = [dialog.map { $0.prompt.joined(separator: " ") }, tool, dialog == nil ? unreadable : nil]
+        let parts = [dialog.map { $0.prompt.joined(separator: " ") }, dialog == nil ? unreadable : nil]
         return AgentQuestion(title: title, detail: parts.compactMap { $0 }.filter { !$0.isEmpty }
                                 .joined(separator: "\n\n"),
-                             actions: (dialog?.options ?? []).map { QuestionOption(id: $0, label: $0) })
+                             actions: (dialog?.options ?? []).map { QuestionOption(id: $0, label: $0) },
+                             context: tool)
     }
 
     /// What to type for `action`: the option's number, or Escape.
@@ -156,6 +157,8 @@ final class ClaudeDialogBridge: @unchecked Sendable {
     private let session: String
     private let journal: RunJournal
     private let queue: DispatchQueue
+    private let readScreen: (() -> ClaudeDialog?)?
+    private let typeKey: ((String) -> Void)?
     private var offset: UInt64 = 0
     /// `rota question-hook` processes waiting for the chat; Claude's dialog for that request is already there.
     private var hookQuestions: Set<Int32> = []
@@ -163,16 +166,24 @@ final class ClaudeDialogBridge: @unchecked Sendable {
     /// in case another dialog opened alongside.
     private var notifiedDuringHook = false
     /// The dialog in the chat, and its options as read off the screen (nil: unreadable).
-    private var shown: (question: String, dialog: ClaudeDialog?)?
+    private struct ShownDialog {
+        let question: String
+        let dialog: ClaudeDialog?
+        let title: String
+    }
+    private var shown: ShownDialog?
     private var polls = 0
     /// Recent tool calls started and not yet answered, oldest first: what a dialog is most likely about.
     private var pendingTools: [ClaudeTranscript.ToolCall] = []
 
-    init(screen: String, session: String, folder: URL, journal: RunJournal, queue: DispatchQueue) {
+    init(screen: String, session: String, folder: URL, journal: RunJournal, queue: DispatchQueue,
+         readScreen: (() -> ClaudeDialog?)? = nil, typeKey: ((String) -> Void)? = nil) {
         self.screen = screen
         self.session = session
         self.journal = journal
         self.queue = queue
+        self.readScreen = readScreen
+        self.typeKey = typeKey
         file = folder.appendingPathComponent("\(screen).dialog")
         screenFile = folder.appendingPathComponent("\(screen).screen")
     }
@@ -249,7 +260,7 @@ final class ClaudeDialogBridge: @unchecked Sendable {
     private func show(_ open: ClaudeDialog?, title: String) {
         let tool = pendingTools.last.map { $0.name + "\n" + QuestionRequest.json($0.input) }
         let question = ClaudeDialog.question(for: open, title: title, tool: tool)
-        shown = (question.id, open)
+        shown = ShownDialog(question: question.id, dialog: open, title: title)
         let options = open?.options.joined(separator: " | ") ?? "unreadable"
         log.info("""
             claude \(self.session, privacy: .public) dialog: \(title, privacy: .public) \(options, privacy: .public)
@@ -260,11 +271,16 @@ final class ClaudeDialogBridge: @unchecked Sendable {
         }
     }
 
-    /// While a readable dialog is in the chat, a look every other second notices it
-    /// closed, answered at the terminal or left behind by Claude.
+    /// Retry a notification captured before Claude finished drawing its choices too.
     private func watch() {
-        guard let shown, let dialog = shown.dialog, polls % 2 == 0 else { return }
-        if read()?.options != dialog.options { close(shown.question) }
+        guard let shown, polls % 2 == 0 else { return }
+        let open = read()
+        if let dialog = shown.dialog {
+            if open?.options != dialog.options { close(shown.question) }
+        } else if let open {
+            close(shown.question)
+            show(open, title: shown.title)
+        }
     }
 
     private func close(_ question: String) {
@@ -301,10 +317,13 @@ final class ClaudeDialogBridge: @unchecked Sendable {
         }
     }
 
-    private func type(_ text: String) { ScreenRun.type(screen, text) }
+    private func type(_ text: String) {
+        if let typeKey { typeKey(text) } else { ScreenRun.type(screen, text) }
+    }
 
     /// The dialog on the screen now, read from a hardcopy of the session's window.
     private func read() -> ClaudeDialog? {
+        if let readScreen { return readScreen() }
         let manager = FileManager.default
         try? manager.removeItem(at: screenFile)
         defer { try? manager.removeItem(at: screenFile) }

@@ -75,9 +75,9 @@ final class LiveRecoveryTests: XCTestCase {
         func stopWhenReady() {
             if let text = try? String(contentsOf: pidFile, encoding: .utf8),
                let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
-               let owned = OwnedProcess(pid: pid) {
+               let owned = OwnedProcess(pid: pid), let control {
                 child = owned
-                control?.stop()
+                control.stop()
             } else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { stopWhenReady() }
             }

@@ -284,6 +284,8 @@ if sys.argv[4] == "verification":
                       "Rota cannot grant or revoke them here. Cancel or decline to send that instruction "
                       "to the conversation; use Antigravity itself to manage permissions.",
         })
+    records[0]["questions"][0]["context"] = "Synthetic tool request\n" + "\n".join(
+        '  {"name": "inspect", "input": {"line": %d}}' % index for index in range(80))
 records[0]["attention"] = records[0]["questions"][0]["title"]
 # No native session id: this fixture must never start a real continuation.
 records[0].pop("sessionID", None)
@@ -296,6 +298,15 @@ PYTHON
         "$DRIVER" reveal cancelQuestion
         check "$DRIVER" visible cancelQuestion
         check "$DRIVER" visible declineQuestion
+        check "$DRIVER" exists questionContext
+        if "$DRIVER" visible questionContextText; then fail "tool details must start collapsed"; fi
+        capture "UI check $appearance" "$appearance-tool-details-collapsed" 520
+        "$DRIVER" disclose questionContext Expanded
+        check "$DRIVER" exists questionContextText
+        "$DRIVER" reveal cancelQuestion
+        check "$DRIVER" visible cancelQuestion
+        capture "UI check $appearance" "$appearance-tool-details-expanded" 520
+        "$DRIVER" disclose questionContext Collapsed
         if "$DRIVER" exists answerQuestion-accept; then fail "unsupported request must not offer approval"; fi
         local refusal="$appearance-verification-question"
         if [[ "${ROTA_UI_QUESTION_HARNESS:-codex}" == antigravity ]]; then
@@ -654,6 +665,18 @@ reasoning = "Checked the available inputs and kept the answer separate.\n\n```te
     f"Inspection step {index}: preserve the disclosure header while reading the details."
     for index in range(100)) + "\n```"
 answer = "The harness completed its task."
+# A synthetic screenshot, created without accessing the user's files.
+import struct
+import zlib
+image = log.with_name("tool-screenshot.png")
+def chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+pixels = b"".join(b"\0" + bytes((48, 128, 184) if y < 80 else (228, 236, 242)) * 400 for y in range(160))
+image.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 400, 160, 8, 2, 0, 0, 0))
+                  + chunk(b"IDAT", zlib.compress(pixels)) + chunk(b"IEND", b""))
+tool_output = "[Rota tool output v1]\n" + json.dumps({"parts": [
+    {"kind": "image", "text": image.as_uri(), "path": "Tool screenshot"},
+    {"kind": "diff", "text": "\n".join(f"+Added line {index}" for index in range(80)), "path": "example.txt"}]})
 body = "[reasoning] " + reasoning + "\n" + answer + "\n"
 log.write_text(body)
 size = len(body.encode())
@@ -663,7 +686,7 @@ entries = [{"version": 1, "type": "header", "logSize": 0},
            {"version": 1, "type": "item", "id": 2, "kind": "reasoning", "text": " \n\t", "logSize": size},
            {"version": 1, "type": "item", "id": 3, "kind": "tool", "text": "Inspect example.txt", "logSize": size},
            {"version": 1, "type": "item", "id": 4, "kind": "output",
-            "text": "example.txt\nBefore:\nbefore\nAfter:\nafter", "logSize": size},
+            "text": tool_output, "logSize": size},
            {"version": 1, "type": "item", "id": 5, "kind": "agent", "text": answer, "logSize": size}]
 log.with_name(log.name + ".chat.jsonl").write_text("".join(json.dumps(row) + "\n" for row in entries))
 now = datetime.now(timezone.utc)
@@ -705,7 +728,7 @@ PYTHON
     for appearance in light dark; do
         launch "$appearance"
         "$DRIVER" key command-zero
-        check "$DRIVER" exists harnessCompatibilityNotice
+        check wait_exists harnessCompatibilityNotice
         check "$DRIVER" exists Reasoning
         "$DRIVER" tree > "$WORK/reasoning-tree.txt"
         [[ "$(grep -c ' | reasoningDetails$' "$WORK/reasoning-tree.txt")" == 1 ]] || fail "empty reasoning is hidden"
@@ -717,7 +740,14 @@ PYTHON
         "$DRIVER" disclose toolCalls-3 Expanded
         "$DRIVER" reveal toolCall-4
         check wait_visible toolCall-4
+        check wait_visible markdownImage
+        check "$DRIVER" exists toolDiff-4-1
         capture "Harness compatibility check" "$appearance-harness-tool-output"
+        "$DRIVER" disclose toolDiff-4-1 Expanded
+        "$DRIVER" reveal toolDiff-4-1-body
+        check wait_visible toolDiff-4-1-body
+        capture "Harness compatibility check" "$appearance-harness-tool-diff"
+        "$DRIVER" disclose toolDiff-4-1 Collapsed
         "$DRIVER" select sidebarPreview-44444444-4444-4444-8444-444444444444
         wait_exists workToggle
         "$DRIVER" press workToggle
