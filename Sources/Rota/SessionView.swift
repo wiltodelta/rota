@@ -9,7 +9,7 @@ struct SessionView: View {
     @Environment(AppModel.self) private var model
     let record: RunRecord
     let routine: Routine
-    @State private var transcript = TranscriptSnapshot()
+    @State private var transcript: TranscriptSnapshot?
     @State private var reader = TranscriptSessionReader()
     @State private var loadingEarlier = false
     @State private var pageRequest = 0
@@ -33,7 +33,7 @@ struct SessionView: View {
                 .padding(.horizontal, metrics.points(20))
                 .padding(.vertical, metrics.points(12))
             Divider()
-            if !running, current.harness.isAgent, SessionRestart.hitUsageLimit(in: transcript.items) {
+            if !running, current.harness.isAgent, SessionRestart.hitUsageLimit(in: transcript?.items ?? []) {
                 SessionLimitBanner(record: current)
             }
             if current.questions?.isEmpty != false, let question = current.attention {
@@ -41,21 +41,27 @@ struct SessionView: View {
                     model.scheduler.dismissAttention(current)
                 }
             }
-            if let problem = transcript.problem {
+            if let problem = transcript?.problem {
                 Text(problem)
                     .interfaceFont(.callout)
                     .foregroundStyle(Color.secondaryText)
                     .padding(metrics.points(12))
                     .accessibilityIdentifier("transcriptProblem")
             }
-            let items = transcript.items
+            let items = transcript?.items ?? []
             let questionID = questionDraft?.question.id
-            ChatTranscript(items: items, running: running, record: current,
-                           sending: outbox.filter { !$0.delivered(in: items) }.map(\.text),
-                           structured: transcript.structured, hasEarlier: transcript.hasEarlier,
-                           loadingEarlier: loadingEarlier, loadEarlier: loadEarlier,
-                           questionDraft: questionDraft, questionRevealRequest: questionRevealRequest,
-                           submitAnswer: { try submitAnswer($0, questionID: questionID) })
+            // The lazy stack's initial bottom anchor must see the first loaded page.
+            // Starting it empty can leave later rows unrendered until an AX query or scroll.
+            if let transcript {
+                ChatTranscript(items: items, running: running, record: current,
+                               sending: outbox.filter { !$0.delivered(in: items) }.map(\.text),
+                               structured: transcript.structured, hasEarlier: transcript.hasEarlier,
+                               loadingEarlier: loadingEarlier, loadEarlier: loadEarlier,
+                               questionDraft: questionDraft, questionRevealRequest: questionRevealRequest,
+                               submitAnswer: { try submitAnswer($0, questionID: questionID) })
+            } else {
+                Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
             if questionDraft != nil {
                 HStack {
                     Text("Needs your reply").interfaceFont(.callout).foregroundStyle(Color.secondaryText)
@@ -97,6 +103,8 @@ struct SessionView: View {
                                            finished: !running)
                     guard !Task.isCancelled else { return }
                     if request == pageRequest, next != transcript { transcript = next }
+                } else if transcript == nil {
+                    transcript = TranscriptSnapshot()
                 }
                 try? await Task.sleep(for: .seconds(1))
             } while running && !Task.isCancelled

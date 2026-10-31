@@ -101,6 +101,8 @@ sessions; ownership and failure handling are described in [Architecture](archite
 `SessionView` owns a `TranscriptSessionReader` actor for its session and polls
 it while the run is active. Polling and page requests share that reader off the
 UI actor; scheduler refreshes and run completion retain already loaded pages.
+The lazy transcript view is created after the first completed read; later polls
+and page requests keep its identity.
 The view changes state only when the snapshot changes. A pending page request
 supersedes any older poll result. A finished session moves its trailing status
 entry matching the run outcome into one footer with the completion time, result, and duration. It does not

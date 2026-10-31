@@ -616,6 +616,14 @@ was checked in both appearances at 2x: visible icon-to-letter gaps were
 light and 5.64:1 in dark. The fixture supplies granted permissions; it does not
 change system grants or install the command.
 
+`SessionView` distinguishes an unread transcript snapshot from a completed read
+with no messages. It creates `ChatTranscript` after the first read, or after
+confirming that the record has no log, so the lazy stack's initial bottom anchor
+sees the loaded page. Starting the stack empty and inserting that page later can
+leave the viewport blank until scrolling or an Accessibility query forces layout.
+Subsequent refreshes and earlier-page loads update the existing transcript view
+without resetting its reading position or disclosures.
+
 Chat implementation research and proposed changes, including the evidence and
 limits of inspecting super.engineering, live in [Chat UI research](chat-ui-research.md).
 The intended direction is a small provider-independent transcript contract
@@ -1098,6 +1106,10 @@ row's 8 pt inset and up or down as far as the list (a pinned section header
 floats over the rows). Every
 capture runs it. `choose` reads the pop-up back and retries,
 because SwiftUI can redraw the form while its menu is open and drop the pick.
+
+Initial transcript rendering needs a window capture before walking the
+Accessibility tree. An AX walk can materialize lazy rows and hide a blank first
+frame, so an AX-based visibility assertion alone cannot catch this regression.
 
 ## Session configuration and attachments
 
