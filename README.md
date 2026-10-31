@@ -156,9 +156,9 @@ rota tools
 
 ## Your Mac, your agent accounts
 
-Rota stores routines, session logs, and attachment copies locally. It has no
-analytics or hosted scheduling service. Agents use their own services under
-your existing accounts and configuration.
+Rota stores routines, session logs, attachment copies, and bounded performance
+diagnostics locally. It has no remote analytics or hosted scheduling service.
+Agents use their own services under your existing accounts and configuration.
 
 **Routines run with unattended tool permissions.** They can change files
 and use the tools available to their agent. Use projects and skills you
@@ -173,6 +173,8 @@ immediately.
 
 ## Troubleshooting
 
+- **Slow interface or high resource use?** Review the [local diagnostic journal](docs/performance.md).
+  The external collector also works with older installed builds, without restarting them.
 - **Icon hidden by the notch or a menu bar manager?** Open Rota again from
   Finder or Spotlight to show its window.
 - **Agent unavailable?** Check Settings > Agents, then confirm its CLI works

@@ -682,6 +682,12 @@ Animation on their own layers. A SwiftUI-driven animation, whether a per-frame `
 or a repeating animation, made SwiftUI re-rasterize every text in the same hosting view on each
 frame, so an open running session cost most of a core, more the longer its transcript.
 A `CAGradientLayer` `locations` animation stayed still on screen, so the shimmer moves its band.
+Local performance diagnostics (`AppPerformance`, `PerformanceDiagnostics`)
+record process resources, main-queue probe delays and common transcript-reader
+timings on a utility queue. The bounded journal contains numeric UI context,
+not conversation content. Sleep resets probes and resource baselines.
+The event contract, retention source of truth and verification are in
+[Local performance diagnostics](performance.md).
 The File menu holds New Routine and Import, the Routine menu Run Now, Stop and
 Edit Routine for `AppModel.selectedRoutine`; sheets open from `AppModel`
 flags so menus and buttons share them. The session header's Show Routine action
@@ -1465,6 +1471,7 @@ service that may host somebody else's work.
 
 | Feature | Claude stream | Claude interactive | Codex | Grok Build | Antigravity | Shell |
 |---|---|---|---|---|---|---|
+| Local UI performance diagnostics | shared host/reader | shared host/reader | shared host/reader | shared host/reader | shared host/reader | shared host/reader |
 | Model and effort | native configuration | native configuration | native configuration | native model/options verified | native family/options verified | n/a |
 | Message while running | joins turn | terminal input | steer | queued prompt | queued prompt | Terminal |
 | Continue finished session | yes | yes | yes | yes | yes | n/a |

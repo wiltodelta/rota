@@ -205,6 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var widthGuard: NSObjectProtocol?
     private var macState: MacState?
     private var controlServer: ControlServer?
+    private var performance: AppPerformance?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let id = Bundle.main.bundleIdentifier,
@@ -213,6 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             NSApp.terminate(nil)
             return
         }
+        performance = AppPerformance(model: model)
         NSApp.setActivationPolicy(.accessory)
         NSWindow.allowsAutomaticWindowTabbing = false
         for name in [NSMenu.didAddItemNotification, NSMenu.didChangeItemNotification,
@@ -281,6 +283,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        performance?.stop()
         model.discardDraftAttachments()
         controlServer?.stop()
     }

@@ -271,3 +271,12 @@ reasoning has a separate, expandable Reasoning row. Blocks without exposed text
 do not appear. If the selected CLI and its
 running service have different versions, the chat shows a warning; let other
 sessions finish before restarting that service.
+
+## Local performance diagnostics
+
+Rota keeps a bounded diagnostic journal in `~/Library/Logs/Rota/Diagnostics`.
+It records CPU, resident memory, main-queue delays and conversation read times,
+with the app version and numeric UI context. Message text, routine names and
+project paths are excluded. Nothing is uploaded. See
+[Local performance diagnostics](performance.md) for the event format,
+limitations and a collector for older installed builds.

@@ -270,7 +270,12 @@ public actor TranscriptSessionReader {
     public init() {}
 
     public func read(log: URL, shell: Bool, finished: Bool, earlier: Bool = false) -> TranscriptSnapshot {
-        if earlier, !shell { return reader.readEarlier(log: log, finished: finished) }
-        return reader.read(log: log, shell: shell, finished: finished)
+        let started = ProcessInfo.processInfo.systemUptime
+        let snapshot = earlier && !shell
+            ? reader.readEarlier(log: log, finished: finished)
+            : reader.read(log: log, shell: shell, finished: finished)
+        PerformanceDiagnostics.shared.recordTranscript(seconds: ProcessInfo.processInfo.systemUptime - started,
+                                                       items: snapshot.items.count, earlier: earlier, shell: shell)
+        return snapshot
     }
 }
