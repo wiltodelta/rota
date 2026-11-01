@@ -6,11 +6,23 @@
       "action": "Authorize a separate native-contract verification and implementation task for finished_reason",
       "source": ".claude/harness-compatibility-weekly.md#agy-finished-reason-учитывать-досрочное-завершение",
       "first_seen_at": "2026-10-31T01:11:56Z",
-      "updated_at": "2026-10-31T04:31Z",
+      "updated_at": "2026-11-01T17:22:17Z",
       "question_asked_at": "2026-10-31T01:17:32Z",
       "question_source": "Codex session: harness-compatibility-weekly, request_user_input_async accepted 2026-10-31T01:17:32Z",
-      "resolution": "Operator approved 2026-10-30 in chat; implemented in AntigravityStream.outcome and AntigravityRun.exited, native probes on agy 1.4.12, AntigravityTests fail on old code, maintain.sh and Antigravity live tests passed; awaiting commit",
+      "resolution": "Operator approved 2026-10-30 in chat; implemented in AntigravityStream.outcome and AntigravityRun.exited, native probes on agy 1.4.12, AntigravityTests fail on old code, maintain.sh and Antigravity live tests passed; awaiting commit; implementation committed as 03e310a, verified in this review",
       "resolved_at": "2026-10-31T04:31Z"
+    },
+    "CODEX-MODEL-VERIFICATION": {
+      "status": "pending",
+      "summary": "Codex model/verification notification is ignored by the run adapter",
+      "action": "Authorize a separate semantics verification and visible journal diagnostic implementation task",
+      "source": ".claude/harness-compatibility-weekly.md#codex-model-verification-сохранять-требование-проверки-доступа",
+      "first_seen_at": "2026-11-01T17:22:17Z",
+      "updated_at": "2026-11-01T17:22:17Z",
+      "question_asked_at": null,
+      "question_source": null,
+      "resolution": null,
+      "resolved_at": null
     }
   }
 }
