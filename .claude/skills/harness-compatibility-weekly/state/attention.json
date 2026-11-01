@@ -15,12 +15,12 @@
     "CODEX-MODEL-VERIFICATION": {
       "status": "pending",
       "summary": "Codex model/verification notification is ignored by the run adapter",
-      "action": "Authorize a separate semantics verification and visible journal diagnostic implementation task",
+      "action": "Operator approved a separate semantics verification and visible journal diagnostic implementation task; implementation remains pending",
       "source": ".claude/harness-compatibility-weekly.md#codex-model-verification-сохранять-требование-проверки-доступа",
       "first_seen_at": "2026-11-01T17:22:17Z",
-      "updated_at": "2026-11-01T17:22:17Z",
-      "question_asked_at": null,
-      "question_source": null,
+      "updated_at": "2026-11-01T17:29:54Z",
+      "question_asked_at": "2026-11-01T17:29:54Z",
+      "question_source": "Codex session: harness-compatibility-weekly, request_user_input_async call_820d5e5096d54e2f81efa8543e4dde9f accepted; operator approved the separate task in the same session",
       "resolution": null,
       "resolved_at": null
     }

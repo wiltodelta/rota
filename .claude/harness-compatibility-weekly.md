@@ -16,7 +16,7 @@
 
 ### CODEX-MODEL-VERIFICATION: сохранять требование проверки доступа
 
-Статус: новое предложение, ожидает решения. Приоритет: видимость необходимого действия пользователя. [Первичный источник, Turn events](https://learn.chatgpt.com/docs/app-server#turn-events) описывает `model/verification` с `threadId`, `turnId`, `verifications`. Схема установленного CLI `v2/ModelVerificationNotification.json`, полученная без запуска модели, подтверждает эти обязательные поля и вариант `trustedAccessForCyber`. SHA-256 схемы: `4f27a99d0c8664c29abb4d65384ab16853bbc29b61de5e749111cefdc6994655`.
+Статус: отдельная задача разрешена оператором в этой сессии; реализация и проверка ожидаются. Решение получено через вопрос в сессии, receipt сохранён в attention.json. Приоритет: видимость необходимого действия пользователя. [Первичный источник, Turn events](https://learn.chatgpt.com/docs/app-server#turn-events) описывает `model/verification` с `threadId`, `turnId`, `verifications`. Схема установленного CLI `v2/ModelVerificationNotification.json`, полученная без запуска модели, подтверждает эти обязательные поля и вариант `trustedAccessForCyber`. SHA-256 схемы: `4f27a99d0c8664c29abb4d65384ab16853bbc29b61de5e749111cefdc6994655`.
 
 Проверенное наблюдение: `Sources/RotaCore/CodexDaemonRun.swift`, `handle`, пропускает этот метод в `default: break`; поиск по адаптерам не нашёл другого обработчика. При получении события его сведения не попадут в журнал. Это подтверждённый пробел обработки, а не наблюдавшаяся поломка аккаунта. Дата появления события и его реальная последовательность относительно error/turn completion не установлены.
 
