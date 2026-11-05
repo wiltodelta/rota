@@ -144,7 +144,7 @@ private struct MenuRoutineRow: View {
     @State private var hovering = false
 
     var body: some View {
-        let running = model.scheduler.active[routine.id] != nil
+        let running = model.scheduler.hasActiveSession(routine.id)
         let toggleRun = {
             if running {
                 model.scheduler.stop(routine.id)
@@ -221,7 +221,7 @@ struct StatusDot: View {
     }
 
     private func color(_ last: RunRecord?) -> Color {
-        if model.scheduler.active[routine.id] != nil { return .blue }
+        if model.scheduler.hasActiveSession(routine.id) { return .blue }
         if last?.outcome.isFailure == true { return .red }
         return routine.enabled ? .green : Color.secondary.opacity(0.5)
     }
@@ -231,7 +231,7 @@ struct StatusDot: View {
     }
 
     private static func status(of routine: Routine, in scheduler: Scheduler, last: RunRecord?) -> String {
-        if scheduler.active[routine.id] != nil { return "Running" }
+        if scheduler.hasActiveSession(routine.id) { return "Running" }
         if let last, last.outcome.isFailure { return "Last run: \(last.outcome.title)" }
         return routine.enabled ? "On schedule" : "Paused"
     }

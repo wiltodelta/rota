@@ -135,8 +135,13 @@ Invisible native row markers capture the first fully visible message's
 actual offset. SwiftUI can keep offscreen native markers attached to the window
 but hidden, with stale frames inside the visible rectangle. Exclude hidden markers
 and hidden ancestors from both anchor selection and restoration.
-Keep the ID scroll-position binding alongside the proxy and pixel
-correction: removing it in the synthetic prepend check lost the reading position.
+The proxy and pixel correction own scroll positioning. Do not add an ID
+`scrollPosition` binding to the lazy stack: competing position updates can leave
+the transcript white on first paint until a wheel event forces layout. The
+`--paint-only` UI check captures the long synthetic transcript before any AX
+query or scroll input and recognizes its final message within the chat body,
+excluding the sidebar preview. The prepend checks still verify pixel position
+without that binding.
 The reading anchor is saved during scrolling, before new data
 changes layout; capturing it only in the update callback can already see the
 moved row. A narrow `TranscriptViewport` bridge restores that offset after

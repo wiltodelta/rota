@@ -55,7 +55,11 @@
     answered as a later message.
   - Shell commands run in a detached `screen` session; **Open in Terminal**
     attaches with `screen -r`, where you can type into the command or stop it.
-  A continued session runs again and appends to the same chat. Finished Claude Code, Codex, Grok Build and Antigravity
+  A continued session runs again and appends to the same chat. Older conversations
+  can continue while another session of the same routine runs. **Stop** in a
+  session stops that session; the routine-level Stop action stops all its sessions.
+  Scheduled slots still skip while the routine has an active session; **Run Now** is unavailable.
+  Finished Claude Code, Codex, Grok Build and Antigravity
   sessions also open in their own CLI with **Continue in Terminal**. Rota follows
   that continuation: new messages and tool calls appear in the same chat and
   session preview, with **Working in Terminal** or **Waiting in Terminal** as

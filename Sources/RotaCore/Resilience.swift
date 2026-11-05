@@ -115,9 +115,9 @@ extension Scheduler {
         return start(record, spec: spec)
     }
 
-    /// A surviving screen owns this routine until it exits. UI reads the last checked state.
+    /// A surviving screen owns this session until it exits. UI reads the last checked state.
     public func isSurvivingSession(_ record: RunRecord) -> Bool {
-        survivingSessions[record.routineID]?.id == record.id
+        survivingSessions[record.id] != nil
     }
 
     func refreshSurvivingSession() {
@@ -125,30 +125,32 @@ extension Scheduler {
     }
 
     func hasSurvivingSession(_ routineID: String) -> Bool {
-        if survivingSessions[routineID]?.needsReconciliation == true { return true }
-        if let record = survivingSessions[routineID], !stillRunning(record) { survivingSessions[routineID] = nil }
-        return survivingSessions[routineID] != nil
+        for record in Array(survivingSessions.values) where record.routineID == routineID {
+            if record.needsReconciliation != true, !stillRunning(record) { survivingSessions[record.id] = nil }
+        }
+        return survivingSessions.values.contains { $0.routineID == routineID }
     }
 
     func reserveUnverified(_ record: RunRecord) {
         var record = record
         record.needsReconciliation = true
         saveRecord(record)
-        survivingSessions[record.routineID] = record
-        reconciliationRetry[record.routineID] = now().addingTimeInterval(Self.retryDelay)
+        survivingSessions[record.id] = record
+        reconciliationRetry[record.id] = now().addingTimeInterval(Self.retryDelay)
         lastError = "The native session state is unknown. Rota will check it before starting another run."
     }
 
     func reconcileNative(_ record: RunRecord) {
-        survivingSessions[record.routineID] = nil
+        survivingSessions[record.id] = nil
+        reconciliationRetry[record.id] = nil
         guard adoptInterrupted(record) else { return reserveUnverified(record) }
     }
 
     func reconcilePending() {
         guard isOnline() else { return }
         let records = survivingSessions.values.filter {
-            $0.needsReconciliation == true && active[$0.routineID] == nil
-                && (reconciliationRetry[$0.routineID] ?? .distantPast) <= now()
+            $0.needsReconciliation == true && active[$0.id] == nil
+                && (reconciliationRetry[$0.id] ?? .distantPast) <= now()
         }
         for record in records { reconcileNative(record) }
     }
@@ -165,9 +167,9 @@ extension Scheduler {
             probe(routine.harness) { [weak self] reachable in
                 guard let self, reachable else { self?.retryLater(); return }
                 guard self.pendingResumes.removeValue(forKey: recordID) != nil,
-                      // A routine already running again leaves the older session as it ended.
-                      self.active[routineID] == nil, !self.hasSurvivingSession(routineID),
-                      var record = self.history.records(for: routineID).first(where: { $0.id == recordID })
+                      self.active[recordID] == nil,
+                      var record = self.history.records(for: routineID).first(where: { $0.id == recordID }),
+                      !self.isSurvivingSession(record), !self.hasNativeConflict(record)
                 else { return }
                 record.resumes = (record.resumes ?? 0) + 1
                 Self.log.info("Continuing \(routineID, privacy: .public) after an interruption")
@@ -182,7 +184,7 @@ extension Scheduler {
             probe(routine.harness) { [weak self] reachable in
                 guard let self, reachable else { self?.retryLater(); return }
                 guard self.pendingReruns.removeValue(forKey: routineID) != nil,
-                      self.active[routineID] == nil, !self.hasSurvivingSession(routineID),
+                      !self.hasActiveSession(routineID), !self.hasSurvivingSession(routineID),
                       let routine = self.routine(routineID) else { return }
                 self.reruns[routineID, default: 0] += 1
                 Self.log.info("Running \(routineID, privacy: .public) again after a network failure")

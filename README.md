@@ -66,7 +66,8 @@ checks, recovery guarantees, and updates when a CLI changes.
 Sessions from all your routines appear in one inbox. Open a result to read
 the agent's response, inspect its tool activity, or ask a follow-up. Attach
 files and keep working in the same conversation, while the agent runs or
-after it finishes.
+after it finishes. Older conversations can continue alongside newer sessions
+of the same routine.
 
 If a session hits a usage limit, **Restart with…** lets you continue in another
 harness with the conversation as context. The same action is available for any
@@ -131,7 +132,7 @@ work that takes longer than expected.
 
 - A recently missed schedule runs once when Rota returns. Older slots are
   recorded as skipped.
-- A routine already running skips its next slot, so it cannot overlap itself.
+- A routine with a running session skips its next scheduled slot.
 - Interrupted agent work can resume in the same session after sleep,
   shutdown, or a network error. Shell commands are never automatically retried.
 - Failures and questions can notify you. Normal completion notifications

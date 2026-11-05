@@ -20,7 +20,6 @@ struct ChatTranscript: View {
     var submitAnswer: ((QuestionAnswer) throws -> Void)?
     @State private var expandedTools: Set<Int> = []
     @State private var scroll = TranscriptScrollState()
-    @State private var visibleItem: Int?
     @State private var viewport = TranscriptViewport()
     @State private var pageAnchor: TranscriptViewport.Anchor?
 
@@ -121,8 +120,6 @@ struct ChatTranscript: View {
                 .frame(maxWidth: metrics.points(760))
                 .frame(maxWidth: .infinity)
             }
-            // The lazy stack needs this binding to retain the reading position on prepends.
-            .scrollPosition(id: $visibleItem, anchor: .top)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .onScrollPhaseChange { _, phase, context in
                 let wasInteracting = scroll.interacting

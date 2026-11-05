@@ -8,10 +8,10 @@ extension Scheduler {
     /// A session as it is now: the running copy, which the run's end saves, or the stored one.
     public func current(_ id: UUID, routineID: String? = nil) -> RunRecord? {
         if let routineID {
-            if let running = active[routineID], running.id == id { return running }
+            if let running = active[id], running.routineID == routineID { return running }
             return history.records(for: routineID).first { $0.id == id }
         }
-        return active.values.first { $0.id == id } ?? routines.lazy.compactMap { routine in
+        return active[id] ?? routines.lazy.compactMap { routine in
             self.history.records(for: routine.id).first { $0.id == id }
         }.first
     }
@@ -55,13 +55,13 @@ extension Scheduler {
         }
         guard let routineID else { return nil }
         guard routine(routineID) != nil else { throw ControlError("No routine \(routineID).") }
-        return active[routineID] ?? history.records(for: routineID).first { !$0.isSkip }
+        return activeRecord(for: routineID) ?? history.records(for: routineID).first { !$0.isSkip }
     }
 
     func setAttention(_ text: String?, on record: RunRecord) -> RunRecord {
         var record = record
         record.attention = text
-        if active[record.routineID]?.id == record.id { active[record.routineID] = record }
+        if active[record.id] != nil { active[record.id] = record }
         saveRecord(record)
         return record
     }

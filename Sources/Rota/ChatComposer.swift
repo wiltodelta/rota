@@ -142,7 +142,7 @@ struct ChatComposer: View {
                         }
                     }
                     if running && !canSend {
-                        StopRingButton { model.scheduler.stop(record.routineID) }
+                        StopRingButton { model.scheduler.stop(record.id) }
                             .help("Stop the session")
                             .accessibilityLabel("Stop")
                             .accessibilityIdentifier("composerStop")
@@ -272,8 +272,7 @@ struct ChatComposer: View {
         case .shell:
             return running ? "Open in Terminal to type into the command." : nil
         default:
-            return model.scheduler.active[record.routineID] != nil && !running
-                ? "Another session of this routine is running." : nil
+            return nil
         }
     }
 

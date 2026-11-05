@@ -29,7 +29,9 @@ struct RoutineCommands: Commands {
         CommandMenu("Routine") {
             let model = AppModel.shared
             let routine = model.selectedRoutine
-            let running = routine.map { model.scheduler.active[$0.id] != nil } ?? false
+            let running = routine.map { model.scheduler.hasActiveSession($0.id) } ?? false
+            let selectedSession: UUID? = if case .session(let id) = model.selection { id } else { nil }
+            let canStop = selectedSession.map { model.scheduler.active[$0] != nil } ?? running
             Button("Run Now") {
                 guard let routine else { return }
                 model.scheduler.run(routine, trigger: .manual)
@@ -37,9 +39,13 @@ struct RoutineCommands: Commands {
             }
             .keyboardShortcut("r")
             .disabled(routine == nil || running)
-            Button("Stop") { routine.map { model.scheduler.stop($0.id) } }
+            Button("Stop") {
+                if let selectedSession { model.scheduler.stop(selectedSession) } else {
+                    routine.map { model.scheduler.stop($0.id) }
+                }
+            }
                 .keyboardShortcut(".")
-                .disabled(!running)
+                .disabled(!canStop)
             Divider()
             Button("Edit Routine\u{2026}") { model.editSelectedRoutine() }
                 .keyboardShortcut("e")

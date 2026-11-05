@@ -32,7 +32,7 @@ public final class Scheduler {
     public internal(set) var routines: [Routine] = [] {
         didSet { cachedSessions = nil }
     }
-    public internal(set) var active: [String: RunRecord] = [:]
+    public internal(set) var active: [UUID: RunRecord] = [:]
     /// Bumped whenever a run record changes, so views re-read history.
     public internal(set) var historyVersion = 0 {
         didSet {
@@ -51,11 +51,11 @@ public final class Scheduler {
     @ObservationIgnored public var isOnline: () -> Bool = { true }
     /// Whether a screen session is still up; a seam so tests never run `screen`.
     @ObservationIgnored public var sessionAlive: (String) -> Bool = { ScreenRun.alive($0) }
-    /// Routines whose run was going when the Mac went to sleep.
-    @ObservationIgnored var sleptThrough: Set<String> = []
-    /// Sessions cut off by sleep, shutdown or a lost network, to continue once online: record id to routine id.
-    var survivingSessions: [String: RunRecord] = [:]
-    @ObservationIgnored var reconciliationRetry: [String: Date] = [:]
+    /// Sessions that were going when the Mac went to sleep.
+    @ObservationIgnored var sleptThrough: Set<UUID> = []
+    /// Sessions whose surviving or unknown native state must be reconciled.
+    var survivingSessions: [UUID: RunRecord] = [:]
+    @ObservationIgnored var reconciliationRetry: [UUID: Date] = [:]
     @ObservationIgnored var pendingResumes: [UUID: String] = [:]
     /// Agent runs that failed on the network before they had a session, to run again: routine id to trigger.
     @ObservationIgnored var pendingReruns: [String: RunTrigger] = [:]
@@ -79,13 +79,13 @@ public final class Scheduler {
     @ObservationIgnored var questionDeliveries: [UUID: Set<String>] = [:]
     @ObservationIgnored var questionReplies: [UUID: [String: @Sendable (QuestionAnswer) -> Void]] = [:]
     @ObservationIgnored var hookAnswers: [String: QuestionAnswer] = [:]
-    @ObservationIgnored var controls: [String: RunControl] = [:]
+    @ObservationIgnored var controls: [UUID: RunControl] = [:]
     /// Each launch has its own identity, including continuations of the same record.
-    @ObservationIgnored var launchIDs: [String: UUID] = [:]
-    /// When each routine's current run started, a continued session included.
-    @ObservationIgnored var runStarts: [String: Date] = [:]
-    /// Messages a run handed back as its session ended, by routine; the session continues with them.
-    @ObservationIgnored var lateMessages: [String: [String]] = [:]
+    @ObservationIgnored var launchIDs: [UUID: UUID] = [:]
+    /// When each active session's current run started, a continued turn included.
+    @ObservationIgnored var runStarts: [UUID: Date] = [:]
+    /// Messages handed back as each session ended; that same session continues with them.
+    @ObservationIgnored var lateMessages: [UUID: [String]] = [:]
     @ObservationIgnored private var timer: Timer?
 
     public init(location: StorageLocation, launcher: RoutineLaunching) {
@@ -106,7 +106,7 @@ public final class Scheduler {
         for record in history.closeOrphans(routineIDs: routines.map(\.id), now: now()) {
             if stillRunning(record) {
                 if adoptSurviving(record) { continue }
-                survivingSessions[record.routineID] = record
+                survivingSessions[record.id] = record
             } else if record.sessionID != nil
                 || record.logPath.map({ RunLease.read(URL(fileURLWithPath: $0)) != nil }) == true {
                 reconcileNative(record)
@@ -143,7 +143,8 @@ public final class Scheduler {
             if current.timeIntervalSince(due) > Self.missedRunGrace {
                 record(skipped: "missed the \(due.formatted(date: .abbreviated, time: .shortened)) slot",
                        routine: routine, at: current)
-            } else if active[routine.id] != nil || survivingSessions[routine.id] != nil {
+            } else if hasActiveSession(routine.id)
+                || survivingSessions.values.contains(where: { $0.routineID == routine.id }) {
                 record(skipped: "the previous run was still going", routine: routine, at: current, notify: false)
             } else {
                 // A minute late is the tick's own lag; later than that, the slot was missed.
@@ -156,7 +157,7 @@ public final class Scheduler {
     // MARK: Running
 
     public func run(_ routine: Routine, trigger: RunTrigger) {
-        guard active[routine.id] == nil else { return }
+        guard !hasActiveSession(routine.id) else { return }
         guard !hasSurvivingSession(routine.id) else {
             lastError = "This routine still has a native session running. Close it before starting another."
             return
@@ -196,16 +197,17 @@ public final class Scheduler {
         return spec
     }
 
-    /// Launches `spec` as `record`, which becomes the routine's active run.
+    /// Launches one session without replacing another session of the same routine.
     @discardableResult
     func start(_ record: RunRecord, spec: LaunchSpec) -> Bool {
+        guard active[record.id] == nil, !hasNativeConflict(record) else { return false }
         var record = record
         record.launchMode = spec.mode
         record.executablePath = spec.executable
         record.cliVersion = nil
         record.serverVersion = nil
         record.needsReconciliation = nil
-        let id = record.routineID
+        let id = record.id
         let launchID = UUID()
         record.executionID = launchID
         launchIDs[id] = launchID
@@ -229,12 +231,17 @@ public final class Scheduler {
             record.outcome = .launchFailed(error.localizedDescription)
             record.endedAt = now()
             saveRecord(record)
-            if let routine = self.routine(id) { notifier?.runEnded(record, routine: routine) }
+            if let routine = self.routine(record.routineID) { notifier?.runEnded(record, routine: routine) }
             return false
         }
     }
 
-    public func stop(_ id: String) {
+    /// Stops every active session of a routine. Session controls use the UUID overload.
+    public func stop(_ routineID: String) {
+        for record in Array(active.values) where record.routineID == routineID { stop(record.id) }
+    }
+
+    public func stop(_ id: UUID) {
         if let record = active[id] { cancelQuestions(on: record) }
         controls[id]?.stop()
     }
@@ -258,9 +265,9 @@ public final class Scheduler {
     func deliverMessage(_ message: String, to record: RunRecord) -> Bool {
         guard canMessage(record) else { return false }
         if isActive(record) {
-            guard let control = controls[record.routineID] else { return false }
+            guard let control = controls[record.id] else { return false }
             control.send(message)
-            active[record.routineID] = record
+            active[record.id] = record
             saveRecord(record)
             return true
         }
@@ -269,32 +276,33 @@ public final class Scheduler {
 
     /// The current run start, or current native terminal turn start, while it works.
     public func runStartedAt(_ record: RunRecord) -> Date? {
-        isActive(record) ? runStarts[record.routineID] : nil
+        isActive(record) ? runStarts[record.id] : nil
     }
 
     /// Transcript lookup is off the main actor; tests supply an isolated producer file.
     public var terminalTranscript: @Sendable (Harness, String) -> URL? = NativeTranscript.locate
     var openingTerminals: Set<UUID> = []
 
-    func attachSession(_ session: String, to routineID: String) {
-        guard var record = active[routineID] else { return }
+    func attachSession(_ session: String, to runID: UUID) {
+        guard var record = active[runID] else { return }
         record.sessionID = session
-        active[routineID] = record
+        active[runID] = record
         saveRecord(record)
     }
 
-    func finish(_ routineID: String, outcome: RunOutcome) {
-        guard var record = active[routineID] else { return }
+    func finish(_ runID: UUID, outcome: RunOutcome) {
+        guard var record = active[runID] else { return }
+        let routineID = record.routineID
         cancelQuestions(on: record)
         record = current(record.id, routineID: routineID) ?? record
         record.outcome = outcome
         record.endedAt = now()
-        active[routineID] = nil
-        launchIDs[routineID] = nil
-        controls[routineID] = nil
-        runStarts[routineID] = nil
+        active[runID] = nil
+        launchIDs[runID] = nil
+        controls[runID] = nil
+        runStarts[runID] = nil
         saveRecord(record)
-        let slept = self.sleptThrough.remove(routineID) != nil
+        let slept = self.sleptThrough.remove(runID) != nil
         if record.needsReconciliation == true {
             reserveUnverified(record)
         } else {
@@ -303,14 +311,14 @@ public final class Scheduler {
         Self.log.info("\(routineID, privacy: .public) ended: \(outcome.title, privacy: .public)")
         if let routine = routine(routineID) { notifier?.runEnded(record, routine: routine) }
         pauseAfterRepeatedFailures(routineID)
-        if let messages = lateMessages.removeValue(forKey: routineID) {
+        if let messages = lateMessages.removeValue(forKey: runID) {
             continueLate(record, with: messages.joined(separator: "\n\n"))
         }
     }
 
     /// A message the run could no longer take waits for the run's end, then continues its session.
     func receiveLate(_ message: String, routineID: String, runID: UUID) {
-        if active[routineID]?.id == runID { return lateMessages[routineID, default: []].append(message) }
+        if active[runID] != nil { return lateMessages[runID, default: []].append(message) }
         guard let record = current(runID, routineID: routineID), record.outcome != .running else { return }
         continueLate(record, with: message)
     }

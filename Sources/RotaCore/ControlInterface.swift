@@ -122,7 +122,7 @@ public enum ControlInterface {
                 properties: ["id": id], required: ["id"]),
             Tool(
                 name: "stop_routine", method: .routinesStop, command: "stop",
-                description: "Stop a routine's running session.",
+                description: "Stop all running sessions of a routine.",
                 properties: ["id": id], required: ["id"]),
             Tool(
                 name: "delete_routine", method: .routinesDelete, command: "remove",

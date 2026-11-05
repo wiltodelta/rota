@@ -27,7 +27,17 @@ flowchart LR
   endpoints must both be integers; malformed ranges are rejected rather than
   silently dropping empty or nonnumeric components.
 - `Scheduler` owns the routines (`routines.json` in Application Support) and
-  persists each routine's `nextFire`. Each launch has a separate token, even
+  persists each routine's `nextFire`. Active records, controls, launch tokens,
+  elapsed times, deferred messages and recovery reservations are keyed by the
+  run UUID. Explicit continuation of an older conversation can run alongside
+  other sessions of the same routine. `scripts/ui-check.sh --parallel-only` checks
+  continuation and individual Stop with two synthetic Claude conversations in
+  both appearances. Questions, Stop, completion and recovery
+  affect only their owning session. `activeRecord(for:)` selects the most recently
+  started or continued session for routine-level display and messaging; routine
+  Stop ends all its active sessions. Automatic slots and Run Now remain serialized
+  by routine. Two records cannot concurrently own the same harness/native session ID.
+  Each launch has a separate token, even
   when continuing the same session: late callbacks cannot update or finish a
   later launch, and expired question callbacks receive cancellation. A tick fires a due slot (a catch-up or a
   skip when it is late, below) and moves `nextFire` past now either way.
@@ -878,8 +888,8 @@ Development checkouts share the default app identity. When another development
 copy is open, sign the test copy with a session-specific bundle ID ending in
 `.dev` and set the driver's `ROTA_BUNDLE_ID` to match. Keep `ROTA_DATA_DIR` isolated
 as well: a separate data directory does not isolate app identity.
-It restores development defaults and any existing terminal command files after
-the run, and stops development-owned MCP inspection children before quitting
+It restores development defaults after the run; terminal command files live
+inside the isolated data directory. It stops development-owned MCP inspection children before quitting
 their parent. The default terminal coverage includes iTerm2 when installed;
 `ROTA_UI_TERMINAL=terminal` explicitly uses Terminal for both appearances when
 another terminal's shell startup is blocked. This override is printed and does
@@ -929,6 +939,9 @@ rechecks the console and refuses input while it is locked or its state is unknow
 
 The UI layout gate checks the window frame against the screen's visible area,
 including menu bar and Dock exclusions, as well as checking the controls inside it.
+`ChatOpener` writes a separate `terminal-scripts/<run UUID>.command` under the
+application data root for each session. History deletion and retention remove
+its script, so parallel terminal opens cannot overwrite another session's command.
 `Scheduler.continueInTerminal` reserves the session while locating its native
 transcript off the main actor, then starts `TerminalRun` with the CLI's native
 resume arguments. The existing run ID, session ID, log and normalized journal
@@ -1486,6 +1499,7 @@ service that may host somebody else's work.
 | Live answer text | partial events | transcript entries | deltas | chunks | deltas | log |
 | Retry progress | api_retry status | api_error status | willRetry status | live retry payload unverified | CLI owns retries | n/a |
 | Recover after Rota restart | durable spool | surviving screen | native thread/turn history | load replay/active prompt | durable spool | surviving screen |
+| Parallel continuation of distinct sessions | yes | yes | yes | yes | yes | no finished-session resume |
 | Terminal continuation | after run | live/after | after | after | after | live |
 | Wait for background work | non-ambient tasks | shells/agents | no root wake signal verified | native activity | CLI controls its grace period | n/a |
 | Session identity in Rota MCP | inherited | inherited | per-thread server config | per-session server config | inherited | CLI only |
@@ -1511,8 +1525,9 @@ bounded recent excerpt of normalized transcript (`SessionRestart.context`), with
 the readable log path for additional context. It does not translate native session IDs or provider options.
 `RunRecord.originalRequest` preserves the root request across repeated restarts;
 prior handoff prompts are excluded from excerpts. The scheduler rechecks stored
-state after reading and rejects overlapping runs, terminal opens and reserved
-native sessions. Both Claude modes use the current
+state after reading and rejects restarting the source while it is running,
+opening in Terminal or reserved for recovery. Another session of that routine
+does not block the restart. Both Claude modes use the current
 interactive preference and folder trust through the existing launch-spec builder.
 Shell sources and destinations are excluded because command text is not an agent
 request. `SessionRestart.hitUsageLimit` recognizes common textual quota/rate-limit

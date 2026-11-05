@@ -23,8 +23,7 @@ struct SessionView: View {
 
     /// The record as the scheduler has it now, with a reply request that came after the view opened.
     private var current: RunRecord {
-        if let active = model.scheduler.active[record.routineID], active.id == record.id { return active }
-        return record
+        model.scheduler.active[record.id] ?? record
     }
 
     var body: some View {
@@ -195,7 +194,7 @@ struct SessionView: View {
         }
         // A session that takes messages has Stop beside its field.
         if running && !model.scheduler.canMessage(record) {
-            Button(interfaceTitle: "Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }
+            Button(interfaceTitle: "Stop", systemImage: "stop.fill") { model.scheduler.stop(record.id) }
                 .accessibilityIdentifier("stopSession")
         }
         if model.scheduler.terminalCommand(for: record) != nil {

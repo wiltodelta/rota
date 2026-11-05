@@ -248,7 +248,7 @@ private struct RoutineRow: View {
                 Text(routine.name).interfaceFont(.body)
                     .lineLimit(1).foregroundStyle(SidebarText.primary(onAccent: onAccent))
                 TimelineView(.periodic(from: .now, by: 30)) { _ in
-                    Text(NextRunFormat.subtitle(routine, running: model.scheduler.active[routine.id] != nil))
+                    Text(NextRunFormat.subtitle(routine, running: model.scheduler.hasActiveSession(routine.id)))
                         .interfaceFont(.caption)
                         .foregroundStyle(SidebarText.caption(onAccent: onAccent))
                         .lineLimit(2)

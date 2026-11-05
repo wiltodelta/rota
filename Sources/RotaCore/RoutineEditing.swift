@@ -40,18 +40,22 @@ extension Scheduler {
         }
         let next = routines.filter { $0.id != id }
         guard persist(next) else { return false }
-        let control = controls[id]
-        if let record = active[id] { cancelQuestions(on: record) }
-        launchIDs[id] = nil
-        active[id] = nil
-        controls[id] = nil
-        runStarts[id] = nil
+        let records = active.values.filter { $0.routineID == id }
+        let ownedControls = records.compactMap { controls[$0.id] }
+        for record in records {
+            cancelQuestions(on: record)
+            launchIDs[record.id] = nil
+            active[record.id] = nil
+            controls[record.id] = nil
+            runStarts[record.id] = nil
+            lateMessages[record.id] = nil
+            sleptThrough.remove(record.id)
+        }
         pendingResumes = pendingResumes.filter { $0.value != id }
         pendingReruns[id] = nil
         reruns[id] = nil
-        sleptThrough.remove(id)
         routines = next
-        control?.stop()
+        ownedControls.forEach { $0.stop() }
         history.removeAll(for: id)
         historyVersion += 1
         return true

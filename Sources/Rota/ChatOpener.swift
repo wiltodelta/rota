@@ -20,13 +20,13 @@ enum ChatOpener {
     private static func openAttached(_ record: RunRecord, workingDirectory: String,
                                      scheduler: Scheduler, terminal: String?) {
         guard let (executable, arguments) = scheduler.terminalCommand(for: record) else { return }
-        let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Rota/chat")
-        let file = folder.appendingPathComponent("\(record.routineID).command")
+        let file = scheduler.history.terminalScript(for: record.id)
+        let folder = file.deletingLastPathComponent()
         let command = ([executable] + arguments).map(shellQuote).joined(separator: " ")
         let script = "#!/bin/zsh -l\ncd \(shellQuote(workingDirectory)) || exit 1\nexec \(command)\n"
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
             try script.write(to: file, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
             let app = terminal.map { URL(fileURLWithPath: $0) }

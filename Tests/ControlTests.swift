@@ -200,7 +200,7 @@ final class ControlCommandTests: XCTestCase {
         _ = try create().get()
         _ = try call("routines.run", ["id": "digest"]).get()
         let spec = try XCTUnwrap(launcher.specs.first)
-        let record = try XCTUnwrap(scheduler.active["digest"])
+        let record = try XCTUnwrap(scheduler.activeRecord(for: "digest"))
         XCTAssertEqual(spec.environment["ROTA_SESSION"], record.id.uuidString)
         XCTAssertEqual(spec.environment["ROTA_ROUTINE"], "digest")
         XCTAssertEqual(spec.environment["ROTA_CLI"], "/Applications/Rota.app/Contents/Helpers/rota")
@@ -210,9 +210,9 @@ final class ControlCommandTests: XCTestCase {
         _ = try create().get()
         _ = try call("routines.run", ["id": "digest"]).get()
         launcher.events[0].session("thread-1")
-        let session = try XCTUnwrap(scheduler.active["digest"]).id.uuidString
+        let session = try XCTUnwrap(scheduler.activeRecord(for: "digest")).id.uuidString
         _ = try call("notify", ["message": "Approve the invoice?", "session": session, "needsReply": true]).get()
-        XCTAssertEqual(scheduler.active["digest"]?.attention, "Approve the invoice?")
+        XCTAssertEqual(scheduler.activeRecord(for: "digest")?.attention, "Approve the invoice?")
         XCTAssertEqual(notifier.notified.last?.session?.uuidString, session)
         XCTAssertEqual(notifier.notified.last?.needsReply, true)
         // The mark outlives the run, and answering clears it.
@@ -260,7 +260,7 @@ final class ControlCommandTests: XCTestCase {
     func testDeletionRequiresAnExplicitFinishedSessionAndRemovesItsFiles() throws {
         _ = try create().get()
         _ = try call("routines.run", ["id": "digest"]).get()
-        let record = try XCTUnwrap(scheduler.active["digest"])
+        let record = try XCTUnwrap(scheduler.activeRecord(for: "digest"))
         let params: [String: Any] = ["id": "digest", "session": record.id.uuidString]
         XCTAssertNotNil(call("sessions.delete", ["id": "digest"]).failure)
         XCTAssertNotNil(call("sessions.delete", params).failure)
@@ -296,12 +296,12 @@ final class ControlCommandTests: XCTestCase {
         params["values"] = ["target": ["production"]]
         XCTAssertNotNil(call("sessions.answer", params).failure)
         XCTAssertTrue(answers.isEmpty)
-        XCTAssertEqual(scheduler.active["digest"]?.questions?.count, 1)
+        XCTAssertEqual(scheduler.activeRecord(for: "digest")?.questions?.count, 1)
         params["values"] = ["target": ["staging"]]
         _ = try call("sessions.answer", params).get()
         XCTAssertEqual(answers, [.init(values: ["target": ["staging"]])])
-        XCTAssertEqual(scheduler.active["digest"]?.questions?.count, 0)
-        XCTAssertNil(scheduler.active["digest"]?.attention)
+        XCTAssertEqual(scheduler.activeRecord(for: "digest")?.questions?.count, 0)
+        XCTAssertNil(scheduler.activeRecord(for: "digest")?.attention)
         XCTAssertNotNil(call("sessions.answer", params).failure)
     }
 
@@ -320,7 +320,7 @@ final class ControlCommandTests: XCTestCase {
         _ = try await scheduler.controlRequest("sessions.message",
             ["id": "digest", "text": "Separate file", "attachments": [source.path]]).get()
         XCTAssertEqual(launcher.controls[0].messages.count, 2)
-        XCTAssertEqual(scheduler.active["digest"]?.questions, [question])
+        XCTAssertEqual(scheduler.activeRecord(for: "digest")?.questions, [question])
         launcher.events[0].question(.init(id: "blocking", title: "Blocking")) { _ in }
         let blocked = await scheduler.controlRequest("sessions.message",
             ["id": "digest", "text": "Keep this draft", "attachments": [source.path]])

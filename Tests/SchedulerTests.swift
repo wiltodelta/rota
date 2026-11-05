@@ -82,6 +82,155 @@ final class SchedulerTests: XCTestCase {
         return routine
     }
 
+    func testOlderSessionContinuesAlongsideNewerSessionWithoutCrossingEvents() throws {
+        let modes: [(Harness, Bool)] = [(.claude, false), (.claude, true), (.codex, false),
+                                       (.grok, false), (.antigravity, false)]
+        scheduler.claudeSettings = { ClaudeUserSettings(trustedProjects: ["/p"]) }
+        for (harness, interactive) in modes {
+            var routine = addDailyRoutine(enabled: false)
+            routine.harness = harness
+            scheduler.save(routine)
+            scheduler.claudeInteractive = { interactive }
+            let base = launcher.specs.count
+            scheduler.run(routine, trigger: .manual)
+            launcher.events[base].session("older-native-session")
+            let older = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
+            launcher.completions[base](.succeeded)
+            clock += 60
+            scheduler.run(routine, trigger: .manual)
+            launcher.events[base + 1].session("newer-native-session")
+            let newer = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
+            guard scheduler.message("Continue the older conversation", to: older) else {
+                return XCTFail("A different active session must not block this conversation on \(harness)")
+            }
+            XCTAssertEqual(scheduler.active.count, 2)
+            XCTAssertEqual(launcher.specs[base + 2].resume, "older-native-session")
+            XCTAssertEqual(launcher.specs[base + 2].mode, interactive ? .claudeInteractive : harness.launchMode)
+            launcher.events[base + 2].configuration(SessionConfiguration(model: "older-model"))
+            launcher.events[base + 1].configuration(SessionConfiguration(model: "newer-model"))
+            XCTAssertEqual(scheduler.current(older.id)?.reportedModel, "older-model")
+            XCTAssertEqual(scheduler.current(newer.id)?.reportedModel, "newer-model")
+            launcher.completions[base + 1](.succeeded)
+            XCTAssertTrue(scheduler.isActive(older))
+            XCTAssertFalse(scheduler.isActive(newer))
+            XCTAssertTrue(scheduler.message("Keep going", to: older))
+            XCTAssertEqual(launcher.controls[base + 2].sent, ["Keep going"])
+            launcher.completions[base + 2](.succeeded)
+            XCTAssertTrue(scheduler.active.isEmpty)
+            XCTAssertEqual(scheduler.current(older.id)?.outcome, .succeeded)
+            XCTAssertEqual(scheduler.current(newer.id)?.outcome, .succeeded)
+        }
+    }
+
+    private func savedOlderSession(for routine: Routine, harness: Harness = .codex,
+                                   logName: String = "older") -> RunRecord {
+        var record = RunRecord(routineID: routine.id, trigger: .manual, harness: harness,
+                               startedAt: clock.addingTimeInterval(-60), endedAt: clock, outcome: .succeeded)
+        record.sessionID = "older-native-session"
+        record.logPath = directory.appendingPathComponent("\(logName).log").path
+        scheduler.saveRecord(record)
+        return record
+    }
+
+    func testParallelSessionQuestionsAndStopRemainIndependent() throws {
+        let routine = addDailyRoutine(enabled: false)
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("newer-native-session")
+        let newer = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
+        let older = savedOlderSession(for: routine)
+        XCTAssertTrue(scheduler.message("Continue", to: older))
+        var question = AgentQuestion(id: "same-native-question-id", title: "A question")
+        question.replyViaMessage = true
+        launcher.events[0].question(question) { _ in }
+        launcher.events[1].question(question) { _ in }
+        launcher.events[1].questionResolved(question.id)
+        XCTAssertTrue(scheduler.current(older.id)?.questions?.isEmpty == true)
+        XCTAssertEqual(scheduler.current(newer.id)?.questions?.map(\.id), [question.id])
+        scheduler.stop(older.id)
+        XCTAssertTrue(launcher.controls[1].stopped)
+        XCTAssertFalse(launcher.controls[0].stopped)
+        launcher.events[1].finished(.cancelled)
+        XCTAssertTrue(scheduler.isActive(newer))
+        XCTAssertFalse(scheduler.isActive(older))
+        scheduler.stopAll()
+        XCTAssertTrue(launcher.controls[0].stopped)
+        launcher.events[0].finished(.cancelled)
+        XCTAssertTrue(scheduler.active.isEmpty)
+    }
+
+    func testNativeConversationCannotHaveTwoActiveOwners() throws {
+        let routine = addDailyRoutine(enabled: false)
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("shared-native-session")
+        var duplicate = RunRecord(routineID: routine.id, trigger: .manual, harness: .codex,
+                                  startedAt: clock, endedAt: clock, outcome: .succeeded)
+        duplicate.sessionID = "shared-native-session"
+        duplicate.logPath = directory.appendingPathComponent("duplicate.log").path
+        scheduler.saveRecord(duplicate)
+        XCTAssertFalse(scheduler.canMessage(duplicate))
+        XCTAssertFalse(scheduler.message("Must not create a second writer", to: duplicate))
+        XCTAssertEqual(launcher.specs.count, 1)
+    }
+
+    func testTerminalContinuationCanOwnAnOlderSessionWhileAnotherRuns() async throws {
+        let routine = addDailyRoutine(enabled: false)
+        let transcript = directory.appendingPathComponent("synthetic-native.jsonl")
+        scheduler.terminalTranscript = { _, _ in transcript }
+        for harness in Harness.allCases where harness.isAgent {
+            let base = launcher.specs.count
+            scheduler.run(routine, trigger: .manual)
+            launcher.events[base].session("newer-native-session")
+            let newer = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
+            let older = savedOlderSession(for: routine, harness: harness, logName: "terminal-\(harness.rawValue)")
+            XCTAssertNotNil(scheduler.terminalCommand(for: older))
+            let continued = await scheduler.continueInTerminal(older)
+            guard continued else { return XCTFail("A different active conversation must not block Terminal") }
+            XCTAssertEqual(scheduler.active.count, 2)
+            XCTAssertEqual(launcher.specs[base + 1].mode, .terminal(harness))
+            launcher.events[base + 1].terminalState(.working)
+            XCTAssertEqual(scheduler.current(older.id)?.terminalState, .working)
+            XCTAssertNil(scheduler.current(newer.id)?.terminalState)
+            launcher.events[base + 1].finished(.succeeded)
+            XCTAssertTrue(scheduler.isActive(newer))
+            launcher.events[base].finished(.succeeded)
+        }
+    }
+
+    func testParallelSessionsRecoverFromSleepIndependently() throws {
+        let routine = addDailyRoutine(enabled: false)
+        scheduler.probe = { _, done in done(true) }
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("newer-native-session")
+        let newer = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
+        let older = savedOlderSession(for: routine)
+        XCTAssertTrue(scheduler.message("Continue", to: older))
+        scheduler.systemWillSleep()
+        launcher.events[0].finished(.interrupted)
+        launcher.events[1].finished(.interrupted)
+        XCTAssertEqual(scheduler.active.count, 2)
+        guard launcher.specs.count == 4 else { return XCTFail("Both interrupted sessions must resume") }
+        XCTAssertEqual(launcher.specs[2].resume, newer.sessionID)
+        XCTAssertEqual(launcher.specs[3].resume, older.sessionID)
+        XCTAssertEqual(scheduler.current(newer.id)?.resumes, 1)
+        XCTAssertEqual(scheduler.current(older.id)?.resumes, 1)
+        launcher.events[2].finished(.succeeded)
+        launcher.events[3].finished(.succeeded)
+        XCTAssertTrue(scheduler.active.isEmpty)
+    }
+
+    func testParallelLaunchFailureDoesNotDiscardSibling() throws {
+        let routine = addDailyRoutine(enabled: false)
+        scheduler.run(routine, trigger: .manual)
+        launcher.events[0].session("newer-native-session")
+        let newer = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
+        let older = savedOlderSession(for: routine)
+        launcher.failure = NSError(domain: "synthetic", code: 1)
+        XCTAssertFalse(scheduler.message("Continue", to: older))
+        XCTAssertTrue(scheduler.isActive(newer))
+        XCTAssertEqual(scheduler.active.count, 1)
+        XCTAssertFalse(launcher.controls[0].stopped)
+    }
+
     func testHistoryRefreshReusesDecodedRecords() throws {
         let routine = addDailyRoutine(enabled: false)
         scheduler.run(routine, trigger: .manual)
@@ -154,9 +303,9 @@ final class SchedulerTests: XCTestCase {
         let routine = addDailyRoutine()
         launcher.finishDuringLaunch = .succeeded
         scheduler.run(routine, trigger: .manual)
-        XCTAssertNil(scheduler.active[routine.id])
-        XCTAssertNil(scheduler.runStarts[routine.id])
-        XCTAssertNil(scheduler.launchIDs[routine.id])
+        XCTAssertNil(scheduler.activeRecord(for: routine.id))
+        XCTAssertTrue(scheduler.runStarts.isEmpty)
+        XCTAssertTrue(scheduler.launchIDs.isEmpty)
         XCTAssertEqual(scheduler.allRecords().first?.outcome, .succeeded)
         scheduler.stopAll()
         XCTAssertFalse(try XCTUnwrap(launcher.controls.first).stopped)
@@ -169,10 +318,10 @@ final class SchedulerTests: XCTestCase {
         launcher.completions[0](.succeeded)
         scheduler.run(routine, trigger: .manual)
         launcher.events[1].session("second-session")
-        let second = try XCTUnwrap(scheduler.active[routine.id])
+        let second = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
         launcher.events[0].session("stale-session")
         launcher.completions[0](.failed(exitCode: 1))
-        XCTAssertEqual(scheduler.active[routine.id], second)
+        XCTAssertEqual(scheduler.activeRecord(for: routine.id), second)
         XCTAssertEqual(notifier.outcomes, [.succeeded])
         launcher.completions[1](.succeeded)
     }
@@ -184,7 +333,7 @@ final class SchedulerTests: XCTestCase {
         launcher.completions[0](.succeeded)
         let record = try XCTUnwrap(scheduler.allRecords().first)
         XCTAssertTrue(scheduler.message("Continue with another task", to: record))
-        let continued = try XCTUnwrap(scheduler.active[routine.id])
+        let continued = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
         XCTAssertEqual(continued.id, record.id)
         launcher.events[0].session("stale-session")
         launcher.events[0].configuration(.init(model: "stale-model"))
@@ -192,7 +341,7 @@ final class SchedulerTests: XCTestCase {
         let replies = AnswerRecorder()
         launcher.events[0].question(.init(id: "stale", title: "Expired")) { replies.append($0) }
         launcher.completions[0](.failed(exitCode: 1))
-        XCTAssertEqual(scheduler.active[routine.id], continued)
+        XCTAssertEqual(scheduler.activeRecord(for: routine.id), continued)
         XCTAssertEqual(notifier.outcomes, [.succeeded])
         XCTAssertEqual(replies.values.map(\.action), ["cancel"])
         launcher.completions[1](.succeeded)
@@ -204,7 +353,7 @@ final class SchedulerTests: XCTestCase {
         scheduler.save(routine)
         scheduler.run(routine, trigger: .manual)
         launcher.events[0].session("shell-screen")
-        let record = try XCTUnwrap(scheduler.active[routine.id])
+        let record = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
         let command = try XCTUnwrap(scheduler.terminalCommand(for: record))
         XCTAssertEqual(command.executable, "/usr/bin/screen")
         XCTAssertEqual(command.arguments, ["-r", "shell-screen"])
@@ -260,7 +409,7 @@ final class SchedulerTests: XCTestCase {
     func testQuestionsRequireExplicitAnswersAndSurviveOrdinaryMessagesAndDismissal() throws {
         let routine = addDailyRoutine()
         scheduler.run(routine, trigger: .manual)
-        let record = try XCTUnwrap(scheduler.active[routine.id])
+        let record = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
         launcher.events[0].session("native-session")
         let replies = AnswerRecorder()
         let question = AgentQuestion(id: "q1", title: "Choose a color", fields: [.init(id: "color", title: "Color")])
@@ -289,7 +438,7 @@ final class SchedulerTests: XCTestCase {
             let index = launcher.events.count
             scheduler.run(routine, trigger: .manual)
             launcher.events[index].session("synthetic-thread-" + harness.rawValue)
-            let record = try XCTUnwrap(scheduler.active[routine.id])
+            let record = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
             var question = AgentQuestion(id: "async", title: "Choose", fields: [.init(id: "note", title: "Note?")])
             question.replyViaMessage = true
             launcher.events[index].question(question) { _ in XCTFail("No RPC reply for async input") }
@@ -314,7 +463,7 @@ final class SchedulerTests: XCTestCase {
         let routine = addDailyRoutine()
         scheduler.run(routine, trigger: .manual)
         launcher.events[0].session("native-thread")
-        let record = try XCTUnwrap(scheduler.active[routine.id])
+        let record = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
         var question = AgentQuestion(id: "async-1", title: "Choose", fields: [.init(id: "0", title: "Color?")])
         question.replyViaMessage = true
         let replies = AnswerRecorder()
@@ -341,7 +490,7 @@ final class SchedulerTests: XCTestCase {
         let routine = addDailyRoutine()
         scheduler.run(routine, trigger: .manual)
         launcher.events[0].session("native-thread")
-        let record = try XCTUnwrap(scheduler.active[routine.id])
+        let record = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
         for id in ["first", "second"] {
             var question = AgentQuestion(id: id, title: id)
             question.replyViaMessage = true
@@ -370,7 +519,7 @@ final class SchedulerTests: XCTestCase {
         let routine = addDailyRoutine()
         scheduler.run(routine, trigger: .manual)
         launcher.events[0].session("native-thread")
-        let record = try XCTUnwrap(scheduler.active[routine.id])
+        let record = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
         var question = AgentQuestion(id: "call-retry", title: "Choose", fields: [.init(id: "0", title: "Color?")])
         question.replyViaMessage = true
         launcher.events[0].question(question) { _ in XCTFail("Async input has no RPC reply") }
@@ -398,7 +547,7 @@ final class SchedulerTests: XCTestCase {
             let index = launcher.events.count
             scheduler.run(routine, trigger: .manual)
             launcher.events[index].session("native-conversation")
-            let record = try XCTUnwrap(scheduler.active[routine.id])
+            let record = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
             let question = try XCTUnwrap(QuestionRequest.antigravity("ask_permission", arguments: [:], id: action))
             launcher.events[index].question(question) { _ in XCTFail("No suspended native RPC exists") }
             launcher.events[index].finished(.succeeded)
@@ -417,7 +566,7 @@ final class SchedulerTests: XCTestCase {
         let routine = addDailyRoutine()
         scheduler.run(routine, trigger: .manual)
         launcher.events[0].session("native-thread")
-        let record = try XCTUnwrap(scheduler.active[routine.id])
+        let record = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
         var async = AgentQuestion(id: "async", title: "Async choice")
         async.replyViaMessage = true
         launcher.events[0].question(async) { _ in XCTFail("No RPC for async input") }
@@ -437,7 +586,7 @@ final class SchedulerTests: XCTestCase {
     func testMultipleQuestionsResolveIndependentlyAndFinishCancelsTheRest() throws {
         let routine = addDailyRoutine()
         scheduler.run(routine, trigger: .manual)
-        let record = try XCTUnwrap(scheduler.active[routine.id])
+        let record = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
         let replies = AnswerRecorder()
         for id in ["a", "b"] {
             launcher.events[0].question(.init(id: id, title: id)) { replies.append($0) }
@@ -454,7 +603,7 @@ final class SchedulerTests: XCTestCase {
     func testHookPollingReturnsTheActualAnswerOnceAndExpiresAfterStop() throws {
         let routine = addDailyRoutine()
         scheduler.run(routine, trigger: .manual)
-        let record = try XCTUnwrap(scheduler.active[routine.id])
+        let record = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
         let question = AgentQuestion(id: "hook", title: "Test question")
         let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(question))
         _ = try scheduler.questionCommand("questions.create", ["session": record.id.uuidString, "question": encoded])
@@ -497,7 +646,7 @@ final class SchedulerTests: XCTestCase {
     func testSessionDeletionRechecksActiveStateAndCancelsPendingResume() throws {
         let routine = addDailyRoutine()
         scheduler.run(routine, trigger: .manual)
-        var stale = try XCTUnwrap(scheduler.active[routine.id])
+        var stale = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
         stale.outcome = .succeeded
         XCTAssertFalse(scheduler.canDelete(stale))
         XCTAssertFalse(scheduler.deleteSession(stale))
@@ -519,13 +668,13 @@ final class SchedulerTests: XCTestCase {
     func testReportedConfigurationSurvivesFinishAndStaleRecordsDoNotResetIt() throws {
         let routine = addDailyRoutine()
         scheduler.run(routine, trigger: .manual)
-        let initial = try XCTUnwrap(scheduler.active[routine.id])
+        let initial = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
         launcher.events[0].session("fixture-session")
         launcher.events[0].configuration(SessionConfiguration(model: "reported-model", effort: "high",
                                                             modelTitle: "Reported model"))
         XCTAssertNil(scheduler.current(initial.id, routineID: routine.id)?.model)
-        XCTAssertEqual(scheduler.active[routine.id]?.reportedModel, "reported-model")
-        XCTAssertEqual(scheduler.active[routine.id]?.reportedModelTitle, "Reported model")
+        XCTAssertEqual(scheduler.activeRecord(for: routine.id)?.reportedModel, "reported-model")
+        XCTAssertEqual(scheduler.activeRecord(for: routine.id)?.reportedModelTitle, "Reported model")
         XCTAssertEqual(scheduler.history.records(for: routine.id).first?.reportedEffort, "high")
         XCTAssertTrue(scheduler.message("message from a stale view", to: initial))
         XCTAssertEqual(launcher.controls[0].sent, ["message from a stale view"])
@@ -534,7 +683,7 @@ final class SchedulerTests: XCTestCase {
         XCTAssertEqual(scheduler.history.records(for: routine.id).first?.reportedModelTitle, "Reported model")
         scheduler.run(routine, trigger: .manual)
         launcher.events[0].configuration(SessionConfiguration(model: "stale-model"))
-        XCTAssertNil(scheduler.active[routine.id]?.reportedModel, "Old sessions cannot overwrite a new run")
+        XCTAssertNil(scheduler.activeRecord(for: routine.id)?.reportedModel, "Old sessions cannot overwrite a new run")
     }
 
     func testDeletionRechecksAnInteractiveSessionThatOutlivedTheApp() throws {
@@ -565,11 +714,11 @@ final class SchedulerTests: XCTestCase {
         XCTAssertEqual(spec.mode, .codexDaemon)
         XCTAssertEqual(spec.workingDirectory, "/p")
         XCTAssertEqual(spec.timeout, 30 * 60)
-        XCTAssertNotNil(scheduler.active["report"])
+        XCTAssertNotNil(scheduler.activeRecord(for: "report"))
         XCTAssertEqual(scheduler.routine("report")?.nextFire, makeDate(day: 10, hour: 10, minute: 0))
 
         launcher.completions[0](.succeeded)
-        XCTAssertNil(scheduler.active["report"])
+        XCTAssertNil(scheduler.activeRecord(for: "report"))
         XCTAssertEqual(scheduler.history.records(for: "report").map(\.outcome), [.succeeded])
         XCTAssertEqual(notifier.outcomes, [.succeeded])
     }
@@ -587,7 +736,7 @@ final class SchedulerTests: XCTestCase {
         clock = makeDate(day: 12, hour: 9, minute: 0)
         scheduler.tick()
         XCTAssertEqual(launcher.specs.count, 1)
-        XCTAssertEqual(scheduler.active["report"]?.trigger, .catchUp)
+        XCTAssertEqual(scheduler.activeRecord(for: "report")?.trigger, .catchUp)
         XCTAssertEqual(scheduler.routine("report")?.nextFire, makeDate(day: 12, hour: 10, minute: 0))
         launcher.completions[0](.succeeded)
         scheduler.tick()
@@ -598,7 +747,7 @@ final class SchedulerTests: XCTestCase {
         _ = addDailyRoutine()
         clock = makeDate(hour: 10, minute: 1)
         scheduler.tick()
-        XCTAssertEqual(scheduler.active["report"]?.trigger, .scheduled)
+        XCTAssertEqual(scheduler.activeRecord(for: "report")?.trigger, .scheduled)
     }
 
     func testSlotMissedBeyondGraceIsSkippedNotRun() {
@@ -709,7 +858,7 @@ final class SchedulerTests: XCTestCase {
         let routine = addDailyRoutine()
         launcher.failure = LaunchError.missingExecutable("/bin/codex")
         scheduler.run(routine, trigger: .manual)
-        XCTAssertNil(scheduler.active["report"])
+        XCTAssertNil(scheduler.activeRecord(for: "report"))
         XCTAssertEqual(scheduler.history.records(for: "report").first?.outcome,
                        .launchFailed("no executable at /bin/codex"))
     }
@@ -732,7 +881,7 @@ final class SchedulerTests: XCTestCase {
         XCTAssertEqual(spec.prompt, "go")
         XCTAssertFalse(spec.arguments.contains("--resume"))
         launcher.events[0].session("abc123")
-        let running = try XCTUnwrap(scheduler.active["report"])
+        let running = try XCTUnwrap(scheduler.activeRecord(for: "report"))
         XCTAssertEqual(running.sessionID, "abc123")
         XCTAssertTrue(scheduler.canMessage(running))
         XCTAssertNil(scheduler.terminalCommand(for: running))
@@ -785,7 +934,7 @@ final class SchedulerTests: XCTestCase {
         scheduler.save(routine)
         clock = clock.addingTimeInterval(60)
         scheduler.tick()
-        let running = try XCTUnwrap(scheduler.active[routine.id])
+        let running = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
         let log = try XCTUnwrap(running.logPath)
         try FileManager.default.createDirectory(at: URL(fileURLWithPath: log).deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
@@ -795,7 +944,7 @@ final class SchedulerTests: XCTestCase {
             scheduler.tick()
         }
         XCTAssertEqual(launcher.specs.count, 1)
-        XCTAssertEqual(scheduler.active[routine.id]?.id, running.id)
+        XCTAssertEqual(scheduler.activeRecord(for: routine.id)?.id, running.id)
         XCTAssertEqual(scheduler.allRecords().map(\.id), [running.id])
         XCTAssertTrue(FileManager.default.fileExists(atPath: log))
         launcher.completions[0](.succeeded)
@@ -811,7 +960,7 @@ final class SchedulerTests: XCTestCase {
         XCTAssertEqual(launcher.specs.first?.mode, .codexDaemon)
         XCTAssertNil(launcher.specs.first?.resume)
         launcher.events[0].session("thread-1")
-        let running = try XCTUnwrap(scheduler.active["report"])
+        let running = try XCTUnwrap(scheduler.activeRecord(for: "report"))
         XCTAssertTrue(scheduler.canMessage(running))
         XCTAssertNil(scheduler.terminalCommand(for: running))
         scheduler.message("also check the logs", to: running)
@@ -827,7 +976,7 @@ final class SchedulerTests: XCTestCase {
         XCTAssertEqual(follow.resume, "thread-1")
         XCTAssertEqual(follow.prompt, "one more thing")
         XCTAssertEqual(follow.log.path, finished.logPath)
-        XCTAssertEqual(scheduler.active["report"]?.id, finished.id, "the same session is running again")
+        XCTAssertEqual(scheduler.activeRecord(for: "report")?.id, finished.id, "the same session is running again")
         XCTAssertEqual(scheduler.history.records(for: "report").count, 1)
         launcher.completions[1](.succeeded)
         XCTAssertEqual(scheduler.history.records(for: "report").first?.outcome, .succeeded)
@@ -860,19 +1009,20 @@ final class SchedulerTests: XCTestCase {
         launcher.sessionDuringLaunch = "early-1"
         scheduler.run(routine, trigger: .manual)
         XCTAssertEqual(scheduler.history.records(for: "report").first?.sessionID, "early-1")
-        XCTAssertEqual(scheduler.active["report"]?.sessionID, "early-1")
+        XCTAssertEqual(scheduler.activeRecord(for: "report")?.sessionID, "early-1")
     }
 
-    func testFinishedSessionWaitsWhileAnotherRunOfTheRoutineWorks() throws {
+    func testFinishedSessionCanContinueWhileAnotherRunOfTheRoutineWorks() throws {
         let routine = addDailyRoutine()
         scheduler.run(routine, trigger: .manual)
         launcher.events[0].session("thread-1")
         launcher.completions[0](.succeeded)
         let old = try XCTUnwrap(scheduler.history.records(for: "report").first)
         scheduler.run(routine, trigger: .manual)
-        XCTAssertFalse(scheduler.canMessage(old))
-        scheduler.message("hello", to: old)
-        XCTAssertEqual(launcher.specs.count, 2, "no third launch")
+        XCTAssertTrue(scheduler.canMessage(old))
+        XCTAssertTrue(scheduler.message("hello", to: old))
+        XCTAssertEqual(launcher.specs.count, 3)
+        XCTAssertEqual(scheduler.active.count, 2)
     }
 
     func testMessageIsRejectedWhenContinuationCannotLaunch() throws {
@@ -883,7 +1033,7 @@ final class SchedulerTests: XCTestCase {
         let record = try XCTUnwrap(scheduler.history.records(for: routine.id).first)
         launcher.failure = NSError(domain: "Synthetic launch failure", code: 1)
         XCTAssertFalse(scheduler.message("Keep my draft", to: record))
-        XCTAssertNil(scheduler.active[routine.id])
+        XCTAssertNil(scheduler.activeRecord(for: routine.id))
     }
 
     func testShellRoutineRunsItsCommand() throws {
@@ -911,7 +1061,7 @@ final class SchedulerTests: XCTestCase {
         scheduler.delete(routine.id)
         launcher.events[0].session("late-session")
         launcher.completions[0](.cancelled)
-        XCTAssertNil(scheduler.active[routine.id])
+        XCTAssertNil(scheduler.activeRecord(for: routine.id))
         XCTAssertTrue(scheduler.history.records(for: routine.id).isEmpty)
         XCTAssertTrue(launcher.controls[0].stopped)
     }

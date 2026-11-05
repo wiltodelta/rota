@@ -8,6 +8,8 @@
 #   scripts/ui-check.sh           shell routine only, no agent quota spent
 #   scripts/ui-check.sh --live    also message a running Codex session
 #   scripts/ui-check.sh --scroll-only     long transcript and question navigation only
+#   scripts/ui-check.sh --parallel-only   continue and stop independent sessions with synthetic Claude
+#   scripts/ui-check.sh --paint-only      first transcript paint without AX or scroll input
 #   scripts/ui-check.sh --questions-only  finished question and verification states only
 #   scripts/ui-check.sh --harnesses-only  reasoning and CLI/service compatibility states only
 #   scripts/ui-check.sh --restart-only   cross-harness restart with synthetic agent output
@@ -29,7 +31,6 @@ APP="$PWD/Rota.app"
 DRIVER="$WORK/driver"
 LIVE="${1:-}"
 TERMINAL_MODE="${ROTA_UI_TERMINAL:-auto}"
-CACHE="$HOME/Library/Caches/Rota/chat"
 AUDIT="${ROTA_MACAUDIT:-$HOME/Documents/GitHub/claude-config/skills/ui-audit-macos/scripts/macaudit.py}"
 [[ -f "$AUDIT" ]] || { echo "Set ROTA_MACAUDIT to the shared macaudit.py helper." >&2; exit 1; }
 
@@ -112,11 +113,6 @@ with open(sys.argv[1], "rb") as before, open(sys.argv[2], "rb") as after:
     assert plistlib.load(before) == plistlib.load(after), "Development defaults were not restored"
 PYTHON
     fi
-    for name in ui-shell-light ui-shell-dark ui-codex; do
-        if [[ -f "$WORK/$name.command" ]]; then cp -p "$WORK/$name.command" "$CACHE/$name.command"
-        else rm -f "$CACHE/$name.command"
-        fi
-    done
     rm -rf "$WORK"
 }
 
@@ -179,9 +175,6 @@ session_value() {
         "$SUPPORT/runs/$1.json" "$2"
 }
 
-for name in ui-shell-light ui-shell-dark ui-codex; do
-    if [[ -f "$CACHE/$name.command" ]]; then cp -p "$CACHE/$name.command" "$WORK/$name.command"; fi
-done
 HAD_DEFAULTS=0
 if defaults export "$DOMAIN" "$WORK/defaults.plist" 2>/dev/null; then HAD_DEFAULTS=1; fi
 trap cleanup EXIT
@@ -550,6 +543,92 @@ check_settings() {
         && pass "showing the sidebar keeps the window width" || fail "showing the sidebar keeps the window width"
 }
 
+if [[ "$LIVE" == --paint-only ]]; then
+    swiftc -O scripts/check-transcript-paint.swift -o "$WORK/check-paint"
+    for appearance in light dark; do
+        python3 scripts/fixtures/transcript-paint.py "$SUPPORT" "$WORK/project"
+        # Restore the minimum frame before launch, so no AX resize can materialize missing rows.
+        defaults write "$DOMAIN" 'NSWindow Frame RotaMain' -string '0 0 820 600 0 0 1470 956 '
+        open_rota --env "ROTA_APPEARANCE=$appearance"
+        app_pid=""
+        for _ in {1..40}; do
+            app_pid="$(pgrep -f "^$APP/Contents/MacOS/Rota$" || true)"
+            [[ -n "$app_pid" ]] && break
+            sleep 0.1
+        done
+        [[ -n "$app_pid" ]] || fail "paint check app did not launch"
+        # Reopen the accessory app to show its main window; no AX queries before check-paint.
+        open_rota
+        "$WORK/check-paint" "$app_pid" "$OUT/$appearance-transcript-first-paint.png"
+        pass "transcript painted before AX or scroll input in $appearance"
+        capture 'Transcript paint check' "$appearance-transcript-layout"
+        quit_rota
+    done
+    exit 0
+fi
+
+if [[ "$LIVE" == --parallel-only ]]; then
+    cp scripts/fixtures/question-stream.py "$WORK/question-stream"
+    chmod 700 "$WORK/question-stream"
+    defaults write "$DOMAIN" executables -dict claude "$WORK/question-stream"
+    defaults write "$DOMAIN" claudeInteractive -bool false
+    running_count() {
+        "$APP/Contents/Helpers/rota" sessions transcript-paint --json \
+            | python3 -c 'import json,sys; print(sum(row["running"] for row in json.load(sys.stdin)))'
+    }
+    wait_running_count() {
+        local attempt
+        for attempt in {1..40}; do
+            [[ "$(running_count)" == "$1" ]] && return 0
+            sleep 0.2
+        done
+        fail "expected $1 independently running sessions"
+    }
+    for appearance in light dark; do
+        python3 scripts/fixtures/transcript-paint.py "$SUPPORT" "$WORK/project"
+        old_session="$(python3 - "$SUPPORT" <<'PYTHON'
+import json
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+file = root / "routines.json"
+routines = json.loads(file.read_text())
+routines[0]["harness"] = "claude"
+file.write_text(json.dumps(routines))
+file = root / "runs/transcript-paint.json"
+records = json.loads(file.read_text())
+records[0]["harness"] = "claude"
+file.write_text(json.dumps(records))
+print(records[0]["id"].upper())
+PYTHON
+)"
+        launch "$appearance"
+        "$DRIVER" menu 'Run Now'
+        wait_running_count 1
+        newer_session="$("$APP/Contents/Helpers/rota" sessions transcript-paint --json \
+            | python3 -c 'import json,sys; print(next(row["session"] for row in json.load(sys.stdin) if row["running"]))')"
+        "$DRIVER" select "sidebarPreview-$old_session"
+        wait_exists composer
+        "$DRIVER" set composer 'Older conversation follow-up'
+        check "$DRIVER" enabled send
+        "$DRIVER" press send
+        wait_text 'Received: Older conversation follow-up'
+        wait_running_count 2
+        capture 'Transcript paint check' "$appearance-parallel-sessions"
+        "$DRIVER" press composerStop
+        wait_running_count 1
+        "$DRIVER" select "sidebarPreview-$newer_session"
+        "$DRIVER" set composer 'Newer conversation follow-up'
+        "$DRIVER" press send
+        wait_text 'Received: Newer conversation follow-up'
+        "$APP/Contents/Helpers/rota" stop transcript-paint >/dev/null
+        wait_running_count 0
+        quit_rota
+    done
+    pass 'parallel continuation and individual stop in both appearances'
+    exit 0
+fi
+
 if [[ "$LIVE" == --settings-only ]]; then
     for appearance in light dark; do
         rm -rf "$SUPPORT"
@@ -911,7 +990,7 @@ PYTHON
     attach=""
     for _ in 1 2 3 4 5 6 7 8; do
         sleep 1
-        "$DRIVER" confirm-iterm "ui-shell-$appearance" >/dev/null || true
+        "$DRIVER" confirm-iterm "$(basename "$WORK")/data/terminal-scripts/" >/dev/null || true
         attach="$(pgrep -f "screen -r $session" | tail -1 || true)"; [[ -n "$attach" ]] && break
     done
     [[ -n "$attach" && "$(terminal_of "$attach")" == "$expected" ]] && pass "opens in $expected" \

@@ -94,6 +94,11 @@ public struct RunHistory: Sendable {
         self.location = location
     }
 
+    /// A separate terminal launch script for each conversation, isolated with its history.
+    public func terminalScript(for id: UUID) -> URL {
+        location.root.appendingPathComponent("terminal-scripts").appendingPathComponent("\(id.uuidString).command")
+    }
+
     private func file(for routineID: String) -> URL {
         location.historyDirectory.appendingPathComponent("\(routineID).json")
     }
@@ -131,6 +136,7 @@ public struct RunHistory: Sendable {
             $0.logPath.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
         })
         for dropped in records where !keptIDs.contains(dropped.id) {
+            try? FileManager.default.removeItem(at: terminalScript(for: dropped.id))
             if let path = dropped.logPath,
                !keptLogs.contains(URL(fileURLWithPath: path).resolvingSymlinksInPath().path) {
                 removeLog(path, routineID: record.routineID)
@@ -165,6 +171,7 @@ public struct RunHistory: Sendable {
 
     public func removeAll(for routineID: String) {
         for record in records(for: routineID) {
+            try? FileManager.default.removeItem(at: terminalScript(for: record.id))
             if let path = record.logPath { removeLog(path, routineID: routineID) }
         }
         try? FileManager.default.removeItem(at: file(for: routineID))
@@ -193,6 +200,7 @@ public struct RunHistory: Sendable {
             }
         }
         try JSONFile.write(retained, to: file(for: routineID))
+        try? FileManager.default.removeItem(at: terminalScript(for: id))
         return true
     }
 

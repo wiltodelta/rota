@@ -2,21 +2,21 @@ import Foundation
 
 extension Scheduler {
     func events(for record: RunRecord, launchID: UUID) -> RunEvents {
-        let id = record.routineID
         let runID = record.id
-        let isCurrent = { [weak self] in self?.launchIDs[id] == launchID }
+        let routineID = record.routineID
+        let isCurrent = { [weak self] in self?.launchIDs[runID] == launchID }
         return RunEvents(
             session: { [weak self] session in
                 guard isCurrent() else { return }
-                self?.attachSession(session, to: id)
+                self?.attachSession(session, to: runID)
             },
             finished: { [weak self] outcome in
                 guard isCurrent() else { return }
-                self?.finish(id, outcome: outcome)
+                self?.finish(runID, outcome: outcome)
             },
             configuration: { [weak self] configuration in
                 guard isCurrent() else { return }
-                self?.updateConfiguration(configuration, routineID: id, runID: runID)
+                self?.updateConfiguration(configuration, routineID: routineID, runID: runID)
             },
             question: { [weak self] question, reply in
                 guard isCurrent() else { return reply(.init(action: "cancel")) }
@@ -27,24 +27,24 @@ extension Scheduler {
                 self?.resolveQuestion(questionID, runID: runID)
             },
             terminalState: { [weak self] state in
-                guard isCurrent(), let self, var current = self.active[id], current.id == runID,
+                guard isCurrent(), let self, var current = self.active[runID],
                       current.terminalState != state else { return }
-                if state == .working { self.runStarts[id] = self.now() }
+                if state == .working { self.runStarts[runID] = self.now() }
                 current.terminalState = state
-                self.active[id] = current
+                self.active[runID] = current
                 self.saveRecord(current)
             }, terminalInput: { [weak self] in
-                guard isCurrent(), let self, let current = self.active[id], current.id == runID else { return }
+                guard isCurrent(), let self, let current = self.active[runID] else { return }
                 self.dismissAttention(current)
             }, undelivered: { [weak self] message in
                 // Not tied to the launch: it may arrive after the run has finished.
-                self?.receiveLate(message, routineID: id, runID: runID)
+                self?.receiveLate(message, routineID: routineID, runID: runID)
             }, provenance: { [weak self] cli, server in
                 self?.updateProvenance(cli: cli, server: server, runID: runID, launchID: launchID)
             }, reconciliationRequired: { [weak self] in
-                guard isCurrent(), let self, var record = self.active[id] else { return }
+                guard isCurrent(), let self, var record = self.active[runID] else { return }
                 record.needsReconciliation = true
-                self.active[id] = record
+                self.active[runID] = record
                 self.saveRecord(record)
             })
     }
@@ -53,7 +53,7 @@ extension Scheduler {
         guard var record = current(runID), record.executionID == launchID else { return }
         if let cli { record.cliVersion = cli }
         if let server { record.serverVersion = server }
-        if isActive(record) { active[record.routineID] = record }
+        if isActive(record) { active[record.id] = record }
         saveRecord(record)
     }
 
@@ -122,7 +122,7 @@ extension Scheduler {
         guard var record = current(runID), record.questions?.contains(where: { $0.id == id }) == true else { return }
         record.questions?.removeAll { $0.id == id }
         record.attention = record.nextQuestion?.title
-        if isActive(record) { active[record.routineID] = record }
+        if isActive(record) { active[record.id] = record }
         saveRecord(record)
     }
 
@@ -133,7 +133,7 @@ extension Scheduler {
             current.questions = current.questions?.filter { $0.replyViaMessage == true }
             if current.questions?.isEmpty == true { current.questions = nil }
             current.attention = current.nextQuestion?.title
-            if isActive(current) { active[current.routineID] = current }
+            if isActive(current) { active[current.id] = current }
             saveRecord(current)
         }
         for reply in replies.values { reply(.init(action: "cancel")) }

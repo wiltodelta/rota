@@ -73,7 +73,7 @@ final class ResilienceTests: XCTestCase {
         online = true
         scheduler.networkBecameAvailable()
         XCTAssertEqual(launcher.specs.count, 1)
-        XCTAssertEqual(scheduler.active["digest"]?.trigger, .catchUp)
+        XCTAssertEqual(scheduler.activeRecord(for: "digest")?.trigger, .catchUp)
     }
 
     func testARunCutOffBySleepContinuesWhenTheNetworkIsBack() throws {
@@ -88,7 +88,7 @@ final class ResilienceTests: XCTestCase {
         XCTAssertEqual(launcher.specs.count, 2)
         XCTAssertEqual(launcher.specs.last?.resume, "thread-1")
         XCTAssertEqual(launcher.specs.last?.prompt, Scheduler.resumeMessage)
-        XCTAssertEqual(scheduler.active["digest"]?.resumes, 1)
+        XCTAssertEqual(scheduler.activeRecord(for: "digest")?.resumes, 1)
     }
 
     func testAFailureNotCausedByTheMacIsLeftAlone() {
@@ -151,11 +151,11 @@ final class ResilienceTests: XCTestCase {
         XCTAssertEqual(record.cliVersion, "cli 1.2.3",
                        "Late version discovery still belongs to the completed execution")
         XCTAssertTrue(scheduler.message("next", to: record))
-        XCTAssertNil(scheduler.active[routine.id]?.cliVersion)
+        XCTAssertNil(scheduler.activeRecord(for: routine.id)?.cliVersion)
         original.provenance("outdated 0.0.1", "outdated 0.0.1")
-        XCTAssertNil(scheduler.active[routine.id]?.cliVersion)
+        XCTAssertNil(scheduler.activeRecord(for: routine.id)?.cliVersion)
         launcher.events.last?.provenance("cli 2.3.4", "server 2.3.4")
-        XCTAssertEqual(scheduler.active[routine.id]?.cliVersion, "cli 2.3.4")
+        XCTAssertEqual(scheduler.activeRecord(for: routine.id)?.cliVersion, "cli 2.3.4")
     }
 
     func testRunsOpenAtShutdownAreReconciledWithoutSubmittingAPrompt() {
@@ -168,7 +168,7 @@ final class ResilienceTests: XCTestCase {
         XCTAssertEqual(launcher.specs.last?.resume, "thread-1")
         XCTAssertTrue(launcher.specs.last?.adopt == true)
         XCTAssertEqual(launcher.specs.last?.prompt, "")
-        XCTAssertNil(scheduler.active[routine.id]?.resumes)
+        XCTAssertNil(scheduler.activeRecord(for: routine.id)?.resumes)
     }
 
     func testAClaudeSessionStillAliveInItsTerminalIsFollowedNotStartedTwice() throws {
@@ -235,7 +235,7 @@ final class ResilienceTests: XCTestCase {
 
     /// The log the run wrote, as the runner would.
     private func log(_ text: String) throws {
-        let path = try XCTUnwrap(scheduler.active["digest"]?.logPath)
+        let path = try XCTUnwrap(scheduler.activeRecord(for: "digest")?.logPath)
         try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
                                                 withIntermediateDirectories: true)
         try Data(text.utf8).write(to: URL(fileURLWithPath: path))
@@ -262,7 +262,7 @@ final class ResilienceTests: XCTestCase {
         XCTAssertEqual(launcher.specs.count, 2, "nothing was done yet, so the whole run starts again")
         XCTAssertNil(launcher.specs.last?.resume)
         XCTAssertEqual(launcher.specs.last?.prompt, "Summarize.")
-        XCTAssertEqual(scheduler.active["digest"]?.trigger, .scheduled)
+        XCTAssertEqual(scheduler.activeRecord(for: "digest")?.trigger, .scheduled)
         for _ in 0..<Scheduler.resumeLimit {
             try log("[error] getaddrinfo ENOTFOUND api.openai.com")
             launcher.events.last?.finished(.failed(exitCode: 1))
@@ -285,7 +285,7 @@ final class ResilienceTests: XCTestCase {
             XCTAssertEqual(launcher.specs.last?.mode, .antigravityStream)
             XCTAssertEqual(launcher.specs.last?.resume, "thread-1")
             XCTAssertEqual(launcher.specs.last?.prompt, Scheduler.resumeMessage)
-            XCTAssertEqual(scheduler.active[routine.id]?.resumes, attempt)
+            XCTAssertEqual(scheduler.activeRecord(for: routine.id)?.resumes, attempt)
         }
         try log(failure)
         launcher.events.last?.finished(.failed(exitCode: 1))

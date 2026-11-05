@@ -24,6 +24,24 @@ final class StorageTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(second.logPath)))
     }
 
+    func testTerminalScriptsBelongToTheirSessions() throws {
+        let history = RunHistory(location: location)
+        let first = try savedSession(history, at: 0)
+        let second = try savedSession(history, at: 1)
+        let firstScript = history.terminalScript(for: first.id)
+        let secondScript = history.terminalScript(for: second.id)
+        XCTAssertNotEqual(firstScript, secondScript)
+        try FileManager.default.createDirectory(at: firstScript.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try "first".write(to: firstScript, atomically: true, encoding: .utf8)
+        try "second".write(to: secondScript, atomically: true, encoding: .utf8)
+        XCTAssertTrue(try history.remove(first.id, for: "a"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstScript.path))
+        XCTAssertEqual(try String(contentsOf: secondScript, encoding: .utf8), "second")
+        history.removeAll(for: "a")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: secondScript.path))
+    }
+
     func testUpsertDoesNotOverwriteUnreadableHistory() throws {
         let history = RunHistory(location: location)
         let record = try savedSession(history, at: 0)

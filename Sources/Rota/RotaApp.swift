@@ -301,10 +301,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         let alert = NSAlert()
         if running == 1 {
-            alert.messageText = "Stop the running routine and quit?"
+            alert.messageText = "Stop the running session and quit?"
             alert.informativeText = "Its session is kept, and you can continue it after Rota opens again."
         } else {
-            alert.messageText = "Stop \(running) running routines and quit?"
+            alert.messageText = "Stop \(running) running sessions and quit?"
             alert.informativeText = "Their sessions are kept, and you can continue them after Rota opens again."
         }
         alert.addButton(withTitle: "Stop and Quit")

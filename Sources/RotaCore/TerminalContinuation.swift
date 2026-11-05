@@ -14,10 +14,10 @@ extension Scheduler {
             }
             return nil
         }
-        if isActive(record), let command = controls[record.routineID]?.attachCommand, let program = command.first {
+        if isActive(record), let command = controls[record.id]?.attachCommand, let program = command.first {
             return (program, Array(command.dropFirst()))
         }
-        guard isActive(record) || active[record.routineID] == nil,
+        guard !hasNativeConflict(record),
               let session = record.sessionID,
               let (program, arguments) = record.harness.terminal(session: session, running: isActive(record))
         else { return nil }
@@ -26,8 +26,8 @@ extension Scheduler {
 
     /// Resumes the native CLI under Rota's ownership without submitting a new prompt.
     public func continueInTerminal(_ record: RunRecord) async -> Bool {
-        guard !openingTerminals.contains(record.id), !hasSurvivingSession(record.routineID),
-              active[record.routineID] == nil,
+        guard !openingTerminals.contains(record.id), !isSurvivingSession(record), !hasNativeConflict(record),
+              active[record.id] == nil,
               let record = current(record.id, routineID: record.routineID),
               let routine = routine(record.routineID), let session = record.sessionID,
               let logPath = record.logPath,
@@ -40,7 +40,8 @@ extension Scheduler {
             lastError = "Could not find this session's native transcript. Terminal continuation was not started."
             return false
         }
-        guard active[record.routineID] == nil, !hasSurvivingSession(record.routineID), let latest = current(record.id),
+        guard active[record.id] == nil, !isSurvivingSession(record), !hasNativeConflict(record),
+              let latest = current(record.id),
               latest.sessionID == session, latest.logPath == logPath,
               self.routine(record.routineID) != nil else { return false }
         var next = latest
@@ -59,7 +60,8 @@ extension Scheduler {
 
     @discardableResult
     func continueSession(_ record: RunRecord, with message: String) -> Bool {
-        guard !hasSurvivingSession(record.routineID), let reopened = reopen(record, prompt: message) else {
+        guard active[record.id] == nil, !isSurvivingSession(record), !hasNativeConflict(record),
+              let reopened = reopen(record, prompt: message) else {
             return false
         }
         var record = reopened.0

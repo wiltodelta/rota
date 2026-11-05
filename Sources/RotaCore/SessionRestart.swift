@@ -4,8 +4,9 @@ extension Scheduler {
     /// Restarting creates a separate session; the routine keeps its scheduled harness and options.
     public func canRestart(_ record: RunRecord) -> Bool {
         record.harness.isAgent && !record.isSkip && record.outcome != .running
-            && routine(record.routineID) != nil && active[record.routineID] == nil
-            && survivingSessions[record.routineID] == nil && !openingTerminals.contains(record.id)
+            && routine(record.routineID) != nil && active[record.id] == nil
+            && survivingSessions[record.id] == nil && !openingTerminals.contains(record.id)
+            && !hasNativeConflict(record)
     }
 
     /// Reads context off the UI actor, then rechecks ownership before launching a fresh agent session.

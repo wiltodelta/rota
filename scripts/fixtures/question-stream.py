@@ -17,7 +17,8 @@ if "--version" in sys.argv:
 if "--help" in sys.argv:
     sys.exit(0)
 
-emit({"type": "system", "subtype": "init", "session_id": "synthetic-question-session", "model": "synthetic-model"})
+session = sys.argv[sys.argv.index("--resume") + 1] if "--resume" in sys.argv else str(uuid.uuid4())
+emit({"type": "system", "subtype": "init", "session_id": session, "model": "synthetic-model"})
 for line in sys.stdin:
     event = json.loads(line)
     if event.get("type") == "control_request":

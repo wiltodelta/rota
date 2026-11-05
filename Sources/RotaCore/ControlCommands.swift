@@ -165,7 +165,7 @@ extension Scheduler {
 
     private func stopNow(_ params: [String: Any]) throws -> [String: Any] {
         let routine = try existing(params)
-        guard active[routine.id] != nil else { throw ControlError("\(routine.id) is not running.") }
+        guard hasActiveSession(routine.id) else { throw ControlError("\(routine.id) is not running.") }
         stop(routine.id)
         return ["stopping": routine.id]
     }
@@ -178,9 +178,9 @@ extension Scheduler {
 
     private func runNow(_ params: [String: Any]) throws -> [String: Any] {
         let routine = try existing(params)
-        guard active[routine.id] == nil else { throw ControlError("\(routine.id) is already running.") }
+        guard !hasActiveSession(routine.id) else { throw ControlError("\(routine.id) is already running.") }
         run(routine, trigger: .manual)
-        guard let record = active[routine.id] else {
+        guard let record = activeRecord(for: routine.id) else {
             throw ControlError(lastError ?? "\(routine.id) did not start; see its latest session.")
         }
         return describe(record)
@@ -190,7 +190,7 @@ extension Scheduler {
     func describe(_ routine: Routine) -> [String: Any] {
         var json = (try? JSONSerialization.jsonObject(with: JSONFile.encoder.encode(routine))) as? [String: Any] ?? [:]
         json["scheduleText"] = ScheduleText.describe(routine.schedule) ?? routine.schedule
-        json["running"] = active[routine.id] != nil
+        json["running"] = hasActiveSession(routine.id)
         if let last = history.records(for: routine.id).first(where: { !$0.isSkip }) {
             json["lastSession"] = describe(last)
         }
@@ -213,7 +213,8 @@ extension Scheduler {
             }
             return record
         }
-        guard let latest = active[routine.id] ?? history.records(for: routine.id).first(where: { !$0.isSkip }) else {
+        let latest = activeRecord(for: routine.id) ?? history.records(for: routine.id).first { !$0.isSkip }
+        guard let latest else {
             throw ControlError("\(routine.id) has no sessions.")
         }
         return latest
@@ -253,7 +254,7 @@ extension Scheduler {
         guard message(text, to: record) else {
             throw ControlError(lastError ?? "The session did not accept the message.")
         }
-        return describe(active[record.routineID] ?? record)
+        return describe(active[record.id] ?? record)
     }
 
     /// The last `characters` of a text file and whether anything came before them.

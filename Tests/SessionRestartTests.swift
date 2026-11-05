@@ -91,26 +91,27 @@ final class SessionRestartTests: XCTestCase {
         XCTAssertEqual(launcher.specs.last?.mode, .claudeInteractive)
     }
 
-    func testRestartRejectsOverlapShellAndTheSameHarness() async throws {
+    func testRestartAllowsAnotherSessionButRejectsShellAndTheSameHarness() async throws {
         let same = await scheduler.restart(source, with: source.harness)
         let shell = await scheduler.restart(source, with: .shell)
         XCTAssertNil(same)
         XCTAssertNil(shell)
         scheduler.run(routine, trigger: .manual)
         let overlap = await scheduler.restart(source, with: .claude)
-        XCTAssertNil(overlap)
-        XCTAssertEqual(launcher.specs.count, 1)
+        XCTAssertNotNil(overlap)
+        XCTAssertEqual(launcher.specs.count, 2)
+        XCTAssertEqual(scheduler.active.count, 2)
         launcher.events.last?.finished(.succeeded)
         var shellSource = try XCTUnwrap(source)
         shellSource.harness = .shell
         scheduler.saveRecord(shellSource)
         let fromShell = await scheduler.restart(shellSource, with: .claude)
         XCTAssertNil(fromShell)
-        XCTAssertEqual(launcher.specs.count, 1)
+        XCTAssertEqual(launcher.specs.count, 2)
     }
 
     func testRestartRejectsUnknownNativeStateAndStaleRunningRecord() async throws {
-        scheduler.survivingSessions[routine.id] = source
+        scheduler.survivingSessions[source.id] = source
         let reserved = await scheduler.restart(source, with: .claude)
         XCTAssertNil(reserved)
         scheduler.survivingSessions = [:]
@@ -126,7 +127,7 @@ final class SessionRestartTests: XCTestCase {
         launcher.shouldFail = true
         let failed = await scheduler.restart(source, with: .claude)
         XCTAssertNil(failed)
-        XCTAssertNil(scheduler.active[routine.id])
+        XCTAssertNil(scheduler.activeRecord(for: routine.id))
         let failedRecord = try XCTUnwrap(scheduler.records(for: routine.id).first { $0.id != source.id })
         guard case .launchFailed = failedRecord.outcome else { return XCTFail("Expected launch failure") }
         var missing = try XCTUnwrap(source)

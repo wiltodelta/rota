@@ -81,7 +81,7 @@ struct RoutineDetail: View {
                 .toggleStyle(.switch)
                 .help(routine.enabled ? "Runs on schedule; turn off to pause" : "Paused; turn on to run on schedule")
                 .accessibilityIdentifier("routineEnabled")
-                if model.scheduler.active[routine.id] != nil {
+                if model.scheduler.hasActiveSession(routine.id) {
                     Button(interfaceTitle: "Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }
                         .accessibilityIdentifier("stopRoutine")
                 } else {
