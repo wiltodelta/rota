@@ -199,6 +199,7 @@ case "bounds", "visible":
     if arguments.first == "bounds" {
         print("\(rect.minX) \(rect.minY) \(rect.width) \(rect.height)")
     } else {
+        guard rect.width > 0, rect.height > 0 else { fail("element has no visible area: \(arguments[1])") }
         var parent: AXUIElement? = attribute(element, kAXParentAttribute)
         while let current = parent {
             let role: String = attribute(current, kAXRoleAttribute) ?? ""

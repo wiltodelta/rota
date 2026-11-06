@@ -233,9 +233,10 @@
 - The sidebar folds away with the button beside the title, View > Hide
   Sidebar or Control-Command-S. Its visibility and resized width are kept across
   launches, so the divider returns to where you left it.
-- The filter above the sidebar offers **All Sessions**, **Running**, **Needs Attention**,
+- The filter button beside **Sessions** offers **All Sessions**, **Running**, **Needs Attention**,
   **Unread**, **Failed**, and **Completed**. It filters sessions while keeping routines
-  available. Needs Attention includes questions, approvals, explicit attention requests,
+  available. An active filter appears below the section heading; press its × to show all sessions.
+  Needs Attention includes questions, approvals, explicit attention requests,
   and sessions waiting in Terminal. Completed shows successful sessions without a pending request.
   An open session stays visible if it becomes read or finishes, until you select another
   session or change the filter. This keeps the chat from disappearing while you read.

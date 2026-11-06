@@ -632,9 +632,15 @@ change system grants or install the command.
 
 `MainSidebar` keeps the native list's keyboard focus when changing sessions;
 `ChatComposer` does not request focus on each record change. Its focus state
-separates the session filter from the list. Arrow commands apply only to the
-focused filter, while list arrows retain native selection and scrolling.
+distinguishes the list itself from the filter beside its Sessions heading.
+Arrow commands apply only to the focused filter, while list arrows retain
+native selection and scrolling.
 Shift-Tab reaches the filter from the list, and Tab returns to the list.
+The Sessions heading and native menu occupy a nonselectable list row, with a
+filled symbol when filtering. Native Section headers merge their children into
+one Accessibility element, hiding separate control actions and caching their
+values. A regular row preserves the menu and removable condition as separate
+controls. Shift-Tab scrolls the heading into view as the filter receives focus.
 
 `SessionFilter` evaluates normalized record states for every harness, including
 both Claude modes and terminal continuations. All Sessions is the initial filter
@@ -646,9 +652,11 @@ reset a filter that would otherwise hide the requested session; returning from
 Settings preserves the previous filter and pinned selection. Filter logic and
 navigation boundaries are covered by `SessionFilterTests`.
 `scripts/ui-check.sh --keyboard-only` exercises real arrow and Tab events, text
-selection in the composer, empty results, unread retention, Settings restoration,
-and a disposable Shell run's live state changes. It covers both appearances at
+selection in the composer, empty results, condition reset, unread retention,
+Settings restoration, long-history focus recovery, and a disposable Shell run's
+live state changes. It covers both appearances at
 minimum width and normal and maximum interface zoom, without running an agent.
+Visibility checks reject zero-area cached Accessibility frames for offscreen controls.
 
 `SessionView` distinguishes an unread transcript snapshot from a completed read
 with no messages. It creates `ChatTranscript` after the first read, or after

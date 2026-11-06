@@ -551,12 +551,12 @@ check_settings() {
 if [[ "$LIVE" == --keyboard-only ]]; then
     for appearance in light dark; do
         python3 scripts/fixtures/keyboard-navigation.py "$SUPPORT" "$WORK/project"
-        read -r keyboard_alpha keyboard_beta keyboard_gamma keyboard_delta keyboard_epsilon < <(
+        read -r keyboard_alpha keyboard_beta keyboard_gamma keyboard_delta keyboard_epsilon keyboard_oldest < <(
             python3 - "$SUPPORT/keyboard-ids.json" <<'PYTHON'
 import json
 import sys
 ids = json.load(open(sys.argv[1]))
-print(*(ids[name] for name in ("alpha", "beta", "gamma", "delta", "epsilon")))
+print(*(ids[name] for name in ("alpha", "beta", "gamma", "delta", "epsilon", "oldest")))
 PYTHON
         )
         launch "$appearance"
@@ -601,6 +601,11 @@ PYTHON
             check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_beta"
             if "$DRIVER" exists "sidebarPreview-$keyboard_alpha"; then fail 'filter hides nonmatching sessions'; fi
             capture 'Keyboard conversations' "$appearance-keyboard-attention-$zoom"
+            check wait_exists clearSessionFilter
+            "$DRIVER" press clearSessionFilter
+            check wait_value sessionFilter 'All Sessions'
+            "$DRIVER" choose sessionFilter 'Needs Attention'
+            "$DRIVER" focus sessionFilter
             "$DRIVER" key down
             check wait_value sessionFilter Unread
             if [[ "$zoom" == normal ]]; then
@@ -630,8 +635,23 @@ PYTHON
             "$DRIVER" key right
             check wait_value sessionFilter Completed
             "$DRIVER" key tab
+            "$DRIVER" key up
+            check "$DRIVER" selected-in routineSidebar 'routineHarness-keyboard-running'
+            "$DRIVER" key down
+            check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_alpha"
             "$DRIVER" key down
             check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_delta"
+            "$DRIVER" choose sessionFilter 'All Sessions'
+            "$DRIVER" focus routineSidebar
+            for _ in {1..30}; do "$DRIVER" key down; done
+            check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_oldest"
+            check wait_visible "sidebarPreview-$keyboard_oldest"
+            if "$DRIVER" visible sessionFilter; then fail 'history scrolls filter out of view'; fi
+            "$DRIVER" key shift-tab
+            check wait_visible sessionFilter
+            capture 'Keyboard conversations' "$appearance-keyboard-history-$zoom"
+            "$DRIVER" key right
+            check wait_value sessionFilter Running
         done
         "$DRIVER" choose sessionFilter Running
         "$APP/Contents/Helpers/rota" run keyboard-running >/dev/null

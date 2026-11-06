@@ -7,17 +7,16 @@ struct MainSidebar: View {
     @Environment(\.appearsActive) private var appearsActive
     @Environment(AppModel.self) private var model
     @AppStorage("routinesExpanded") private var routinesExpanded = true
-    @FocusState private var sidebarFocused: Bool
-    @FocusState private var filterFocused: Bool
+    private enum Focus: Hashable { case list, filter }
+    @FocusState private var focus: Focus?
 
     let records: [RunRecord]
 
     var body: some View {
         @Bindable var model = model
         let visible = model.sessionFilter.visibleRecords(records, selection: model.selection)
-        let activeList = appearsActive && sidebarFocused
-        VStack(spacing: 0) {
-            filterPicker
+        let activeList = appearsActive && focus == .list
+        ScrollViewReader { proxy in
             List(selection: $model.selection) {
                 Section(isExpanded: $routinesExpanded) {
                     ForEach(RoutineOrder.byNextRun(model.scheduler.routines)) { routine in
@@ -30,6 +29,12 @@ struct MainSidebar: View {
                     SidebarHeader(title: "Routines")
                 }
                 Section {
+                    sessionHeader
+                        .selectionDisabled()
+                        .id("sessionFilterHeader")
+                    if model.sessionFilter != .all {
+                        SessionFilterToken(filter: model.sessionFilter).selectionDisabled()
+                    }
                     if visible.isEmpty {
                         Text("No matching sessions")
                             .interfaceFont(.callout)
@@ -49,55 +54,36 @@ struct MainSidebar: View {
                                 .interfaceFont(.body).tag(SidebarItem.session(record.id))
                         }
                     }
-                } header: {
-                    SidebarHeader(title: "Sessions")
-                        .accessibilityIdentifier("sessionsSection")
                 }
             }
             .accessibilityIdentifier("routineSidebar")
-            .focused($sidebarFocused)
+            .focused($focus, equals: .list)
             .onKeyPress(keys: [.tab, KeyEquivalent("\u{19}")]) { press in
                 guard press.modifiers.contains(.shift) || press.key.character == "\u{19}" else { return .ignored }
-                filterFocused = true
+                focus = .filter
                 return .handled
+            }
+            .onChange(of: focus) { _, value in
+                if value == .filter { proxy.scrollTo("sessionFilterHeader", anchor: .top) }
             }
         }
     }
 
-    private var filterPicker: some View {
+    private var sessionHeader: some View {
         HStack(spacing: metrics.points(8)) {
-            Image(systemName: "line.3.horizontal.decrease")
-                .interfaceSystemFont(size: 13)
-                .foregroundStyle(Color.secondaryText)
-                .accessibilityHidden(true)
-            Picker("Session Filter", selection: Binding(
-                get: { model.sessionFilter },
-                set: { model.selectSessionFilter($0) }
-            )) {
-                ForEach(SessionFilter.allCases) { filter in Text(filter.title).tag(filter) }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .focusable(interactions: .edit)
-            .focused($filterFocused)
-            .onMoveCommand { direction in
-                let offset = direction == .up || direction == .left ? -1 : 1
-                let next = model.sessionFilter.moved(by: offset)
-                if next != model.sessionFilter { model.selectSessionFilter(next) }
-            }
-            .onKeyPress(keys: [.tab]) { press in
-                guard !press.modifiers.contains(.shift) else { return .ignored }
-                sidebarFocused = true
-                return .handled
-            }
-            .accessibilityValue(model.sessionFilter.title)
-            .accessibilityIdentifier("sessionFilter")
-            .help("Filter sessions. Use arrow keys to change the filter, then Tab to browse sessions.")
-            .frame(maxWidth: .infinity)
+            SidebarHeader(title: "Sessions")
+            Spacer(minLength: 0)
+            SessionFilterMenu(filter: model.sessionFilter)
+                .focused($focus, equals: .filter)
+                .onKeyPress(keys: [.tab]) { press in
+                    guard !press.modifiers.contains(.shift) else { return .ignored }
+                    focus = .list
+                    return .handled
+                }
         }
-        .interfaceFont(.callout)
-        .padding(.horizontal, metrics.points(16))
-        .padding(.vertical, metrics.points(8))
+        .textCase(nil)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("sessionsSection")
     }
 }
 

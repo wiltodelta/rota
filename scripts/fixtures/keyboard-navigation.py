@@ -56,6 +56,20 @@ for index, name in enumerate(("alpha", "beta", "gamma", "delta", "epsilon")):
     if name == "beta":
         record["attention"] = "Synthetic reply requested."
     records.append(record)
+# A long read history exercises the section header while the list scrolls.
+for index in range(24):
+    record = records[0].copy()
+    started = now - timedelta(days=2, minutes=index + 2)
+    ended = started + timedelta(seconds=1)
+    record.update(
+        id=str(uuid.uuid4()).upper(),
+        startedAt=started.isoformat(),
+        endedAt=ended.isoformat(),
+        readAt=ended.isoformat(),
+        sessionID=f"synthetic-keyboard-history-{index}",
+    )
+    records.append(record)
+ids["oldest"] = records[-1]["id"]
 (root / "runs" / (routine + ".json")).write_text(json.dumps(records), encoding="utf-8")
 (root / "runs/keyboard-running.json").write_text("[]", encoding="utf-8")
 (root / "keyboard-ids.json").write_text(json.dumps(ids), encoding="utf-8")
