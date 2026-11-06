@@ -233,6 +233,16 @@
 - The sidebar folds away with the button beside the title, View > Hide
   Sidebar or Control-Command-S. Its visibility and resized width are kept across
   launches, so the divider returns to where you left it.
+- The filter above the sidebar offers **All Sessions**, **Running**, **Needs Attention**,
+  **Unread**, **Failed**, and **Completed**. It filters sessions while keeping routines
+  available. Needs Attention includes questions, approvals, explicit attention requests,
+  and sessions waiting in Terminal. Completed shows successful sessions without a pending request.
+  An open session stays visible if it becomes read or finishes, until you select another
+  session or change the filter. This keeps the chat from disappearing while you read.
+- With the session list focused, Up and Down select sessions or routines, skipping day headings.
+  Selecting a session keeps keyboard focus in the list. Shift-Tab focuses the session filter;
+  its arrow keys change filters, and Tab returns to the list. Inside the message field,
+  arrows move the text cursor or selection as usual.
 - Settings… (Command-,), or Settings at the foot of the sidebar, opens
   Settings inside the main window: the sidebar lists General, Chat and Agents,
   and Back or Escape returns to your routines and sessions. It reopens on the

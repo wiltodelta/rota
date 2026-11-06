@@ -62,7 +62,7 @@ struct ChatComposer: View {
         .frame(maxWidth: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
         .task(id: record.id) {
-            focused = true
+            // Selecting another session keeps keyboard focus in the sidebar.
             resolvedConfiguration = nil
             legacyModel = nil
             resolvingConfiguration = false

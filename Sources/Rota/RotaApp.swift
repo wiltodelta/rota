@@ -74,7 +74,16 @@ final class AppModel {
     static let shared = AppModel()
 
     let scheduler: Scheduler
-    var selection: SidebarItem?
+    var sessionFilter: SessionFilter = .all
+    var selection: SidebarItem? {
+        didSet {
+            guard selection != oldValue, selection != selectionBeforeSettings,
+                  case .session(let id) = selection, let record = scheduler.current(id) else { return }
+            // Menu-bar and notification destinations must remain visible under the current filter.
+            if !sessionFilter.includes(record) { sessionFilter = .all }
+        }
+    }
+
     /// Unsent messages survive switching between sessions for this app launch.
     var sessionDrafts: [UUID: String] = [:]
     var sessionAttachments: [UUID: [ChatAttachment]] = [:]
@@ -123,7 +132,8 @@ final class AppModel {
     }
 
     func deleteSession(_ record: RunRecord) {
-        let records = selection == .session(record.id) ? scheduler.allRecords() : []
+        let records = selection == .session(record.id)
+            ? sessionFilter.visibleRecords(scheduler.allRecords(), selection: selection) : []
         guard scheduler.deleteSession(record) else { return }
         sessionDrafts[record.id] = nil
         sessionAttachments[record.id] = nil
@@ -169,16 +179,6 @@ final class AppModel {
     func reply(_ text: String, to session: UUID) {
         guard let record = scheduler.current(session) else { return }
         scheduler.message(text, to: record)
-    }
-
-    func showMainWindow(selecting item: SidebarItem? = nil) {
-        if let item { selection = item }
-        openMainWindow()
-    }
-
-    /// A routine's latest session, or the routine itself before its first run.
-    func latest(of routineID: String) -> SidebarItem {
-        SidebarItem.latest(routineID: routineID, records: scheduler.records(for: routineID))
     }
 
     /// The Settings section the main window shows; nil shows routines and sessions.

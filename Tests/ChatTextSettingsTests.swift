@@ -102,8 +102,9 @@ final class ChatTextSettingsTests: XCTestCase {
         for (text, height) in [(prose, 22 * factor), (MarkdownProse.code(source, text: settings), 20 * factor)] {
             let view = ProseTextView.make()
             view.textStorage?.setAttributedString(text)
-            _ = view.fittingSize(width: 1000)
+            view.setFrameSize(NSSize(width: 1000, height: 500))
             let layout = try XCTUnwrap(view.layoutManager)
+            layout.ensureLayout(for: try XCTUnwrap(view.textContainer))
             var positions: [CGFloat] = []
             let range = NSRange(location: 0, length: layout.numberOfGlyphs)
             layout.enumerateLineFragments(forGlyphRange: range) { rect, _, _, _, _ in

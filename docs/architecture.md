@@ -166,16 +166,16 @@ flowchart LR
   its own text/private/numeric fields inside the transcript's
   scroll view, while the composer stays pinned below it. The form never squeezes
   the transcript into a near-zero nested scroll viewport.
-  The card is measured outside the lazy message stack, even while offscreen.
+  The card is measured outside the message stack, even while offscreen.
   It registers its own transcript viewport marker and participates in
   the same zoom-anchor handling as message rows.
-  Its end anchor sits outside the spaced lazy rows, with a compact form tail;
+  Its end anchor sits outside the spaced message rows, with a compact form tail;
   scrolling to the absolute bottom must leave the final actions visible even
   at minimum height and 150% zoom.
   While a form is pending, a pinned Show Question control above the ordinary
   composer scrolls to the actual document bottom after the reader scrolls away,
   leaving the card's final actions visible. The end request survives delayed
-  transcript loading and lazy height recalculation until manual scrolling cancels it.
+  transcript loading and message-height recalculation until manual scrolling cancels it.
   Native document-frame and clip-bounds notifications also correct late layout changes,
   including zoom adjustments that settle after SwiftUI's geometry callback.
   The floating
@@ -490,8 +490,12 @@ flowchart LR
   `NSTextView` (`ProseText`). A drag or Select All crosses those blocks, lists
   keep their hanging indent, and Copy gives plain text with list markers.
   Code blocks, tables and image blocks stay separate views. The view measures
-  itself at SwiftUI's proposed width and never tracks its frame width, which
-  layout resets mid-measurement. A legacy log ends a message at each blank line,
+  with a separate TextKit layout manager and container, sharing the attributed
+  storage with the displayed text. SwiftUI can probe several widths without
+  resizing the view; those probes must not change displayed wrapping. Only the
+  assigned frame controls the display container's width. Zero-width probes skip
+  layout. The natural size and latest constrained size are cached until text
+  storage is edited, including attribute changes from zoom or font settings. A legacy log ends a message at each blank line,
   so `TranscriptTurn.answerMessages` rejoins an answer's paragraphs. Selection
   cannot cross from one message to the next; hovering a message shows a Copy
   button (beside a prompt, at the end of the agent's header row) that copies
@@ -626,13 +630,36 @@ was checked in both appearances at 2x: visible icon-to-letter gaps were
 light and 5.64:1 in dark. The fixture supplies granted permissions; it does not
 change system grants or install the command.
 
+`MainSidebar` keeps the native list's keyboard focus when changing sessions;
+`ChatComposer` does not request focus on each record change. Its focus state
+separates the session filter from the list. Arrow commands apply only to the
+focused filter, while list arrows retain native selection and scrolling.
+Shift-Tab reaches the filter from the list, and Tab returns to the list.
+
+`SessionFilter` evaluates normalized record states for every harness, including
+both Claude modes and terminal continuations. All Sessions is the initial filter
+for each launch. Explicit filter changes preserve a matching selection, choose
+the first matching session, or clear an empty result. Live changes keep the open
+session pinned until the next selection, so reading an unread session does not
+automatically open and mark the remaining unread sessions. External destinations
+reset a filter that would otherwise hide the requested session; returning from
+Settings preserves the previous filter and pinned selection. Filter logic and
+navigation boundaries are covered by `SessionFilterTests`.
+`scripts/ui-check.sh --keyboard-only` exercises real arrow and Tab events, text
+selection in the composer, empty results, unread retention, Settings restoration,
+and a disposable Shell run's live state changes. It covers both appearances at
+minimum width and normal and maximum interface zoom, without running an agent.
+
 `SessionView` distinguishes an unread transcript snapshot from a completed read
 with no messages. It creates `ChatTranscript` after the first read, or after
-confirming that the record has no log, so the lazy stack's initial bottom anchor
+confirming that the record has no log, so the stack's initial bottom anchor
 sees the loaded page. Starting the stack empty and inserting that page later can
 leave the viewport blank until scrolling or an Accessibility query forces layout.
-Subsequent refreshes and earlier-page loads update the existing transcript view
-without resetting its reading position or disclosures.
+Loaded messages use `VStack`: lazy height estimates across session switches can
+leave rows unrendered or put the apparent end inside a tall message. The reader
+bounds the initial page; earlier pages are loaded explicitly. Subsequent refreshes
+and earlier-page loads update the existing transcript view without resetting its
+reading position or disclosures.
 
 Chat implementation research and proposed changes, including the evidence and
 limits of inspecting super.engineering, live in [Chat UI research](chat-ui-research.md).
@@ -1130,7 +1157,7 @@ Activation and the window-server list can settle at different times. A persisten
 foreign window at the target point still stops the check before any event is sent.
 
 Initial transcript rendering needs a window capture before walking the
-Accessibility tree. An AX walk can materialize lazy rows and hide a blank first
+Accessibility tree. An AX walk can force additional layout and hide a blank first
 frame, so an AX-based visibility assertion alone cannot catch this regression.
 
 ## Session configuration and attachments

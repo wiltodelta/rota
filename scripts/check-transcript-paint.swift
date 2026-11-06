@@ -1,14 +1,18 @@
 // Recognize the transcript's first painted frame, without AX or wheel events that can unblank a lazy stack.
-// Usage: check-transcript-paint <pid> <output.png>
+// Usage: check-transcript-paint <pid> <output.png> [expected text] [window title] [preceding text]
 import AppKit
 import Vision
 
 let arguments = CommandLine.arguments
-guard arguments.count == 3, let pid = Int(arguments[1]) else {
-    fputs("Usage: check-transcript-paint <pid> <output.png>\n", stderr)
+guard (3...6).contains(arguments.count), let pid = Int(arguments[1]) else {
+    fputs("Usage: check-transcript-paint <pid> <output.png> [expected text] [window title] [preceding text]\n", stderr)
     exit(1)
 }
 let output = URL(fileURLWithPath: arguments[2])
+let expected = arguments.count >= 4 ? arguments[3] : "Paint check passed"
+let title = arguments.count >= 5 ? arguments[4] : nil
+let requiredText = [expected] + (arguments.count == 6 ? [arguments[5]] : [])
+var matchingWindowVisible = false
 let deadline = Date().addingTimeInterval(20)
 var recognized = ""
 while Date() < deadline {
@@ -19,7 +23,9 @@ while Date() < deadline {
               let bounds = $0[kCGWindowBounds as String] as? NSDictionary,
               let frame = CGRect(dictionaryRepresentation: bounds) else { return false }
         return frame.width >= 820 && frame.height >= 520
+            && (title == nil || $0[kCGWindowName as String] as? String == title)
     }
+    matchingWindowVisible = window != nil
     if let id = window?[kCGWindowNumber as String] as? UInt32 {
         let capture = Process()
         capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
@@ -28,21 +34,25 @@ while Date() < deadline {
         capture.waitUntilExit()
         if capture.terminationStatus == 0 {
             let request = VNRecognizeTextRequest()
-            request.recognitionLevel = .accurate
+            request.recognitionLevel = .fast
             request.recognitionLanguages = ["en-US"]
             request.usesLanguageCorrection = false
             // Exclude the sidebar (which already has the same preview), header and composer.
-            request.regionOfInterest = CGRect(x: 0.36, y: 0.22, width: 0.63, height: 0.50)
+            request.regionOfInterest = CGRect(x: 0.32, y: 0.18, width: 0.67, height: 0.64)
             try VNImageRequestHandler(url: output).perform([request])
             recognized = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
                 .joined(separator: " ")
-            if recognized.contains("Paint check passed") {
-                print("Transcript painted before any AX query or scroll input")
+            if requiredText.allSatisfy({ recognized.lowercased().contains($0.lowercased()) }) {
+                print("Transcript painted before its AX tree was queried or scrolled")
                 exit(0)
             }
         }
     }
     Thread.sleep(forTimeInterval: 0.2)
+}
+if !matchingWindowVisible {
+    fputs("No visible window matched the selected session.\n", stderr)
+    exit(1)
 }
 fputs("Transcript stayed blank or omitted its final message. Recognized body: \(recognized)\n", stderr)
 exit(1)

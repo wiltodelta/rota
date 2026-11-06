@@ -11,6 +11,9 @@
 //   enabled <id>                 print whether a control is enabled
 //   visible <id-or-title>       require full visibility inside the window and scroll viewport
 //   in-toolbar <id>             require an element to remain inside the title-bar toolbar
+//   select-in <id> <text>      select a row inside one container without querying the transcript
+//   selected-in <id> <text>    require a matching row to be selected
+//   selected-text <id>         read the current text selection
 //   text-count <value>          count static text elements with that exact value
 //   bounds <id-or-title>        print x y width height in screen points
 //   exists <id-or-title>         exit 0 if an element with that identifier or title exists
@@ -206,21 +209,40 @@ case "bounds", "visible":
             parent = attribute(current, kAXParentAttribute)
         }
     }
-case "select":
-    guard arguments.count >= 2 else { fail("select <text> [nth match, from 1]") }
-    let text = arguments[1]
-    let nth = arguments.count > 2 ? Int(arguments[2]) ?? 1 : 1
+case "select", "select-in":
+    let scoped = arguments[0] == "select-in"
+    let textIndex = scoped ? 2 : 1
+    guard arguments.count > textIndex else { fail("select [text] or select-in <container-id> <text> [nth match]") }
+    let text = arguments[textIndex]
+    let nth = arguments.count > textIndex + 1 ? Int(arguments[textIndex + 1]) ?? 1 : 1
     var rows: [AXUIElement] = []
-    _ = find({ element in
+    let collectRow: (AXUIElement) -> Bool = { element in
         if (attribute(element, kAXRoleAttribute) as String?) == "AXRow",
            find(in: element, first: { label($0).contains(text) }) != nil {
             rows.append(element)
         }
         return false
-    })
+    }
+    if scoped {
+        guard let container = find({ matches($0, arguments[1]) }) else { fail("no container \(arguments[1])") }
+        _ = find(in: container, collectRow)
+    } else {
+        _ = find(collectRow)
+    }
     guard rows.count >= nth else { fail("\(rows.count) rows contain \(text)") }
     let result = AXUIElementSetAttributeValue(rows[nth - 1], kAXSelectedAttribute as CFString, kCFBooleanTrue)
     guard result == .success else { fail("select failed: \(result.rawValue)") }
+case "selected-in":
+    guard arguments.count == 3,
+          let container = find({ matches($0, arguments[1]) }),
+          let row = find(in: container, first: { element in
+              (attribute(element, kAXRoleAttribute) as String?) == "AXRow"
+                  && find(in: element, first: { label($0).contains(arguments[2]) }) != nil
+          }) else { fail("selected-in <container-id> <row text>") }
+    guard (attribute(row, kAXSelectedAttribute) as Bool?) == true else { fail("row is not selected: \(arguments[2])") }
+case "selected-text":
+    guard arguments.count == 2, let element = find({ matches($0, arguments[1]) }) else { fail("no element") }
+    print((attribute(element, kAXSelectedTextAttribute) as String?) ?? "")
 case "choose":
     // SwiftUI can redraw the form while its menu is open and drop the pick, so
     // read the value back and try again.
@@ -454,6 +476,9 @@ case "key":
     // Keystrokes posted to Rota's process reach its key window even when System
     // Events keystrokes do not. Focus the target first with `focus`.
     let keys: [String: (CGKeyCode, CGEventFlags)] = [
+        "up": (126, []), "down": (125, []), "left": (123, []), "right": (124, []),
+        "tab": (48, []), "shift-tab": (48, .maskShift),
+        "command-down": (125, .maskCommand), "shift-left": (123, .maskShift),
         "return": (36, []), "escape": (53, []), "command-comma": (43, .maskCommand), "option-return": (36, .maskAlternate),
         "shift-return": (36, .maskShift), "control-return": (36, .maskControl),
         "command-zero": (29, .maskCommand), "command-plus": (24, [.maskCommand, .maskShift]),
@@ -463,6 +488,15 @@ case "key":
         "option-command-zero": (29, [.maskCommand, .maskAlternate])
     ]
     guard arguments.count == 2, let (code, flags) = keys[arguments[1]] else { fail("unknown key") }
+    let navigationKeys: Set<String> = ["up", "down", "left", "right", "tab", "shift-tab", "command-down", "shift-left"]
+    if navigationKeys.contains(arguments[1]) {
+        let visible = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+        guard visible.contains(where: { window in
+            let bounds = window[kCGWindowBounds as String] as? [String: Double]
+            return window[kCGWindowOwnerPID as String] as? Int32 == app.processIdentifier
+                && (bounds?["Height"] ?? 0) > 40
+        }) else { fail("Rota's window is no longer on screen; refusing navigation keys") }
+    }
     app.activate()
     Thread.sleep(forTimeInterval: 0.1)
     for down in [true, false] {

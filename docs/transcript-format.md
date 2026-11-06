@@ -102,7 +102,7 @@ sessions; ownership and failure handling are described in [Architecture](archite
 `SessionView` owns a `TranscriptSessionReader` actor for its session and polls
 it while the run is active. Polling and page requests share that reader off the
 UI actor; scheduler refreshes and run completion retain already loaded pages.
-The lazy transcript view is created after the first completed read; later polls
+The transcript view is created after the first completed read; later polls
 and page requests keep its identity.
 The view changes state only when the snapshot changes. A pending page request
 supersedes any older poll result. A finished session moves its trailing status
@@ -129,25 +129,33 @@ the composer reuse existing components.
 
 Scroll targets, including the end marker, use the same ID type. Mixing a
 string end marker with integer message targets can leave the latest-message
-action short of the end after lazy layout changes. At a page boundary the
+action short of the end after layout changes. At a page boundary the
 load button can be the first visible element, leaving no message target.
 Invisible native row markers capture the first fully visible message's
 actual offset. SwiftUI can keep offscreen native markers attached to the window
 but hidden, with stale frames inside the visible rectangle. Exclude hidden markers
 and hidden ancestors from both anchor selection and restoration.
 The proxy and pixel correction own scroll positioning. Do not add an ID
-`scrollPosition` binding to the lazy stack: competing position updates can leave
+`scrollPosition` binding to the message stack: competing position updates can leave
 the transcript white on first paint until a wheel event forces layout. The
 `--paint-only` UI check captures the long synthetic transcript before any AX
 query or scroll input and recognizes its final message within the chat body,
 excluding the sidebar preview. The prepend checks still verify pixel position
-without that binding.
+without that binding. `scripts/ui-check.sh --switch-only` alternates long, short
+and tall-message sessions in both appearances, at minimum width and in a larger
+window at 110% interface scale. Before querying each destination's transcript AX
+tree, a visible-window capture must show both its final message and preceding
+prose. This catches an empty history as well as a painted footer above missing
+rows. TextKit measurement uses a separate layout manager from the displayed text,
+so proposed widths cannot change displayed wrapping without a frame resize.
+The loaded page uses `VStack` to avoid lazy height estimates during switching.
+The check also saves each case's local performance journal beside its captures.
 The reading anchor is saved during scrolling, before new data
 changes layout; capturing it only in the update callback can already see the
 moved row. A narrow `TranscriptViewport` bridge restores that offset after
-layout; an ID alone does not correct SwiftUI's changing lazy height estimates.
+layout; an ID alone does not correct changing message heights.
 A page request captures its anchor before I/O, materializes that row after the
-page arrives, and then corrects the pixel offset. Later lazy height recalculations
+page arrives, and then corrects the pixel offset. Later height recalculations
 repeat the correction while the reader is idle. `TranscriptScrollState` distinguishes
 manual scroll phases from programmatic movement; layout and anchor corrections
 cannot resume following. User scrolling and the
@@ -155,12 +163,12 @@ latest-message action cancel queued corrections. Layout changes do not resume fo
 scrolling back to the end or pressing the latest-message button does.
 An explicit end request also registers the end marker with `TranscriptViewport`.
 After geometry changes it clamps the native scroll view to the document's actual
-bottom, so lazy estimates, delayed transcript loading and zoom cannot leave the
+bottom, so delayed transcript loading, message sizing and zoom cannot leave the
 request short of the end or beyond the rendered content. Manual scrolling cancels
 that request before saving a reading anchor. Height changes alone never restart
 following. Show Question and question-step changes use this end request so the
 current field and final actions remain reachable. The question card lives outside
-the lazy message stack, so it retains a measured height while offscreen; the jump
+the message stack, so it retains a measured height while offscreen; the jump
 addresses the card itself before correcting the document bottom. A lazy form can
 otherwise remain unrendered while the end marker stops at the preceding footer.
 

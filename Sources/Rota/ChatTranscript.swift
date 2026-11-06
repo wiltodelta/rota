@@ -37,7 +37,7 @@ struct ChatTranscript: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 0) {
-                    LazyVStack(alignment: .leading, spacing: metrics.points(22)) {
+                    VStack(alignment: .leading, spacing: metrics.points(22)) {
                         if let notice = record.compatibilityNotice {
                             CompatibilityNotice(text: notice)
                         }
@@ -102,7 +102,7 @@ struct ChatTranscript: View {
                         }
                     }
                     .scrollTargetLayout()
-                    // The form keeps a measured height even when lazy transcript rows are offscreen.
+                    // The form keeps a measured height even when transcript rows are offscreen.
                     if let questionDraft, let submitAnswer {
                         QuestionCard(draft: questionDraft, submit: submitAnswer)
                             .id(Int.min + 1)
@@ -162,7 +162,7 @@ struct ChatTranscript: View {
                 if scroll.following { scrollToEnd(proxy) }
                 guard !scroll.following, !viewport.isFollowingEnd else { return }
                 if let anchor = pageAnchor {
-                    // Materialize the old row after a prepend, then correct the lazy estimate.
+                    // Find the old row after a prepend, then restore its pixel offset.
                     let mapped = TranscriptViewport.Anchor(id: WorkRow.visibleID(for: anchor.id, in: rows),
                                                            offset: anchor.offset, point: anchor.point)
                     proxy.scrollTo(mapped.id, anchor: mapped.point)

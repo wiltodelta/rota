@@ -49,8 +49,8 @@ struct SessionView: View {
             }
             let items = transcript?.items ?? []
             let questionID = questionDraft?.question.id
-            // The lazy stack's initial bottom anchor must see the first loaded page.
-            // Starting it empty can leave later rows unrendered until an AX query or scroll.
+            // Mount the loaded page before setting the initial bottom position.
+            // Its message heights must replace the empty document's geometry.
             if let transcript {
                 ChatTranscript(items: items, running: running, record: current,
                                sending: outbox.filter { !$0.delivered(in: items) }.map(\.text),

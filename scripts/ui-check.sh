@@ -10,6 +10,8 @@
 #   scripts/ui-check.sh --scroll-only     long transcript and question navigation only
 #   scripts/ui-check.sh --parallel-only   continue and stop independent sessions with synthetic Claude
 #   scripts/ui-check.sh --paint-only      first transcript paint without AX or scroll input
+#   scripts/ui-check.sh --keyboard-only   session/filter arrows, focus and live state changes
+#   scripts/ui-check.sh --switch-only     repeated session switches, paint checked before transcript AX
 #   scripts/ui-check.sh --questions-only  finished question and verification states only
 #   scripts/ui-check.sh --harnesses-only  reasoning and CLI/service compatibility states only
 #   scripts/ui-check.sh --restart-only   cross-harness restart with synthetic agent output
@@ -101,6 +103,9 @@ quit_rota() {
 }
 
 cleanup() {
+    if [[ "$LIVE" == --keyboard-only && -S "$SUPPORT/rota.sock" ]]; then
+        "$APP/Contents/Helpers/rota" stop keyboard-running >/dev/null 2>&1 || true
+    fi
     quit_rota
     defaults delete "$DOMAIN" >/dev/null 2>&1 || true
     if [[ "$HAD_DEFAULTS" == 1 ]]; then
@@ -543,6 +548,119 @@ check_settings() {
         && pass "showing the sidebar keeps the window width" || fail "showing the sidebar keeps the window width"
 }
 
+if [[ "$LIVE" == --keyboard-only ]]; then
+    for appearance in light dark; do
+        python3 scripts/fixtures/keyboard-navigation.py "$SUPPORT" "$WORK/project"
+        read -r keyboard_alpha keyboard_beta keyboard_gamma keyboard_delta keyboard_epsilon < <(
+            python3 - "$SUPPORT/keyboard-ids.json" <<'PYTHON'
+import json
+import sys
+ids = json.load(open(sys.argv[1]))
+print(*(ids[name] for name in ("alpha", "beta", "gamma", "delta", "epsilon")))
+PYTHON
+        )
+        launch "$appearance"
+        "$DRIVER" window 'Keyboard conversations' 820 600
+        for zoom in normal zoom; do
+            if [[ "$zoom" == zoom ]]; then
+                for _ in 1 2 3; do "$DRIVER" key command-plus; done
+            fi
+            "$DRIVER" choose sessionFilter 'All Sessions'
+            "$DRIVER" select-in routineSidebar "sidebarPreview-$keyboard_alpha"
+            "$DRIVER" set composer $'First line\nLast Z'
+            "$DRIVER" focus composer
+            "$DRIVER" key command-down
+            "$DRIVER" key shift-left
+            [[ "$("$DRIVER" selected-text composer)" == Z ]] || fail 'composer arrows select text'
+            for direction in left right up down; do "$DRIVER" key "$direction"; done
+            check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_alpha"
+            "$DRIVER" focus routineSidebar
+            "$DRIVER" key down
+            check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_beta"
+            "$DRIVER" key down
+            check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_gamma"
+            check "$DRIVER" visible "sidebarPreview-$keyboard_gamma"
+            "$DRIVER" key up
+            check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_beta"
+            "$DRIVER" key up
+            check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_alpha"
+            check wait_value composer $'First line\nLast Z'
+            "$DRIVER" key up
+            check "$DRIVER" selected-in routineSidebar 'routineHarness-keyboard-running'
+            "$DRIVER" key down
+            check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_alpha"
+            capture 'Keyboard conversations' "$appearance-keyboard-all-$zoom"
+            # Shift-Tab returns to the filter; Tab returns to the list.
+            "$DRIVER" key shift-tab
+            "$DRIVER" key right
+            check wait_value sessionFilter Running
+            check wait_exists resetSessionFilter
+            capture Rota "$appearance-keyboard-empty-$zoom"
+            "$DRIVER" key down
+            check wait_value sessionFilter 'Needs Attention'
+            check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_beta"
+            if "$DRIVER" exists "sidebarPreview-$keyboard_alpha"; then fail 'filter hides nonmatching sessions'; fi
+            capture 'Keyboard conversations' "$appearance-keyboard-attention-$zoom"
+            "$DRIVER" key down
+            check wait_value sessionFilter Unread
+            if [[ "$zoom" == normal ]]; then
+                check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_delta"
+                sleep 2
+                check wait_value sessionFilter Unread
+                check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_delta"
+                "$DRIVER" key tab
+                "$DRIVER" key down
+                check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_epsilon"
+                sleep 2
+                "$DRIVER" key command-comma
+                check wait_exists settingsSidebar
+                "$DRIVER" press settingsBack
+                check wait_value sessionFilter Unread
+                check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_epsilon"
+                "$DRIVER" focus sessionFilter
+            else
+                check wait_exists resetSessionFilter
+            fi
+            "$DRIVER" key down
+            check wait_value sessionFilter Failed
+            check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_gamma"
+            "$DRIVER" key down
+            check wait_value sessionFilter Completed
+            check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_alpha"
+            "$DRIVER" key right
+            check wait_value sessionFilter Completed
+            "$DRIVER" key tab
+            "$DRIVER" key down
+            check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_delta"
+        done
+        "$DRIVER" choose sessionFilter Running
+        "$APP/Contents/Helpers/rota" run keyboard-running >/dev/null
+        for _ in {1..40}; do
+            [[ "$(session_value keyboard-running running)" == True* ]] && break
+            sleep 0.2
+        done
+        keyboard_running="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[0]["id"])' \
+            "$SUPPORT/runs/keyboard-running.json")"
+        check wait_exists "sidebarPreview-$keyboard_running"
+        "$DRIVER" focus sessionFilter
+        "$DRIVER" key left
+        "$DRIVER" key right
+        check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_running"
+        "$APP/Contents/Helpers/rota" stop keyboard-running >/dev/null
+        for _ in {1..40}; do
+            [[ "$(session_value keyboard-running cancelled)" == True* ]] && break
+            sleep 0.2
+        done
+        check wait_value sessionFilter Running
+        check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_running"
+        "$DRIVER" choose sessionFilter 'All Sessions'
+        "$DRIVER" key command-zero
+        quit_rota
+    done
+    pass 'session and filter keyboard navigation in both appearances and zoom levels'
+    exit 0
+fi
+
 if [[ "$LIVE" == --paint-only ]]; then
     swiftc -O scripts/check-transcript-paint.swift -o "$WORK/check-paint"
     for appearance in light dark; do
@@ -563,6 +681,36 @@ if [[ "$LIVE" == --paint-only ]]; then
         pass "transcript painted before AX or scroll input in $appearance"
         capture 'Transcript paint check' "$appearance-transcript-layout"
         quit_rota
+    done
+    exit 0
+fi
+
+if [[ "$LIVE" == --switch-only ]]; then
+    swiftc -O scripts/check-transcript-paint.swift -o "$WORK/check-paint"
+    for appearance in light dark; do
+        for geometry in '1.1 1470 834' '1.0 820 600'; do
+            read -r scale width height <<< "$geometry"
+            python3 scripts/fixtures/transcript-switch.py "$SUPPORT" "$WORK/project"
+            defaults write "$DOMAIN" interfaceScale -float "$scale"
+            defaults write "$DOMAIN" 'NSWindow Frame RotaMain' -string "0 89 $width $height 0 0 1470 956 "
+            launch "$appearance"
+            app_pid="$(pgrep -f "^$APP/Contents/MacOS/Rota$")"
+            # Restrict AX to the sidebar. Neither transcript may be queried,
+            # resized or scrolled before the destination's painted check.
+            for ((cycle = 0; cycle < 12; cycle++)); do
+                for session in beta gamma alpha; do
+                    open "$APP"
+                    "$DRIVER" select-in routineSidebar "Paint marker $session"
+                    "$WORK/check-paint" "$app_pid" \
+                        "$OUT/$appearance-switch-$scale-$cycle-$session.png" \
+                        "Paint marker $session" "Paint $session" "Synthetic paragraph text"
+                done
+            done
+            pass "36 session switches painted at scale $scale in $appearance"
+            capture 'Paint alpha' "$appearance-switch-layout-$scale"
+            quit_rota
+            cp "$LOGS/Diagnostics/current.jsonl" "$OUT/$appearance-switch-performance-$scale.jsonl"
+        done
     done
     exit 0
 fi

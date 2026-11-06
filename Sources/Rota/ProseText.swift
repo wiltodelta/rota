@@ -23,6 +23,11 @@ struct ProseText: NSViewRepresentable {
 final class ProseTextView: NSTextView {
     /// Unbounded, but finite: a container of `greatestFiniteMagnitude` lays out one line.
     private static let unbounded: CGFloat = 1e7
+    private let measurementLayout = NSLayoutManager()
+    private let measurementContainer = NSTextContainer(size: .zero)
+    // SwiftUI revisits ideal and constrained widths; retain only these two results.
+    private var naturalMeasurement: CGSize?
+    private var proposedMeasurement: (width: CGFloat, size: CGSize)?
 
     static func make() -> ProseTextView {
         let view = ProseTextView(usingTextLayoutManager: false)
@@ -33,6 +38,12 @@ final class ProseTextView: NSTextView {
         view.textContainerInset = .zero
         view.textContainer?.lineFragmentPadding = 0
         view.textContainer?.widthTracksTextView = false
+        view.measurementContainer.lineFragmentPadding = 0
+        view.measurementLayout.addTextContainer(view.measurementContainer)
+        view.textStorage?.addLayoutManager(view.measurementLayout)
+        NotificationCenter.default.addObserver(view, selector: #selector(invalidateMeasurements),
+                                               name: NSTextStorage.didProcessEditingNotification,
+                                               object: view.textStorage)
         // SwiftUI sizes the view; growing itself would set a zero-width frame mid-measurement.
         view.isVerticallyResizable = false
         view.isHorizontallyResizable = false
@@ -40,22 +51,38 @@ final class ProseTextView: NSTextView {
         return view
     }
 
-    // Width tracking, and any resize to the current width, which layout itself
-    // issues, would reset a measurement to the frame mid-layout.
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    @objc private func invalidateMeasurements() {
+        naturalMeasurement = nil
+        proposedMeasurement = nil
+    }
+
+    // Only the actual frame controls displayed wrapping. SwiftUI can probe
+    // other widths without assigning a new frame to the text view.
     override func setFrameSize(_ size: NSSize) {
-        let resized = size.width != frame.width
         super.setFrameSize(size)
-        if resized { textContainer?.size = NSSize(width: size.width, height: Self.unbounded) }
+        let containerSize = NSSize(width: size.width, height: Self.unbounded)
+        if textContainer?.size != containerSize { textContainer?.size = containerSize }
     }
 
     /// The laid-out text at `width`, or at its natural width when SwiftUI asks for the ideal size.
     func fittingSize(width: CGFloat?) -> CGSize {
-        guard let container = textContainer, let layout = layoutManager else { return .zero }
-        let bounded = width.flatMap { $0.isFinite ? max($0, 1) : nil }
+        // A zero-width minimum-size probe has no visible lines to lay out.
+        if let width, width <= 0 { return .zero }
+        let bounded = width.flatMap { $0.isFinite ? $0 : nil }
+        if let bounded {
+            if let cached = proposedMeasurement, cached.width == bounded { return cached.size }
+        } else if let cached = naturalMeasurement { return cached }
+        // Measurement must not change the layout manager used for drawing and selection.
+        let container = measurementContainer
+        let layout = measurementLayout
         container.size = NSSize(width: bounded ?? Self.unbounded, height: Self.unbounded)
         layout.ensureLayout(for: container)
         let used = layout.usedRect(for: container)
-        return CGSize(width: bounded ?? ceil(used.width), height: ceil(used.height))
+        let size = CGSize(width: bounded ?? ceil(used.width), height: ceil(used.height))
+        if let bounded { proposedMeasurement = (bounded, size) } else { naturalMeasurement = size }
+        return size
     }
 }
 

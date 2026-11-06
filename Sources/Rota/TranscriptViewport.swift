@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// SwiftUI's lazy estimates can move a message even while its ID stays selected.
+/// Changes in text and image layout can move a message while its ID stays selected.
 /// These invisible markers restore the actual pixel offset after a transcript update.
 @MainActor
 final class TranscriptViewport: NSObject {
@@ -24,7 +24,7 @@ final class TranscriptViewport: NSObject {
 
     deinit { NotificationCenter.default.removeObserver(self) }
 
-    /// Keep an explicit jump at the real end while lazy rows replace their height estimates.
+    /// Keep an explicit jump at the real end while message heights settle.
     func followEnd() {
         cancel()
         isFollowingEnd = true

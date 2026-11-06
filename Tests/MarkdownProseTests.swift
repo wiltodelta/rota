@@ -61,6 +61,47 @@ final class MarkdownProseTests: XCTestCase {
         XCTAssertEqual(title?.paragraphSpacingBefore, 0)
     }
 
+    func testMeasurementKeepsDisplayedWrappingAtTheFrameWidth() throws {
+        let view = ProseTextView.make()
+        view.textStorage?.setAttributedString(MarkdownProse.inline(String(repeating: "word ", count: 80),
+                                                                   text: settings, font: settings.appKitBody))
+        view.setFrameSize(NSSize(width: 200, height: 500))
+        let container = try XCTUnwrap(view.textContainer)
+        let layout = try XCTUnwrap(view.layoutManager)
+        layout.ensureLayout(for: container)
+        let displayedHeight = layout.usedRect(for: container).height
+
+        _ = view.fittingSize(width: 2000)
+        _ = view.fittingSize(width: nil)
+        // SwiftUI can keep the same frame after probing other widths.
+        view.setFrameSize(view.frame.size)
+        layout.ensureLayout(for: container)
+        XCTAssertEqual(container.size.width, 200)
+        XCTAssertEqual(layout.usedRect(for: container).height, displayedHeight, accuracy: 0.01)
+        XCTAssertEqual(view.fittingSize(width: 200).height, ceil(displayedHeight))
+    }
+
+    func testZeroWidthProposalNeedsNoTextLayout() {
+        let view = ProseTextView.make()
+        view.textStorage?.setAttributedString(MarkdownProse.inline(String(repeating: "word ", count: 80),
+                                                                   text: settings, font: settings.appKitBody))
+        XCTAssertEqual(view.fittingSize(width: 0), .zero)
+    }
+
+    func testMeasurementTracksTextStorageEditsAtTheSameWidth() {
+        let view = ProseTextView.make()
+        view.textStorage?.setAttributedString(MarkdownProse.inline("Short.", text: settings,
+                                                                   font: settings.appKitBody))
+        let short = view.fittingSize(width: 200)
+        view.textStorage?.setAttributedString(MarkdownProse.inline(String(repeating: "word ", count: 80),
+                                                                   text: settings, font: settings.appKitBody))
+        let long = view.fittingSize(width: 200)
+        XCTAssertGreaterThan(long.height, short.height * 3)
+        view.textStorage?.addAttribute(.font, value: NSFont.systemFont(ofSize: 28),
+                                      range: NSRange(location: 0, length: view.string.utf16.count))
+        XCTAssertGreaterThan(view.fittingSize(width: 200).height, long.height)
+    }
+
     func testTextViewHeightFollowsWidth() {
         let view = ProseTextView.make()
         view.textStorage?.setAttributedString(MarkdownProse.inline(String(repeating: "word ", count: 80),
