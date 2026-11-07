@@ -242,7 +242,8 @@
   session or change the filter. This keeps the chat from disappearing while you read.
 - With the session list focused, Up and Down select sessions or routines, skipping day headings.
   Selecting a session keeps keyboard focus in the list. Shift-Tab focuses the session filter;
-  its arrow keys change filters, and Tab returns to the list. Inside the message field,
+  its arrow keys change filters, and Tab returns to the list. Choosing a menu item also
+  returns focus to the list. Inside the message field,
   arrows move the text cursor or selection as usual.
 - Settings… (Command-,), or Settings at the foot of the sidebar, opens
   Settings inside the main window: the sidebar lists General, Chat and Agents,

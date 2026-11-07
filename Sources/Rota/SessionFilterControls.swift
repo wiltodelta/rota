@@ -6,12 +6,16 @@ struct SessionFilterMenu: View {
     @Environment(AppModel.self) private var model
 
     let filter: SessionFilter
+    let onSelection: () -> Void
 
     var body: some View {
         Menu {
             Picker("Session Filter", selection: Binding(
                 get: { filter },
-                set: { model.selectSessionFilter($0) }
+                set: {
+                    model.selectSessionFilter($0)
+                    onSelection()
+                }
             )) {
                 ForEach(SessionFilter.allCases) { filter in Text(filter.title).tag(filter) }
             }

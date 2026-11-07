@@ -549,6 +549,10 @@ check_settings() {
 }
 
 if [[ "$LIVE" == --keyboard-only ]]; then
+    focus_session_filter() {
+        "$DRIVER" focus routineSidebar
+        "$DRIVER" key shift-tab
+    }
     for appearance in light dark; do
         python3 scripts/fixtures/keyboard-navigation.py "$SUPPORT" "$WORK/project"
         read -r keyboard_alpha keyboard_beta keyboard_gamma keyboard_delta keyboard_epsilon keyboard_oldest < <(
@@ -566,6 +570,13 @@ PYTHON
                 for _ in 1 2 3; do "$DRIVER" key command-plus; done
             fi
             "$DRIVER" choose sessionFilter 'All Sessions'
+            "$DRIVER" choose sessionFilter Running
+            capture Rota "$appearance-filter-menu-empty-$zoom"
+            "$DRIVER" key down
+            check wait_value sessionFilter Running
+            "$DRIVER" choose sessionFilter 'All Sessions'
+            "$DRIVER" key down
+            check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_beta"
             "$DRIVER" select-in routineSidebar "sidebarPreview-$keyboard_alpha"
             "$DRIVER" set composer $'First line\nLast Z'
             "$DRIVER" focus composer
@@ -605,7 +616,13 @@ PYTHON
             "$DRIVER" press clearSessionFilter
             check wait_value sessionFilter 'All Sessions'
             "$DRIVER" choose sessionFilter 'Needs Attention'
-            "$DRIVER" focus sessionFilter
+            focus_session_filter
+            "$DRIVER" press sessionFilter
+            "$DRIVER" press 'Needs Attention'
+            "$DRIVER" key down
+            check wait_value sessionFilter 'Needs Attention'
+            capture 'Keyboard conversations' "$appearance-filter-menu-repeat-$zoom"
+            focus_session_filter
             "$DRIVER" key down
             check wait_value sessionFilter Unread
             if [[ "$zoom" == normal ]]; then
@@ -622,7 +639,7 @@ PYTHON
                 "$DRIVER" press settingsBack
                 check wait_value sessionFilter Unread
                 check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_epsilon"
-                "$DRIVER" focus sessionFilter
+                focus_session_filter
             else
                 check wait_exists resetSessionFilter
             fi
@@ -662,7 +679,7 @@ PYTHON
         keyboard_running="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[0]["id"])' \
             "$SUPPORT/runs/keyboard-running.json")"
         check wait_exists "sidebarPreview-$keyboard_running"
-        "$DRIVER" focus sessionFilter
+        focus_session_filter
         "$DRIVER" key left
         "$DRIVER" key right
         check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_running"

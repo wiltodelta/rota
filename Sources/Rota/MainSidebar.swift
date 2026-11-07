@@ -9,6 +9,7 @@ struct MainSidebar: View {
     @AppStorage("routinesExpanded") private var routinesExpanded = true
     private enum Focus: Hashable { case list, filter }
     @FocusState private var focus: Focus?
+    @State private var filterFocusRequested = false
 
     let records: [RunRecord]
 
@@ -60,11 +61,9 @@ struct MainSidebar: View {
             .focused($focus, equals: .list)
             .onKeyPress(keys: [.tab, KeyEquivalent("\u{19}")]) { press in
                 guard press.modifiers.contains(.shift) || press.key.character == "\u{19}" else { return .ignored }
-                focus = .filter
+                proxy.scrollTo("sessionFilterHeader", anchor: .top)
+                filterFocusRequested = true
                 return .handled
-            }
-            .onChange(of: focus) { _, value in
-                if value == .filter { proxy.scrollTo("sessionFilterHeader", anchor: .top) }
             }
         }
     }
@@ -73,8 +72,13 @@ struct MainSidebar: View {
         HStack(spacing: metrics.points(8)) {
             SidebarHeader(title: "Sessions")
             Spacer(minLength: 0)
-            SessionFilterMenu(filter: model.sessionFilter)
+            SessionFilterMenu(filter: model.sessionFilter) { focus = .list }
                 .focused($focus, equals: .filter)
+                .task(id: filterFocusRequested) {
+                    guard filterFocusRequested else { return }
+                    focus = .filter
+                    filterFocusRequested = false
+                }
                 .onKeyPress(keys: [.tab]) { press in
                     guard !press.modifiers.contains(.shift) else { return .ignored }
                     focus = .list

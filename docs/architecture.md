@@ -640,7 +640,11 @@ The Sessions heading and native menu occupy a nonselectable list row, with a
 filled symbol when filtering. Native Section headers merge their children into
 one Accessibility element, hiding separate control actions and caching their
 values. A regular row preserves the menu and removable condition as separate
-controls. Shift-Tab scrolls the heading into view as the filter receives focus.
+controls. Shift-Tab scrolls the heading into view before moving focus to the filter.
+Committing a menu choice returns focus to the session list, removing the menu's
+focus ring. Direct arrow-key changes keep focus on the filter until Tab.
+The native list can partly clip a wrapped last row at larger interface scales;
+this also reproduces in the published 0.2.23 build, independently of menu focus.
 
 `SessionFilter` evaluates normalized record states for every harness, including
 both Claude modes and terminal continuations. All Sessions is the initial filter
