@@ -1,5 +1,30 @@
 # Проверка совместимости агентов
 
+## 2026-11-08, 15:45 America/Los_Angeles
+
+Еженедельный обзор относительно сохранённой базы. Получены все 13 публичных источников манифеста и четыре установленных каталога, недоступных источников нет (0 ошибок получения). Все 17 SHA-256 совпали с базой (`unchanged`), изменённых, новых и непросмотренных источников нет. Повторное чтение неизменных тел для продвижения базы не требуется; `accept --reviewed` выполнен с пустым списком после dry run. URL, хеши, версии CLI и отметки времени хранятся в [progress.json](skills/harness-compatibility-weekly/state/progress.json). Сырые каталоги, локальные пути и данные аккаунта не публикуются.
+
+### Источники и установленные контракты
+
+- `scripts/check-harnesses.sh`: exit 0, 25 тестов без ошибок и пропусков (`HarnessContractTests`, `HarnessLifecycleTests`, `InstalledHarnessContractTests`). Проверены флаги установленных CLI, схема запросов взаимодействия Codex, динамический вывод блоков и нативные каталоги моделей с effort, aliases и default без запуска модельных turns.
+- `uv run python -B -m unittest discover -s scripts/tests -p 'test_harness_review.py' -v`: 7 тестов без ошибок.
+- Недоступные источники: нет (0 ошибок получения).
+
+### Совместимость протоколов, моделей и вывода
+
+- Покрытие: Claude Code ([streaming output](https://code.claude.com/docs/en/agent-sdk/streaming-output), [model config](https://code.claude.com/docs/en/model-config), [changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md), `installed-claude`, режимы stream и interactive), Codex ([App Server](https://learn.chatgpt.com/docs/app-server), [модели](https://developers.openai.com/codex/models/), [releases](https://github.com/openai/codex/releases/latest), `installed-codex`), Grok Build и ACP v1 ([agent guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/15-agent-mode.md), [release notes](https://x.ai/changelog/build), [ACP v1 content](https://agentclientprotocol.com/protocol/v1/content), [ACP v1 tool calls](https://agentclientprotocol.com/protocol/v1/tool-calls), `installed-grok`), Antigravity ([headless](https://antigravity.google/docs/cli/headless/), [модели](https://antigravity.google/docs/models/), [changelog](https://github.com/google-antigravity/antigravity-cli/blob/main/CHANGELOG.md), `installed-antigravity`); у Shell нет вендорского каталога моделей и протокола контентных блоков.
+- Сверена матрица `docs/architecture.md`, `docs/harness-output-contract.md`, `docs/harness-compatibility.md`, `Sources/RotaCore/HarnessCapabilities.swift`, `Sources/RotaCore/ModelCatalog.swift` и адаптеры запуска; новых вендорских изменений относительно базы не обнаружено.
+
+### Предлагаемые изменения кода
+
+- Новых предложений по изменению кода, новых вопросов оператору и оснований для аварийного уведомления в этом обзоре нет.
+- [CODEX-MODEL-VERIFICATION](#codex-model-verification-сохранять-требование-проверки-доступа): статус `pending` в [attention.json](skills/harness-compatibility-weekly/state/attention.json). Уведомление `model/verification` ([Turn events](https://learn.chatgpt.com/docs/app-server#turn-events)) в `Sources/RotaCore/CodexDaemonRun.swift` (`handle`) по-прежнему попадает в `default: break`; оператор уже разрешил отдельную задачу на реализацию 2026-11-01, повторный вопрос не задаётся.
+- [AGY-FINISHED-REASON](#agy-finished-reason-учитывать-досрочное-завершение): статус `resolved` в [attention.json](skills/harness-compatibility-weekly/state/attention.json), реализовано в `AntigravityStream.outcome` и `AntigravityRun.exited`.
+
+### Проверки перед публикацией
+
+Проверки перед публикацией: `maintain.sh` exit 0, 519 тестов (45 явных пропусков live/opt-in проверок), lint, сборка и подпись без ошибок. После gate изменены только отчёт и `state/progress.json`; незакоммиченная правка в `README.md` сохранена без изменений. `simplify`: однопроходная проверка по четырём углам (Reuse, Simplification, Efficiency, Altitude) в текущем контексте без субагентов, замечаний нет. Поиск по README, `docs/`, исходникам, тестам и `CLAUDE.md` подтвердил актуальность ссылок; синхронизация документации не потребовала правок за пределами отчёта, `.claude/rules/` отсутствует. Аудит проектного `CLAUDE.md` (95/100) и `revise-claude-md`: дополнений нет.
+
 ## 2026-11-07, 21:06 America/Los_Angeles
 
 Еженедельный обзор относительно сохранённой базы. Получены все 13 публичных источников манифеста и четыре установленных каталога, недоступных источников нет. Пять источников остались неизменными (`claude-stream`, `grok-protocol`, `grok-release`, `acp-content`, `installed-codex`), у 12 изменились SHA-256 (`acp-tools`, `antigravity-models`, `antigravity-protocol`, `antigravity-release`, `claude-models`, `claude-release`, `codex-models`, `codex-protocol`, `codex-release`, `installed-antigravity`, `installed-claude`, `installed-grok`). Прочитаны релевантные разделы всех изменённых источников, оба фильтра прошли `accept` после dry run. URL, хеши, версии CLI и отметки времени хранятся в [progress.json](skills/harness-compatibility-weekly/state/progress.json). Сырые каталоги, локальные пути и данные аккаунта не публикуются.
