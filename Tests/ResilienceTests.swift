@@ -254,6 +254,16 @@ final class ResilienceTests: XCTestCase {
         XCTAssertEqual(launcher.specs.last?.resume, "thread-1")
     }
 
+    func testARunTheOperatorStoppedDoesNotContinue() throws {
+        let routine = add()
+        startRun(routine)
+        try log("[error] API Error: Connection error.\n[rota: [Request interrupted by user for tool use]]")
+        scheduler.systemWillSleep()
+        launcher.events.last?.finished(.failed(exitCode: 1))
+        scheduler.networkBecameAvailable()
+        XCTAssertEqual(launcher.specs.count, 1)
+    }
+
     func testARunThatFailedOnTheNetworkBeforeItsSessionRunsAgain() throws {
         let routine = add()
         scheduler.run(routine, trigger: .scheduled)
@@ -321,6 +331,12 @@ final class ResilienceTests: XCTestCase {
         XCTAssertTrue(NetworkFailure.matches("read tcp [2001:db8::1]:62411->[2001:db8::2]:443: "
             + "read: no route to host"))
         XCTAssertTrue(NetworkFailure.matches("dial tcp: lookup play.googleapis.com: no such host"))
+        XCTAssertTrue(NetworkFailure.matches("API Error: Your computer went to sleep mid-response. "
+            + "The response above may be incomplete."))
+        XCTAssertTrue(NetworkFailure.matches("API error (attempt 1): request failed: Post "
+            + "\"https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse\": EOF"))
+        XCTAssertTrue(NetworkFailure.matches("Eligibility check failed: Get "
+            + "\"https://www.googleapis.com/oauth2/v2/userinfo\": EOF"))
         XCTAssertFalse(NetworkFailure.matches("The test operation timed out"))
         XCTAssertFalse(NetworkFailure.matches("API error: quota exceeded"))
         XCTAssertFalse(NetworkFailure.matches("API error: unauthorized"))

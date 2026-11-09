@@ -47,7 +47,8 @@ extension Scheduler {
         case .interrupted, .failed: failed = true
         default: failed = false
         }
-        guard failed, sleptThrough || !isOnline() || endedOnNetworkError(record) else { return }
+        guard failed, !stoppedByOperator(record),
+              sleptThrough || !isOnline() || endedOnNetworkError(record) else { return }
         if resumable(record) {
             pendingResumes[record.id] = record.routineID
         } else if record.harness.isAgent, record.sessionID == nil,
@@ -55,6 +56,12 @@ extension Scheduler {
             pendingReruns[record.routineID] = record.trigger
         }
         resumePending()
+    }
+
+    /// The operator stopped this run; continuing it would overrule them.
+    func stoppedByOperator(_ record: RunRecord) -> Bool {
+        guard let path = record.logPath else { return false }
+        return Self.tail(of: path, characters: 4000).0.lowercased().contains("request interrupted by user")
     }
 
     func endedOnNetworkError(_ record: RunRecord) -> Bool {
@@ -213,7 +220,8 @@ public enum NetworkFailure {
         "network is unreachable", "network connection was lost", "could not resolve host", "stream disconnected",
         "error sending request", "fetch failed", "socket hang up", "appears to be offline", "connection reset",
         "dns error", "failed to connect", "unable to connect",
-        "read: operation timed out", "no route to host", "dial tcp: lookup"
+        "read: operation timed out", "no route to host", "dial tcp: lookup",
+        "went to sleep mid-response", "request failed: post", "eligibility check failed"
     ]
 
     public static func matches(_ text: String) -> Bool {
