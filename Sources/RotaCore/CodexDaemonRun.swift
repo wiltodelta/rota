@@ -359,6 +359,7 @@ extension CodexDaemonRun {
             journal.record(params["willRetry"] as? Bool == true ? .status : .error, message)
         case "turn/started": nativeTurnStarted(params)
         case "turn/plan/updated": updatePlan(params)
+        case "model/verification": modelVerification(params)
         case "turn/completed":
             turnCompleted(params["turn"] as? [String: Any])
         default:
@@ -367,9 +368,16 @@ extension CodexDaemonRun {
     }
 
     private func nativeTurnStarted(_ params: [String: Any]) {
-        guard let id = (params["turn"] as? [String: Any])?["id"] as? String else { return }
+        guard let id = (params["turn"] as? [String: Any])?["id"] as? String, !id.isEmpty else { return }
         turnID = id
         if let reason = stopReason { interrupt(as: reason) }
+    }
+
+    private func modelVerification(_ params: [String: Any]) {
+        guard let threadID, let turnID, !turnID.isEmpty, params["turnId"] as? String == turnID else { return }
+        for entry in CodexItemOutput.verifications(params["verifications"]) {
+            journal.record(entry.kind, entry.text, nativeID: "codex/\(threadID)/\(turnID)" + entry.suffix)
+        }
     }
 
     private func updatePlan(_ params: [String: Any]) {

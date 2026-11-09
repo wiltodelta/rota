@@ -44,6 +44,7 @@ final class InstalledHarnessContractTests: XCTestCase {
         XCTAssertFalse(checked.isEmpty, "The schema walk must reach interaction requests")
         print("Codex interaction methods checked: \(checked.sorted())")
         try checkDynamicOutputBlocksRemainVisible(schema: schema)
+        try checkModelVerificationSchemaRemainsVisible(schema: schema)
     }
 
     private func flags(_ harness: Harness, arguments: [String] = ["--help"], required: [String]) throws {
@@ -75,6 +76,29 @@ final class InstalledHarnessContractTests: XCTestCase {
                 XCTAssertEqual(entries.first.flatMap { ToolOutput.decode($0.text) }?.parts.first?.kind, .image)
             }
         }
+    }
+
+    private func checkModelVerificationSchemaRemainsVisible(schema: URL) throws {
+        let data = try Data(contentsOf: schema.appendingPathComponent("v2/ModelVerificationNotification.json"))
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let required = Set(try XCTUnwrap(root["required"] as? [String]))
+        XCTAssertTrue(Set(["threadId", "turnId", "verifications"]).isSubset(of: required))
+        let definitions = try XCTUnwrap(root["definitions"] as? [String: [String: Any]])
+        let variants = try XCTUnwrap(definitions["ModelVerification"]?["enum"] as? [String])
+        XCTAssertFalse(variants.isEmpty)
+        for variant in variants {
+            let entries = CodexItemOutput.verifications([variant])
+            XCTAssertEqual(entries.count, 1, "Installed verification variant disappeared: \(variant)")
+            XCTAssertEqual(entries.first?.kind, .status)
+            XCTAssertFalse(entries.first?.text.isEmpty ?? true, variant)
+            if variant == "trustedAccessForCyber" {
+                XCTAssertEqual(entries.first?.text,
+                               "Codex requires Trusted Access for Cyber verification for this turn.")
+            }
+        }
+        let unknown = CodexItemOutput.verifications(["futureVerification"])
+        XCTAssertEqual(unknown.map(\.text),
+                       ["Codex reported an unsupported model verification requirement (futureVerification)."])
     }
 
     func testClaudeFlags() throws {

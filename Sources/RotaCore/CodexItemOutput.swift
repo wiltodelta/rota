@@ -85,6 +85,22 @@ enum CodexItemOutput {
         return "Agent \(label): \(status)"
     }
 
+    static func verifications(_ values: Any?) -> [Entry] {
+        var seen: Set<String> = []
+        return (values as? [Any] ?? []).compactMap { raw -> Entry? in
+            guard let value = (raw as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !value.isEmpty, seen.insert(value).inserted else { return nil }
+            let text: String
+            switch value {
+            case "trustedAccessForCyber":
+                text = "Codex requires Trusted Access for Cyber verification for this turn."
+            default:
+                text = "Codex reported an unsupported model verification requirement (\(value))."
+            }
+            return .init(kind: .status, text: text, suffix: "/verification/" + value)
+        }
+    }
+
     private static func state(_ value: String) -> String {
         switch value {
         case "pendingInit", "running": return "working"

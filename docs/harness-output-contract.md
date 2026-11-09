@@ -36,6 +36,7 @@ personal session data never belongs in fixtures.
 | MCP resource links | Title/name, MIME type and URI as literal text | Shared block adapters; `ToolContentContractTests`. Display does not fetch or open a resource. |
 | Unsupported content blocks | Notice naming the type, with available display metadata/text | Shared block adapters and unknown Grok tool-content wrappers; `ToolContentContractTests`. Supported neighbors retain their order. |
 | Tool and run failures | Available failure text and native final outcome | Antigravity stream/archive (its `finished_reason` outranks status), Claude result/API errors, Codex error/turn notifications. `SessionContentTests`, `AntigravityTests`. A tool failure does not itself declare the whole run failed. |
+| Codex `model/verification` | Turn-scoped status note (`Trusted Access for Cyber` or unsupported requirement) | `CodexDaemonRun`, `CodexItemOutput`; `HarnessLifecycleTests`, `InstalledHarnessContractTests`. Does not invent a form, URL or final outcome. |
 | Questions and approvals | Native choices/forms, or an unreadable-dialog notice with Terminal access | `AgentQuestionTests`, `AntigravityQuestionTests`, `ClaudeDialogRecoveryTests`, `LiveQuestionTests`. Choices are never invented from prose. |
 | Child-agent activity | Brief parent-session status, separate from its answer | `SessionContentTests`. Antigravity's completed invocation confirms launch, not child completion. |
 | Shell stdout/stderr | Existing literal log | Shell has no model content-block protocol. `LiveHarnessTests` covers exit status and Stop. |
@@ -68,8 +69,9 @@ for decoding, journal replay, neighboring content and message boundaries.
 never enter either journal. Prove new assertions fail with the old decoder.
 
 `InstalledHarnessContractTests.testInstalledCodexInteractionSchemaMatchesAdapters`
-generates the installed schema once for interaction requests and every declared dynamic-output block
-through `CodexItemOutput`. Known text/image variants retain their presentation;
+generates the installed schema once for interaction requests, `model/verification`
+notifications and every declared dynamic-output block
+through `CodexItemOutput`. Known text/image and verification variants retain their presentation;
 others must produce a visible fallback. It does not claim support for every
 `ThreadItem` or old rollout format. Interaction-schema checks separately cover
 user-input requests.

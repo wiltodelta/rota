@@ -454,6 +454,9 @@ flowchart LR
   Other roots and child threads are ignored without replying to their requests;
   a root's collaboration events represent its child work. Foreign turns cannot
   write content, resolve questions, change plans or finish this run.
+  `model/verification` additionally requires the active `turnId` and records a
+  turn-deduplicated status note (`Trusted Access for Cyber` or an unsupported
+  requirement notice) without inventing a form or ending the turn.
   JSON-RPC transports and agent input pipes disable SIGPIPE per descriptor,
   so a peer exiting during a write produces an I/O error rather than killing Rota.
 - `Completed` means the harness ended normally, not that its business task succeeded.
@@ -1609,7 +1612,10 @@ Remaining provider boundaries:
   explicit refusal path; arbitrary elicitation/device verification is not a
   generic form protocol. Ambient tasks such as Monitor do not keep a run open.
 - Codex child completion has not been verified to wake a root turn. Rota follows
-  root turn completion and filters events belonging to other threads.
+  root turn completion and filters events belonging to other threads. Codex's
+  `model/verification` notification is a non-blocking turn diagnostic rather than
+  an interactive form; Claude (stream and interactive), Grok Build, Antigravity
+  and Shell have no equivalent method and keep their own error/question contracts.
 - Grok model catalogs come from ACP initialization metadata, with per-model
   effort lists. Launch checks the returned model and effort configuration.
   Retry status parsing is defensive; a live retry payload has not been induced

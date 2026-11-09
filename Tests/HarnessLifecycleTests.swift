@@ -36,7 +36,8 @@ final class HarnessLifecycleTests: XCTestCase {
                               log: log)
         return (spec, RunJournal(output: try FileHandle(forWritingTo: log),
                                 events: RunEvents(session: session, finished: finished,
-                                                  reconciliationRequired: reconciliation)))
+                                                  reconciliationRequired: reconciliation),
+                                transcript: try TranscriptJournal(log: log, resuming: false, logSize: 0)))
     }
 
     func testCodexFailedStartReplyReservesTheKnownNativeThread() throws {
@@ -150,5 +151,94 @@ final class HarnessLifecycleTests: XCTestCase {
             """#.utf8))
         XCTAssertEqual(output.first?.kind, .output)
         XCTAssertEqual(output.first?.text, "tool output")
+    }
+
+    func testCodexModelVerificationRecordsTurnScopedDiagnosticAndPreservesLifecycle() throws {
+        let ended = expectation(description: "completed after verification and error")
+        let (spec, journal) = try fixture(.codexDaemon, finished: {
+            XCTAssertEqual($0, .succeeded)
+            ended.fulfill()
+        })
+        let runner = CodexDaemonRun(spec: spec, journal: journal, peer: JSONRPCPeer(transport: HarnessPeer()))
+        runner.threadStarted(.success(["thread": ["id": "owned-thread"]]))
+        runner.handle("model/verification", ["threadId": "owned-thread", "turnId": "owned-turn",
+                                             "verifications": ["trustedAccessForCyber"]])
+        runner.handle("turn/started", ["threadId": "owned-thread", "turn": ["id": "owned-turn"]])
+        for foreign in ["other-thread", "child-thread"] {
+            runner.handle("model/verification", ["threadId": foreign, "turnId": "owned-turn",
+                                                 "verifications": ["trustedAccessForCyber"]])
+        }
+        for stale in ["stale-turn", ""] {
+            runner.handle("model/verification", ["threadId": "owned-thread", "turnId": stale,
+                                                 "verifications": ["trustedAccessForCyber"]])
+        }
+        runner.handle("model/verification", ["threadId": "owned-thread", "turnId": "owned-turn",
+                                             "verifications": ["trustedAccessForCyber", "trustedAccessForCyber"]])
+        runner.handle("model/verification", ["threadId": "owned-thread", "turnId": "owned-turn",
+                                             "verifications": ["trustedAccessForCyber", "  ", "futureCyberCheck"]])
+        runner.handle("error", ["threadId": "owned-thread", "willRetry": false,
+                                "error": ["message": "Verification check noted"]])
+        runner.handle("turn/completed", ["threadId": "owned-thread",
+                                         "turn": ["id": "owned-turn", "status": "completed"]])
+        wait(for: [ended], timeout: 2)
+
+        var reader = TranscriptReader()
+        let first = reader.read(log: spec.log, finished: true)
+        XCTAssertTrue(first.structured)
+        XCTAssertEqual(first.items.filter { $0.kind == .status && !$0.text.hasPrefix("Completed after ") }.map(\.text),
+                       ["Codex requires Trusted Access for Cyber verification for this turn.",
+                        "Codex reported an unsupported model verification requirement (futureCyberCheck)."])
+        XCTAssertEqual(first.items.filter { $0.kind == .error }.map(\.text), ["Verification check noted"])
+        try verifyRecoveredCodexModelVerification(spec: spec)
+    }
+
+    private func verifyRecoveredCodexModelVerification(spec: LaunchSpec) throws {
+        let resumedInterrupted = expectation(description: "recovered session still stops")
+        let size = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: spec.log.path)[.size] as? UInt64)
+        let handle = try FileHandle(forWritingTo: spec.log)
+        try handle.seekToEnd()
+        let resumedJournal = RunJournal(output: handle,
+                                        events: RunEvents(session: { _ in }, finished: {
+                                            XCTAssertEqual($0, .cancelled)
+                                            resumedInterrupted.fulfill()
+                                        }),
+                                        transcript: try TranscriptJournal(log: spec.log, resuming: true, logSize: size))
+        let transport = HarnessPeer()
+        var resumedSpec = LaunchSpec(executable: "/bin/false", prompt: "continue", arguments: [],
+                                     workingDirectory: spec.workingDirectory, environment: [:], mode: .codexDaemon,
+                                     timeout: nil, log: spec.log, resume: "owned-thread")
+        resumedSpec.adopt = true
+        let resumed = CodexDaemonRun(spec: resumedSpec, journal: resumedJournal,
+                                     peer: JSONRPCPeer(transport: transport))
+        transport.receive = { request in
+            switch request["method"] as? String {
+            case "initialized": break
+            case "thread/resume":
+                transport.reply(request, result: ["thread": ["id": "owned-thread",
+                                                             "status": ["type": "active"]]])
+            case "thread/turns/list":
+                resumed.handle("model/verification", ["threadId": "owned-thread", "turnId": "old-turn",
+                                                      "verifications": ["staleDuringRecovery"]])
+                resumed.handle("model/verification", ["threadId": "owned-thread", "turnId": "owned-turn",
+                                                      "verifications": ["trustedAccessForCyber"]])
+                transport.reply(request, result: ["data": [["id": "owned-turn", "status": "inProgress", "items": []]]])
+                resumed.stop()
+            case "turn/interrupt":
+                resumed.handle("turn/completed", ["threadId": "owned-thread",
+                                                  "turn": ["id": "owned-turn", "status": "interrupted"]])
+            default: break
+            }
+        }
+        resumed.initialized(.success([:]))
+        wait(for: [resumedInterrupted], timeout: 2)
+
+        var recoveredReader = TranscriptReader()
+        let recovered = recoveredReader.read(log: spec.log, finished: true)
+        XCTAssertEqual(recovered.items.filter {
+            $0.kind == .status && $0.text.contains("verification")
+        }.map(\.text), [
+            "Codex requires Trusted Access for Cyber verification for this turn.",
+            "Codex reported an unsupported model verification requirement (futureCyberCheck)."
+        ])
     }
 }
