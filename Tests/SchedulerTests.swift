@@ -122,6 +122,49 @@ final class SchedulerTests: XCTestCase {
         }
     }
 
+    func testSessionOrderFollowsContinuedActivityAcrossHarnesses() throws {
+        let modes: [(Harness, Bool)] = [(.claude, false), (.claude, true), (.codex, false),
+                                       (.grok, false), (.antigravity, false)]
+        scheduler.claudeSettings = { ClaudeUserSettings(trustedProjects: ["/p"]) }
+        for (harness, interactive) in modes {
+            var routine = addDailyRoutine(enabled: false)
+            routine.harness = harness
+            scheduler.save(routine)
+            scheduler.claudeInteractive = { interactive }
+            let base = launcher.events.count
+            scheduler.run(routine, trigger: .manual)
+            launcher.events[base].session("older-session")
+            let older = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
+            launcher.events[base].finished(.succeeded)
+            clock += 86_400
+            scheduler.run(routine, trigger: .manual)
+            let newer = try XCTUnwrap(scheduler.activeRecord(for: routine.id))
+            XCTAssertEqual(scheduler.allRecords().first?.id, newer.id)
+            clock += 60
+            XCTAssertTrue(scheduler.message("Continue yesterday's conversation", to: older))
+            XCTAssertEqual(scheduler.allRecords().first?.id, older.id)
+            XCTAssertEqual(scheduler.current(older.id)?.updatedAt, clock)
+            XCTAssertEqual(scheduler.current(older.id)?.startedAt, older.startedAt)
+            clock += 60
+            launcher.events[base + 1].finished(.succeeded)
+            XCTAssertEqual(scheduler.allRecords().first?.id, newer.id)
+            clock += 60
+            XCTAssertTrue(scheduler.message("Another follow-up", to: older))
+            XCTAssertEqual(scheduler.allRecords().first?.id, older.id)
+            clock += 60
+            launcher.events[base + 2].finished(.succeeded)
+            let beforeReading = scheduler.allRecords()
+            clock += 60
+            scheduler.markRead(try XCTUnwrap(scheduler.current(newer.id)))
+            XCTAssertEqual(scheduler.allRecords().map(\.id), beforeReading.map(\.id))
+            XCTAssertEqual(scheduler.current(newer.id)?.lastActivityAt,
+                           beforeReading.first { $0.id == newer.id }?.lastActivityAt)
+            let reloaded = Scheduler(location: StorageLocation(root: directory,
+                                    logs: directory.appendingPathComponent("logs")), launcher: launcher)
+            XCTAssertEqual(reloaded.allRecords().map(\.id), scheduler.allRecords().map(\.id))
+        }
+    }
+
     private func savedOlderSession(for routine: Routine, harness: Harness = .codex,
                                    logName: String = "older") -> RunRecord {
         var record = RunRecord(routineID: routine.id, trigger: .manual, harness: harness,

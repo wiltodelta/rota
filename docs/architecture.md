@@ -642,13 +642,16 @@ Shift-Tab reaches the filter from the list, and Tab returns to the list.
 The Sessions heading and native menu occupy a nonselectable list row, with a
 filled symbol when filtering. Native Section headers merge their children into
 one Accessibility element, hiding separate control actions and caching their
-values. A regular row preserves the menu and removable condition as separate
+values. Regular rows preserve the menu and removable conditions as separate
 controls. Shift-Tab scrolls the heading into view before moving focus to the filter.
 Committing a menu choice returns focus to the session list, removing the menu's
 focus ring. Direct arrow-key changes keep focus on the filter until Tab.
 The native list can partly clip a wrapped last row at larger interface scales;
 this also reproduces in the published 0.2.23 build, independently of menu focus.
 
+`SessionFilters` combines selected categories with OR, using an empty set for All Sessions.
+Menu checkmarks toggle categories independently; each sidebar token removes one category.
+Arrow keys retain single-category navigation.
 `SessionFilter` evaluates normalized record states for every harness, including
 both Claude modes and terminal continuations. All Sessions is the initial filter
 for each launch. Explicit filter changes preserve a matching selection, choose
@@ -658,7 +661,10 @@ automatically open and mark the remaining unread sessions. External destinations
 reset a filter that would otherwise hide the requested session; returning from
 Settings preserves the previous filter and pinned selection. Filter logic and
 navigation boundaries are covered by `SessionFilterTests`.
-`scripts/ui-check.sh --keyboard-only` exercises real arrow and Tab events, text
+`scripts/ui-check.sh --filters-only` checks combined categories, individual removal,
+menu deselection, All Sessions reset and arrow navigation in both appearances and zoom levels.
+Each appearance resets zoom before the enlarged pass.
+`scripts/ui-check.sh --keyboard-only` additionally exercises real arrow and Tab events, text
 selection in the composer, empty results, condition reset, unread retention,
 Settings restoration, long-history focus recovery, and a disposable Shell run's
 live state changes. It covers both appearances at
@@ -1113,7 +1119,14 @@ Layout rules learned while measuring the narrowest window (820 pt):
   followed by its routine name, time and status. Harness logos remain the primary
   row icons. The menu panel selects the latest actual session, skipping scheduled
   slots that never ran and falling back to the routine when none exists.
-  History stays grouped by day; date labels
+  Sessions sort by `RunRecord.lastActivityAt`, newest activity first, and group by that day.
+  `updatedAt` persists starts and continuations, sent messages, questions and answers,
+  attention requests and terminal turn transitions; completion uses `endedAt`. Reading
+  or dismissing attention does not advance activity. Old records fall back to their
+  completion or start. Equal activity dates use start time and UUID for a stable order.
+  The sidebar time and routine navigation use activity too; original start times remain
+  in session details and routine run history. Retention and scheduled-failure checks
+  keep launch order. Date labels
   are nonselectable accessibility headers, and only session rows select a chat.
   Collapsing routines leaves the current detail open. The sidebar and
   menu bar panel share `RoutineOrder.byNextRun`: enabled routines with a next

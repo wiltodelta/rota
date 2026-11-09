@@ -1,14 +1,14 @@
 import Foundation
 
 extension Scheduler {
-    /// Every routine's sessions, newest first. Skipped slots stay in each
+    /// Every routine's sessions, most recently active first. Skipped slots stay in each
     /// routine's own history: they have nothing to open.
     public func allRecords() -> [RunRecord] {
         _ = historyVersion
         _ = routines
         if let cachedSessions { return cachedSessions }
         let sessions = routines.flatMap { records(for: $0.id) }.filter { !$0.isSkip }
-            .sorted { $0.startedAt > $1.startedAt }
+            .sorted { $0.isMoreRecentlyActive(than: $1) }
         cachedSessions = sessions
         return sessions
     }

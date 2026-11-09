@@ -202,6 +202,7 @@ public final class Scheduler {
     func start(_ record: RunRecord, spec: LaunchSpec) -> Bool {
         guard active[record.id] == nil, !hasNativeConflict(record) else { return false }
         var record = record
+        record.updatedAt = now()
         record.launchMode = spec.mode
         record.executablePath = spec.executable
         record.cliVersion = nil
@@ -266,6 +267,8 @@ public final class Scheduler {
         guard canMessage(record) else { return false }
         if isActive(record) {
             guard let control = controls[record.id] else { return false }
+            var record = record
+            record.updatedAt = now()
             control.send(message)
             active[record.id] = record
             saveRecord(record)

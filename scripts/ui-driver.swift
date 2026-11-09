@@ -18,7 +18,7 @@
 //   bounds <id-or-title>        print x y width height in screen points
 //   exists <id-or-title>         exit 0 if an element with that identifier or title exists
 //   select <text> [n]            select the nth row (default first) containing that text
-//   choose <popup-id> <item>     pick an item from a pop-up button's menu
+//   choose <popup-id> <item> [value]  pick a menu item; optional resulting value for multiple selection
 //   window <title> <w> <h>       move a window to (100, 100) and resize it
 //   wid <title>                  print the window number of the window with that title
 //   focus <id>                   activate Rota and focus that element
@@ -247,7 +247,8 @@ case "selected-text":
 case "choose":
     // SwiftUI can redraw the form while its menu is open and drop the pick, so
     // read the value back and try again.
-    guard arguments.count == 3 else { fail("choose <popup-id> <item>") }
+    guard (3...4).contains(arguments.count) else { fail("choose <popup-id> <item> [value]") }
+    let expected = arguments.count == 4 ? arguments[3] : arguments[2]
     // A native popup's AXPress can open an inactive menu without selecting its
     // item. Make the development app active before entering menu tracking.
     app.activate()
@@ -261,7 +262,7 @@ case "choose":
     }
     for _ in 0..<3 {
         guard let popup = find({ matches($0, arguments[1]) }) else { fail("no element \(arguments[1])") }
-        if (attribute(popup, kAXValueAttribute) as String?) == arguments[2] { exit(0) }
+        if (attribute(popup, kAXValueAttribute) as String?) == expected { exit(0) }
         AXUIElementSetAttributeValue(popup, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         let opened = AXUIElementPerformAction(popup, kAXPressAction as CFString)
         guard opened == .success else { fail("popup press failed: \(opened.rawValue)") }
@@ -275,7 +276,7 @@ case "choose":
         Thread.sleep(forTimeInterval: 0.6)
     }
     guard let popup = find({ matches($0, arguments[1]) }),
-          (attribute(popup, kAXValueAttribute) as String?) == arguments[2] else { fail("could not choose \(arguments[2])") }
+          (attribute(popup, kAXValueAttribute) as String?) == expected else { fail("could not choose \(arguments[2])") }
 case "window":
     guard arguments.count == 4, let width = Double(arguments[2]), let height = Double(arguments[3]),
           let window = windows().first(where: { (attribute($0, kAXTitleAttribute) as String?) == arguments[1] })

@@ -66,6 +66,17 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     public var reportedEffort: String?
     public var startedAt: Date
     public var endedAt: Date?
+    /// Most recent conversation activity, independent of opening or reading the session.
+    public var updatedAt: Date?
+
+    public var lastActivityAt: Date { max(updatedAt ?? startedAt, endedAt ?? startedAt) }
+    /// Shared display order; UUID only breaks ties after both dates match.
+    public func isMoreRecentlyActive(than other: RunRecord) -> Bool {
+        if lastActivityAt != other.lastActivityAt { return lastActivityAt > other.lastActivityAt }
+        if startedAt != other.startedAt { return startedAt > other.startedAt }
+        return id.uuidString > other.id.uuidString
+    }
+
     public var outcome: RunOutcome
     public var logPath: String?
     /// The harness session, for harnesses whose runs can be reopened to chat.

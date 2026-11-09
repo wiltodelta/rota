@@ -8,13 +8,13 @@ enum SidebarItem: Hashable {
     case routine(String)
 
     static func latest(routineID: String, records: [RunRecord]) -> SidebarItem {
-        records.filter { !$0.isSkip }.max { $0.startedAt < $1.startedAt }
+        records.filter { !$0.isSkip }.max { $1.isMoreRecentlyActive(than: $0) }
             .map { .session($0.id) } ?? .routine(routineID)
     }
 }
 
 /// Routines stay above the growing session history, which is grouped by day
-/// with the newest sessions first.
+/// with the most recently active sessions first.
 struct MainWindow: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
@@ -262,13 +262,13 @@ struct DayGroup {
         var groups: [DayGroup] = []
         for record in records {
             let title: String
-            if calendar.isDate(record.startedAt, inSameDayAs: now) {
+            if calendar.isDate(record.lastActivityAt, inSameDayAs: now) {
                 title = "Today"
             } else if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
-                      calendar.isDate(record.startedAt, inSameDayAs: yesterday) {
+                      calendar.isDate(record.lastActivityAt, inSameDayAs: yesterday) {
                 title = "Yesterday"
             } else {
-                title = record.startedAt.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+                title = record.lastActivityAt.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
             }
             if groups.last?.title == title {
                 groups[groups.count - 1].records.append(record)

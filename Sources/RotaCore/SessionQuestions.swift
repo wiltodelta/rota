@@ -30,6 +30,7 @@ extension Scheduler {
                 guard isCurrent(), let self, var current = self.active[runID],
                       current.terminalState != state else { return }
                 if state == .working { self.runStarts[runID] = self.now() }
+                current.updatedAt = self.now()
                 current.terminalState = state
                 self.active[runID] = current
                 self.saveRecord(current)
@@ -120,6 +121,7 @@ extension Scheduler {
         questionDeliveries[runID]?.remove(id)
         questionReplies[runID]?[id] = nil
         guard var record = current(runID), record.questions?.contains(where: { $0.id == id }) == true else { return }
+        record.updatedAt = now()
         record.questions?.removeAll { $0.id == id }
         record.attention = record.nextQuestion?.title
         if isActive(record) { active[record.id] = record }

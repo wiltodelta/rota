@@ -10,6 +10,7 @@
 #   scripts/ui-check.sh --scroll-only     long transcript and question navigation only
 #   scripts/ui-check.sh --parallel-only   continue and stop independent sessions with synthetic Claude
 #   scripts/ui-check.sh --paint-only      first transcript paint without AX or scroll input
+#   scripts/ui-check.sh --filters-only    combined session categories and resets only
 #   scripts/ui-check.sh --keyboard-only   session/filter arrows, focus and live state changes
 #   scripts/ui-check.sh --switch-only     repeated session switches, paint checked before transcript AX
 #   scripts/ui-check.sh --questions-only  finished question and verification states only
@@ -548,11 +549,63 @@ check_settings() {
         && pass "showing the sidebar keeps the window width" || fail "showing the sidebar keeps the window width"
 }
 
+focus_session_filter() {
+    "$DRIVER" focus routineSidebar
+    "$DRIVER" key shift-tab
+}
+
+check_session_filter_union() {
+    "$DRIVER" choose sessionFilter 'All Sessions'
+    "$DRIVER" choose sessionFilter Failed
+    "$DRIVER" choose sessionFilter 'Needs Attention' 'Needs Attention, Failed'
+    check wait_value sessionFilter 'Needs Attention, Failed'
+    check "$DRIVER" exists "sidebarPreview-$keyboard_beta"
+    check "$DRIVER" exists "sidebarPreview-$keyboard_gamma"
+    if "$DRIVER" exists "sidebarPreview-$keyboard_alpha"; then fail 'combined filters hide other sessions'; fi
+    capture 'Keyboard conversations' "$appearance-combined-filters-$zoom"
+    "$DRIVER" press clearSessionFilter-failed
+    check wait_value sessionFilter 'Needs Attention'
+    if "$DRIVER" exists "sidebarPreview-$keyboard_gamma"; then fail 'removed category hides failed sessions'; fi
+    "$DRIVER" choose sessionFilter 'All Sessions'
+}
+
+if [[ "$LIVE" == --filters-only ]]; then
+    for appearance in light dark; do
+        python3 scripts/fixtures/keyboard-navigation.py "$SUPPORT" "$WORK/project"
+        read -r keyboard_alpha keyboard_beta keyboard_gamma < <(
+            python3 - "$SUPPORT/keyboard-ids.json" <<'PYTHON_IDS'
+import json
+import sys
+ids = json.load(open(sys.argv[1]))
+print(*(ids[name] for name in ("alpha", "beta", "gamma")))
+PYTHON_IDS
+        )
+        launch "$appearance"
+        "$DRIVER" window 'Keyboard conversations' 820 600
+        "$DRIVER" key command-zero
+        for zoom in normal zoom; do
+            if [[ "$zoom" == zoom ]]; then
+                for _ in 1 2 3; do "$DRIVER" key command-plus; done
+            fi
+            check_session_filter_union
+            "$DRIVER" choose sessionFilter 'Needs Attention'
+            focus_session_filter
+            "$DRIVER" choose sessionFilter 'Needs Attention' 'All Sessions'
+            check wait_value sessionFilter 'All Sessions'
+            focus_session_filter
+            "$DRIVER" key right
+            check wait_value sessionFilter Running
+            "$DRIVER" key down
+            check wait_value sessionFilter 'Needs Attention'
+            "$DRIVER" choose sessionFilter 'All Sessions'
+        done
+        quit_rota
+    done
+    pass 'combined session filters, individual removal, reset and keyboard navigation in both appearances'
+    exit 0
+fi
+
 if [[ "$LIVE" == --keyboard-only ]]; then
-    focus_session_filter() {
-        "$DRIVER" focus routineSidebar
-        "$DRIVER" key shift-tab
-    }
     for appearance in light dark; do
         python3 scripts/fixtures/keyboard-navigation.py "$SUPPORT" "$WORK/project"
         read -r keyboard_alpha keyboard_beta keyboard_gamma keyboard_delta keyboard_epsilon keyboard_oldest < <(
@@ -565,11 +618,12 @@ PYTHON
         )
         launch "$appearance"
         "$DRIVER" window 'Keyboard conversations' 820 600
+        "$DRIVER" key command-zero
         for zoom in normal zoom; do
             if [[ "$zoom" == zoom ]]; then
                 for _ in 1 2 3; do "$DRIVER" key command-plus; done
             fi
-            "$DRIVER" choose sessionFilter 'All Sessions'
+            check_session_filter_union
             "$DRIVER" choose sessionFilter Running
             capture Rota "$appearance-filter-menu-empty-$zoom"
             "$DRIVER" key down
@@ -612,15 +666,14 @@ PYTHON
             check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_beta"
             if "$DRIVER" exists "sidebarPreview-$keyboard_alpha"; then fail 'filter hides nonmatching sessions'; fi
             capture 'Keyboard conversations' "$appearance-keyboard-attention-$zoom"
-            check wait_exists clearSessionFilter
-            "$DRIVER" press clearSessionFilter
+            check wait_exists clearSessionFilter-needsAttention
+            "$DRIVER" press clearSessionFilter-needsAttention
             check wait_value sessionFilter 'All Sessions'
             "$DRIVER" choose sessionFilter 'Needs Attention'
             focus_session_filter
-            "$DRIVER" press sessionFilter
-            "$DRIVER" press 'Needs Attention'
-            "$DRIVER" key down
-            check wait_value sessionFilter 'Needs Attention'
+            "$DRIVER" choose sessionFilter 'Needs Attention' 'All Sessions'
+            check wait_value sessionFilter 'All Sessions'
+            "$DRIVER" choose sessionFilter 'Needs Attention'
             capture 'Keyboard conversations' "$appearance-filter-menu-repeat-$zoom"
             focus_session_filter
             "$DRIVER" key down
@@ -799,6 +852,12 @@ PYTHON
         "$DRIVER" press send
         wait_text 'Received: Older conversation follow-up'
         wait_running_count 2
+        old_y="$("$DRIVER" bounds "sidebarPreview-$old_session" | awk '{print $2}')"
+        new_y="$("$DRIVER" bounds "sidebarPreview-$newer_session" | awk '{print $2}')"
+        python3 - "$old_y" "$new_y" <<'PYORDER' || fail 'continued session must lead the sidebar'
+import sys
+assert float(sys.argv[1]) < float(sys.argv[2]), sys.argv[1:]
+PYORDER
         capture 'Transcript paint check' "$appearance-parallel-sessions"
         "$DRIVER" press composerStop
         wait_running_count 1

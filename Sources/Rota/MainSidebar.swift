@@ -33,8 +33,8 @@ struct MainSidebar: View {
                     sessionHeader
                         .selectionDisabled()
                         .id("sessionFilterHeader")
-                    if model.sessionFilter != .all {
-                        SessionFilterToken(filter: model.sessionFilter).selectionDisabled()
+                    ForEach(model.sessionFilter.selected) { filter in
+                        SessionFilterToken(filter: filter).selectionDisabled()
                     }
                     if visible.isEmpty {
                         Text("No matching sessions")
@@ -202,7 +202,7 @@ private struct SessionRow: View {
     }
 
     private var details: String {
-        var parts = [record.harness.title, record.startedAt.formatted(date: .omitted, time: .shortened),
+        var parts = [record.harness.title, record.lastActivityAt.formatted(date: .omitted, time: .shortened),
                      record.statusTitle]
         if record.trigger == .catchUp { parts.insert("catch-up", at: 1) }
         return parts.joined(separator: " \u{00B7} ")
@@ -223,9 +223,14 @@ extension AppModel {
     }
 
     func selectSessionFilter(_ filter: SessionFilter) {
-        sessionFilter = filter
-        selection = filter.destination(from: selection, records: scheduler.allRecords())
+        sessionFilter = SessionFilters(filter)
+        selection = sessionFilter.destination(from: selection, records: scheduler.allRecords())
     }
+    func toggleSessionFilter(_ filter: SessionFilter) {
+        sessionFilter = sessionFilter.toggling(filter)
+        selection = sessionFilter.destination(from: selection, records: scheduler.allRecords())
+    }
+
     /// A routine's latest session, or the routine itself before its first run.
     func latest(of routineID: String) -> SidebarItem {
         SidebarItem.latest(routineID: routineID, records: scheduler.records(for: routineID))

@@ -11,7 +11,9 @@
   as you type.
 - **Sessions are the main view.** The collapsible Routines section stays at the top of the sidebar
   and remembers whether you left it expanded. Below it, the Sessions section lists every routine's sessions,
-  newest first, by day. A session reads as a chat laid out like
+  most recently active first, grouped by the day of the latest activity. Continuing an older
+  conversation brings it to the top; opening or reading it does not change its position.
+  A session reads as a chat laid out like
   super.engineering's: your prompt and messages in bubbles, agent messages
   under the agent's own logo and model, basic tool activity, optional plans,
   and one completion line with the time, result, and duration. New sessions keep messages and
@@ -235,14 +237,16 @@
   launches, so the divider returns to where you left it.
 - The filter button beside **Sessions** offers **All Sessions**, **Running**, **Needs Attention**,
   **Unread**, **Failed**, and **Completed**. It filters sessions while keeping routines
-  available. An active filter appears below the section heading; press its × to show all sessions.
+  available. Select several categories to show sessions matching any of them. Each selected
+  category appears below the section heading; press its × to remove just that category.
+  Choose All Sessions, or remove the last category, to show all sessions.
   Needs Attention includes questions, approvals, explicit attention requests,
   and sessions waiting in Terminal. Completed shows successful sessions without a pending request.
   An open session stays visible if it becomes read or finishes, until you select another
   session or change the filter. This keeps the chat from disappearing while you read.
 - With the session list focused, Up and Down select sessions or routines, skipping day headings.
   Selecting a session keeps keyboard focus in the list. Shift-Tab focuses the session filter;
-  its arrow keys change filters, and Tab returns to the list. Choosing a menu item also
+  its arrow keys choose a single category, and Tab returns to the list. Choosing a menu item also
   returns focus to the list. Inside the message field,
   arrows move the text cursor or selection as usual.
 - Settings… (Command-,), or Settings at the foot of the sidebar, opens

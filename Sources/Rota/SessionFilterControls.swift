@@ -5,21 +5,20 @@ struct SessionFilterMenu: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
 
-    let filter: SessionFilter
+    let filter: SessionFilters
     let onSelection: () -> Void
 
     var body: some View {
         Menu {
-            Picker("Session Filter", selection: Binding(
-                get: { filter },
-                set: {
-                    model.selectSessionFilter($0)
-                    onSelection()
-                }
-            )) {
-                ForEach(SessionFilter.allCases) { filter in Text(filter.title).tag(filter) }
+            ForEach(SessionFilter.allCases) { category in
+                Toggle(category.title, isOn: Binding(
+                    get: { filter.contains(category) },
+                    set: { _ in
+                        model.toggleSessionFilter(category)
+                        onSelection()
+                    }
+                ))
             }
-            .pickerStyle(.inline)
         } label: {
             Image(systemName: filter == .all
                   ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
@@ -34,16 +33,16 @@ struct SessionFilterMenu: View {
         .focusable(interactions: .edit)
         .onMoveCommand { direction in
             let next = filter.moved(by: direction == .up || direction == .left ? -1 : 1)
-            if next != filter { model.selectSessionFilter(next) }
+            if filter != SessionFilters(next) { model.selectSessionFilter(next) }
         }
         .accessibilityLabel("Filter Sessions")
         .accessibilityValue(filter.title)
         .accessibilityIdentifier("sessionFilter")
-        .help("Filter sessions. Use arrow keys to change the filter, then Tab to browse sessions.")
+        .help("Select one or more categories. Arrow keys choose a single category; Tab browses sessions.")
     }
 }
 
-/// The active condition stays separate from the header so its reset action remains accessible.
+/// Each selected category has its own accessible removal action.
 struct SessionFilterToken: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
@@ -52,7 +51,7 @@ struct SessionFilterToken: View {
 
     var body: some View {
         Button {
-            model.selectSessionFilter(.all)
+            model.toggleSessionFilter(filter)
         } label: {
             HStack(spacing: metrics.points(8)) {
                 Text(filter.title).foregroundStyle(Color.primary)
@@ -65,9 +64,9 @@ struct SessionFilterToken: View {
             .background(Color.primary.opacity(0.055), in: Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Show All Sessions")
+        .accessibilityLabel("Remove \(filter.title) Filter")
         .accessibilityValue(filter.title)
-        .accessibilityIdentifier("clearSessionFilter")
-        .help("Show all sessions")
+        .accessibilityIdentifier("clearSessionFilter-\(filter.rawValue)")
+        .help("Remove this category")
     }
 }

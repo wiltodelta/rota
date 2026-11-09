@@ -74,7 +74,7 @@ final class AppModel {
     static let shared = AppModel()
 
     let scheduler: Scheduler
-    var sessionFilter: SessionFilter = .all
+    var sessionFilter: SessionFilters = .all
     var selection: SidebarItem? {
         didSet {
             guard selection != oldValue, selection != selectionBeforeSettings,

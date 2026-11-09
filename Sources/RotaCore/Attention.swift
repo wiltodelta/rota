@@ -60,6 +60,7 @@ extension Scheduler {
 
     func setAttention(_ text: String?, on record: RunRecord) -> RunRecord {
         var record = record
+        if text != nil { record.updatedAt = now() }
         record.attention = text
         if active[record.id] != nil { active[record.id] = record }
         saveRecord(record)
