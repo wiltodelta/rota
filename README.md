@@ -9,7 +9,8 @@ change them when another agent fits the job better.
 
 [Download Rota](https://github.com/wiltodelta/rota/releases/latest) ·
 [Get started](#get-started) · [User guide](docs/user-guide.md) ·
-[Website](https://wiltodelta.com/projects/rota/)
+[Website](https://wiltodelta.com/projects/rota/) ·
+by [Victor Kuznetsov](https://wiltodelta.com/)
 
 [![Build Rota App](https://github.com/wiltodelta/rota/actions/workflows/build.yml/badge.svg)](https://github.com/wiltodelta/rota/actions/workflows/build.yml)
 
