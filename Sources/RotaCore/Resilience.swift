@@ -172,7 +172,7 @@ extension Scheduler {
                 continue
             }
             probe(routine.harness) { [weak self] reachable in
-                guard let self, reachable else { self?.retryLater(); return }
+                guard let self, reachable, self.isOnline() else { self?.retryLater(); return }
                 guard self.pendingResumes.removeValue(forKey: recordID) != nil,
                       self.active[recordID] == nil,
                       var record = self.history.records(for: routineID).first(where: { $0.id == recordID }),
@@ -189,7 +189,7 @@ extension Scheduler {
                 continue
             }
             probe(routine.harness) { [weak self] reachable in
-                guard let self, reachable else { self?.retryLater(); return }
+                guard let self, reachable, self.isOnline() else { self?.retryLater(); return }
                 guard self.pendingReruns.removeValue(forKey: routineID) != nil,
                       !self.hasActiveSession(routineID), !self.hasSurvivingSession(routineID),
                       let routine = self.routine(routineID) else { return }

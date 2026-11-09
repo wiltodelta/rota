@@ -47,7 +47,7 @@ public final class Scheduler {
     @ObservationIgnored public var executable: (Harness) -> String = { $0.defaultExecutable() }
     /// What the user's `~/.claude.json` turns on for Claude runs; read at each run, as Claude would.
     @ObservationIgnored public var claudeSettings: () -> ClaudeUserSettings = { ClaudeUserSettings.read() }
-    /// Whether the Mac is online; while it is not, scheduled runs and resumes wait.
+    /// Whether the Mac is awake and online; while it is not, scheduled runs and resumes wait.
     @ObservationIgnored public var isOnline: () -> Bool = { true }
     /// Whether a screen session is still up; a seam so tests never run `screen`.
     @ObservationIgnored public var sessionAlive: (String) -> Bool = { ScreenRun.alive($0) }

@@ -516,8 +516,9 @@ flowchart LR
   Five failed scheduled runs in a row (`failuresBeforePause`; skips and manual
   runs do not count) turn the routine off and notify once.
 - `Resilience.swift`: the Mac cuts runs off, and Rota picks them up. `tick`
-  starts nothing while `isOnline` is false (`MacState` watches `NWPathMonitor`),
-  so a slot due on waking waits for the network. A run going when the Mac
+  starts nothing while `isOnline` is false (`MacState` watches `NWPathMonitor`
+  and `SleepState`), so a slot due on waking waits for the network, and one due
+  during a dark wake waits for a full wake. A run going when the Mac
   slept (`systemWillSleep`) that then fails or is interrupted, one that
   fails while offline or whose log ends on a network error (`NetworkFailure`),
   and every resumable agent run `closeOrphans` finds still open at launch (a shutdown, a

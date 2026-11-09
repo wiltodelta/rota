@@ -202,7 +202,8 @@
   routine's history, out of the sessions list. A run takes as long as it
   needs; a routine can set a time limit if it should not.
 - **Sleep, shutdown and lost Wi-Fi do not lose work.** A due slot waits for
-  the network rather than failing on a Mac that just woke. An agent run cut
+  the Mac to really wake and for the network, rather than starting in the
+  seconds a closed Mac wakes for upkeep or failing on one that just woke. An agent run cut
   off by sleep or a network error, or still open when the Mac shut down,
   simply continues in the same session once its agent's service answers again
   (twice at most per run); one that failed on the network before it started

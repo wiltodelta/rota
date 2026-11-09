@@ -264,6 +264,18 @@ final class ResilienceTests: XCTestCase {
         XCTAssertEqual(launcher.specs.count, 1)
     }
 
+    func testAContinueWaitsWhenTheMacSleepsDuringItsProbe() throws {
+        let routine = add()
+        startRun(routine)
+        try log("[error] API Error: Connection error.")
+        scheduler.probe = { [unowned self] _, done in
+            online = false
+            done(true)
+        }
+        launcher.events.last?.finished(.failed(exitCode: 1))
+        XCTAssertEqual(launcher.specs.count, 1)
+    }
+
     func testARunThatFailedOnTheNetworkBeforeItsSessionRunsAgain() throws {
         let routine = add()
         scheduler.run(routine, trigger: .scheduled)

@@ -4,8 +4,8 @@ import os
 import RotaCore
 
 /// What the Mac is doing that decides when routines can run: whether it is
-/// online, going to sleep, or shutting down. The scheduler waits for the
-/// network before a due slot or a cut-off session, and a shutdown quits Rota
+/// online, asleep, or shutting down. The scheduler waits for an awake Mac with
+/// a network before a due slot or a cut-off session, and a shutdown quits Rota
 /// without asking, leaving its open runs to continue on the next launch.
 @MainActor
 final class MacState {
@@ -15,9 +15,13 @@ final class MacState {
     private(set) var online: Bool?
     /// Set when macOS announces a shutdown, restart or logout.
     private(set) var poweringOff = false
+    private var sleep = SleepState()
 
     init(scheduler: Scheduler) {
-        scheduler.isOnline = { [weak self] in self?.online ?? true }
+        scheduler.isOnline = { [weak self] in
+            guard let self else { return true }
+            return (self.online ?? true) && !self.sleep.isAsleep()
+        }
         monitor.pathUpdateHandler = { [weak self] path in
             let satisfied = path.status == .satisfied
             DispatchQueue.main.async {
@@ -29,15 +33,17 @@ final class MacState {
         }
         monitor.start(queue: DispatchQueue(label: "com.wiltodelta.rota.network"))
         let center = NSWorkspace.shared.notificationCenter
-        center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
+        center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
-                Self.log.info("Mac going to sleep")
+                Self.log.notice("Mac going to sleep")
+                self?.sleep.willSleep()
                 scheduler.systemWillSleep()
             }
         }
         center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
-                Self.log.info("Mac woke")
+                Self.log.notice("Mac woke")
+                self?.sleep.didWake()
                 // The network often comes back a moment later; the monitor then runs what waits.
                 if self?.online != false { scheduler.networkBecameAvailable() }
             }
