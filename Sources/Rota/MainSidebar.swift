@@ -33,8 +33,13 @@ struct MainSidebar: View {
                     sessionHeader
                         .selectionDisabled()
                         .id("sessionFilterHeader")
-                    ForEach(model.sessionFilter.selected) { filter in
-                        SessionFilterToken(filter: filter).selectionDisabled()
+                    if !model.sessionFilter.selected.isEmpty {
+                        SessionFilterFlow(spacing: metrics.points(8)) {
+                            ForEach(model.sessionFilter.selected) { filter in
+                                SessionFilterToken(filter: filter)
+                            }
+                        }
+                        .selectionDisabled()
                     }
                     if visible.isEmpty {
                         Text("No matching sessions")

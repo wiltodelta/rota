@@ -171,7 +171,9 @@ Antigravity questionnaires use a durable message bridge. The installed CLI
 emits the questionnaire's stream step as `unknown`, without its arguments.
 `AntigravityQuestionArchive` incrementally reads completed native
 `PLANNER_RESPONSE.tool_calls` metadata from the same conversation's archive;
-`args.questions` contains a JSON-encoded array. It ignores prose and reasoning.
+`transcript_full.jsonl` preserves `args.questions` as an array; the summary
+`transcript.jsonl` JSON-encodes and can truncate it. The reader prefers the full
+archive and retains summary compatibility. It ignores prose and reasoning.
 Single and multiple selection, multiple questions, custom text and empty-option
 text fields become the shared Rota form. Stable conversation/step/call ids
 deduplicate native row revisions. Resume starts beyond the old archive;
@@ -187,7 +189,10 @@ conversation with a user message. A live test through the real Scheduler
 verified two forms, multiple selection and a new custom answer, which the
 agent repeated on the next turn. It also verified that answered native calls
 did not reappear. `AntigravityQuestionTests` covers the wire adapter, partial
-and duplicate records, continuation, corrupt sources and the runner-to-host seam.
+and duplicate records, truncated summaries, full-archive continuation, corrupt
+sources and the runner-to-host seam. `AntigravityQuestionRestoreTests` verifies
+that saved fallback cards recover their fields at startup without reopening
+answered questions, changing activity or launching the agent.
 
 The runner's `--dangerously-skip-permissions` execution policy remains in
 effect. Archived `ask_permission` and `ask_custom_permission` calls offer only

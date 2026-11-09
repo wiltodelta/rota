@@ -52,6 +52,10 @@ extension QuestionRequest {
 struct AntigravityQuestionArchive {
     let session: String
     let file: URL
+    private let fullFile: URL
+    private var fullOffset: UInt64 = 0
+    private var readingFull = false
+    private var skipThroughStep: Int?
     private var offset: UInt64 = 0
     private var pending = Data()
     private var seen = Set<String>()
@@ -81,14 +85,28 @@ struct AntigravityQuestionArchive {
         self.session = session
         file = home.appendingPathComponent(".gemini/antigravity-cli/brain")
             .appendingPathComponent(session).appendingPathComponent(".system_generated/logs/transcript.jsonl")
+        fullFile = file.deletingLastPathComponent().appendingPathComponent("transcript_full.jsonl")
         if skipExisting {
             offset = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? UInt64) ?? 0
+            fullOffset = (try? FileManager.default.attributesOfItem(atPath: fullFile.path)[.size] as? UInt64) ?? 0
+            if !FileManager.default.fileExists(atPath: fullFile.path), let data = try? Data(contentsOf: file) {
+                // A full archive created later must not replay the pre-continuation history.
+                skipThroughStep = data.split(separator: 10).compactMap { line in
+                    (try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any])?["step_index"] as? Int
+                }.max()
+            }
         }
     }
 
     mutating func read(final: Bool = false) throws -> [AgentQuestion] {
-        guard FileManager.default.fileExists(atPath: file.path) else { return [] }
-        let handle = try FileHandle(forReadingFrom: file)
+        if !readingFull, FileManager.default.fileExists(atPath: fullFile.path) {
+            readingFull = true
+            offset = fullOffset
+            pending.removeAll()
+        }
+        let source = readingFull ? fullFile : file
+        guard FileManager.default.fileExists(atPath: source.path) else { return [] }
+        let handle = try FileHandle(forReadingFrom: source)
         defer { try? handle.close() }
         let end = try handle.seekToEnd()
         guard end >= offset else { throw CocoaError(.fileReadCorruptFile) }
@@ -115,6 +133,7 @@ struct AntigravityQuestionArchive {
         guard let row = object as? [String: Any],
               ["DONE", "ERROR"].contains(row["status"] as? String ?? ""),
               let step = row["step_index"] as? Int else { return [] }
+        if let skipThroughStep, step <= skipThroughStep { return [] }
         if row["type"] as? String == "ERROR_MESSAGE"
             || (row["type"] as? String == "GENERIC" && row["status"] as? String == "ERROR") {
             let id = "antigravity/\(session)/\(step)/error"
@@ -132,6 +151,30 @@ struct AntigravityQuestionArchive {
                   let question = QuestionRequest.antigravity(tool, arguments: call["args"] as? [String: Any] ?? [:],
                                                             id: id), seen.insert(id).inserted else { return nil }
             return question
+        }
+    }
+}
+
+extension Scheduler {
+    /// Repairs saved fallback cards from native metadata without answering or continuing a session.
+    func restoreAntigravityQuestions(home: URL = FileManager.default.homeDirectoryForCurrentUser) {
+        let needsFields: (AgentQuestion) -> Bool = { $0.fields.isEmpty && $0.replyViaMessage == true }
+        for snapshot in allRecords() where snapshot.harness == .antigravity {
+            guard (active[snapshot.id] ?? snapshot).questions?.contains(where: needsFields) == true,
+                  var record = current(snapshot.id, routineID: snapshot.routineID), let questions = record.questions,
+                  let session = record.sessionID,
+                  var archive = AntigravityQuestionArchive(session: session, home: home),
+                  let native = try? archive.read() else { continue }
+            record.questions = questions.map { question in
+                guard needsFields(question),
+                      let replacement = native.first(where: { $0.id == question.id && !$0.fields.isEmpty })
+                else { return question }
+                if record.attention == question.title { record.attention = replacement.title }
+                return replacement
+            }
+            guard record.questions != questions else { continue }
+            if active[record.id] != nil { active[record.id] = record }
+            saveRecord(record)
         }
     }
 }

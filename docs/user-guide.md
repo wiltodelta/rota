@@ -239,7 +239,8 @@
 - The filter button beside **Sessions** offers **All Sessions**, **Running**, **Needs Attention**,
   **Unread**, **Failed**, and **Completed**. It filters sessions while keeping routines
   available. Select several categories to show sessions matching any of them. Each selected
-  category appears below the section heading; press its × to remove just that category.
+  category appears as a pill below the section heading. Pills fill each row before
+  wrapping to the next; press a pill's × to remove just that category.
   Choose All Sessions, or remove the last category, to show all sessions.
   Needs Attention includes questions, approvals, explicit attention requests,
   and sessions waiting in Terminal. Completed shows successful sessions without a pending request.

@@ -563,6 +563,11 @@ check_session_filter_union() {
     check "$DRIVER" exists "sidebarPreview-$keyboard_gamma"
     if "$DRIVER" exists "sidebarPreview-$keyboard_alpha"; then fail 'combined filters hide other sessions'; fi
     capture 'Keyboard conversations' "$appearance-combined-filters-$zoom"
+    "$DRIVER" choose sessionFilter Running 'Running, Needs Attention, Failed'
+    "$DRIVER" choose sessionFilter Unread 'Running, Needs Attention, Unread, Failed'
+    capture 'Keyboard conversations' "$appearance-all-filter-tokens-$zoom"
+    "$DRIVER" choose sessionFilter Running 'Needs Attention, Unread, Failed'
+    "$DRIVER" choose sessionFilter Unread 'Needs Attention, Failed'
     "$DRIVER" press clearSessionFilter-failed
     check wait_value sessionFilter 'Needs Attention'
     if "$DRIVER" exists "sidebarPreview-$keyboard_gamma"; then fail 'removed category hides failed sessions'; fi

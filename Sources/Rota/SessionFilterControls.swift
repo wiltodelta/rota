@@ -1,5 +1,40 @@
 import SwiftUI
 
+/// Packs tokens in reading order, wrapping only when the next token will not fit.
+struct SessionFilterFlow: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let frames = frames(width: proposal.width ?? .infinity, subviews: subviews)
+        return CGSize(width: proposal.width ?? frames.map(\.maxX).max() ?? 0,
+                      height: frames.map(\.maxY).max() ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for (subview, frame) in zip(subviews, frames(width: bounds.width, subviews: subviews)) {
+            subview.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                          anchor: .topLeading, proposal: ProposedViewSize(frame.size))
+        }
+    }
+
+    private func frames(width: CGFloat, subviews: Subviews) -> [CGRect] {
+        var origin = CGPoint.zero
+        var rowHeight: CGFloat = 0
+        return subviews.map { subview in
+            let size = subview.sizeThatFits(ProposedViewSize(width: width, height: nil))
+            if origin.x > 0, origin.x + size.width > width {
+                origin.x = 0
+                origin.y += rowHeight + spacing
+                rowHeight = 0
+            }
+            let frame = CGRect(origin: origin, size: size)
+            origin.x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+            return frame
+        }
+    }
+}
+
 /// A session-scoped menu; its filled symbol indicates that the history is filtered.
 struct SessionFilterMenu: View {
     @Environment(\.interfaceScale) private var metrics

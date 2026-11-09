@@ -71,6 +71,56 @@ final class AntigravityQuestionTests: XCTestCase {
         XCTAssertNil(AntigravityQuestionArchive(session: "../other", home: home))
     }
 
+    func testFullArchivePreservesQuestionsTruncatedInSummary() throws {
+        let home = try workspace()
+        defer { try? FileManager.default.removeItem(at: home) }
+        var archive = try XCTUnwrap(AntigravityQuestionArchive(session: session, home: home))
+        try FileManager.default.createDirectory(at: archive.file.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        let summary: [String: Any] = [
+            "type": "PLANNER_RESPONSE", "status": "DONE", "step_index": 1,
+            "tool_calls": [["name": "ask_question", "args": [
+                "questions": "[{\"question\":\"Cut\n<truncated 799 bytes>",
+            ]]],
+        ]
+        try (JSONSerialization.data(withJSONObject: summary) + Data([10])).write(to: archive.file)
+        let full = archive.file.deletingLastPathComponent().appendingPathComponent("transcript_full.jsonl")
+        var row = try XCTUnwrap(JSONSerialization.jsonObject(with: record().dropLast()) as? [String: Any])
+        var calls = try XCTUnwrap(row["tool_calls"] as? [[String: Any]])
+        let args = try XCTUnwrap(calls[0]["args"] as? [String: Any])
+        let encoded = try XCTUnwrap(args["questions"] as? String)
+        calls[0]["args"] = ["questions": try JSONSerialization.jsonObject(with: Data(encoded.utf8))]
+        row["tool_calls"] = calls
+        let bytes = try JSONSerialization.data(withJSONObject: row) + Data([10])
+        try bytes.write(to: full)
+        let questions = try archive.read(final: true)
+        XCTAssertEqual(questions.first?.fields.map(\.kind), [.choice, .multiple])
+        XCTAssertEqual(questions.first?.fields.dropFirst().first?.options.map(\.label), ["Apple", "Pear", "Plum"])
+
+        var continued = try XCTUnwrap(AntigravityQuestionArchive(session: session, home: home, skipExisting: true))
+        XCTAssertTrue(try continued.read().isEmpty)
+        let writer = try FileHandle(forWritingTo: full)
+        try writer.seekToEnd()
+        try writer.write(contentsOf: record(step: 4))
+        try writer.close()
+        XCTAssertEqual(try continued.read().map(\.id), ["antigravity/\(session)/4/0"])
+    }
+
+    func testFullArchiveAppearingLaterDoesNotReplaySummaryQuestions() throws {
+        let home = try workspace()
+        defer { try? FileManager.default.removeItem(at: home) }
+        var archive = try XCTUnwrap(AntigravityQuestionArchive(session: session, home: home))
+        try FileManager.default.createDirectory(at: archive.file.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try record().write(to: archive.file)
+        var continued = try XCTUnwrap(AntigravityQuestionArchive(session: session, home: home, skipExisting: true))
+        XCTAssertEqual(try archive.read().count, 1)
+        let full = archive.file.deletingLastPathComponent().appendingPathComponent("transcript_full.jsonl")
+        try (record() + record(step: 4)).write(to: full)
+        XCTAssertEqual(try archive.read().map(\.id), ["antigravity/\(session)/4/0"])
+        XCTAssertEqual(try continued.read().map(\.id), ["antigravity/\(session)/4/0"])
+    }
+
     func testUnknownFormsAndPermissionToolsCannotInventApproval() throws {
         for tool in ["ask_question", "ask_permission", "ask_custom_permission"] {
             let question = try XCTUnwrap(QuestionRequest.antigravity(tool, arguments: [:], id: tool))

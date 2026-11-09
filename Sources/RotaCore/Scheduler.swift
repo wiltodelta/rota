@@ -112,6 +112,7 @@ public final class Scheduler {
                 reconcileNative(record)
             }
         }
+        restoreAntigravityQuestions()
         historyVersion += 1
         tick()
         resumePending()
