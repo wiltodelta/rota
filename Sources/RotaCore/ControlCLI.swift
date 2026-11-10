@@ -7,7 +7,8 @@ public enum ControlCLI {
         public var options: [String: String] = [:]
         public var attachments: [String] = []
         public var flags: Set<String> = []
-        static let flagNames: Set<String> = ["json", "off", "no-time-limit", "default-model", "help", "needs-reply"]
+        static let flagNames: Set<String> = ["json", "off", "no-time-limit", "default-model", "help", "needs-reply",
+                                             "once", "repeat", "no-run-limit"]
 
         public init(_ raw: [String]) throws {
             var index = 0
@@ -31,13 +32,15 @@ public enum ControlCLI {
     }
 
     /// The routine fields `add` and `update` take, as the control API names them.
-    private static func routineFields(_ arguments: Arguments) -> [String: Any] {
+    private static func routineFields(_ arguments: Arguments) throws -> [String: Any] {
         var fields: [String: Any] = [:]
         let names = [
             "name": "name", "folder": "workingDirectory", "schedule": "schedule", "harness": "harness",
             "prompt": "prompt", "skill": "skill", "model": "model", "effort": "effort",
+            "at": "scheduledAt",
         ]
         for (option, field) in names { if let value = arguments.options[option] { fields[field] = value } }
+        fields.merge(try schedulingFields(arguments)) { $1 }
         if let limit = arguments.options["time-limit"] { fields["timeLimitMinutes"] = Int(limit) ?? limit }
         if arguments.flags.contains("no-time-limit") { fields["timeLimitMinutes"] = NSNull() }
         if arguments.flags.contains("default-model") {
@@ -45,6 +48,21 @@ public enum ControlCLI {
             fields["effort"] = NSNull()
         }
         if arguments.flags.contains("off") { fields["enabled"] = false }
+        return fields
+    }
+
+    private static func schedulingFields(_ arguments: Arguments) throws -> [String: Any] {
+        var fields: [String: Any] = [:]
+        if arguments.flags.contains("once"), arguments.flags.contains("repeat") {
+            throw ControlError("Choose --once or --repeat.")
+        }
+        if let runs = arguments.options["runs"] { fields["runLimit"] = Int(runs) ?? runs }
+        if arguments.options["runs"] != nil, arguments.flags.contains("no-run-limit") {
+            throw ControlError("Choose --runs or --no-run-limit.")
+        }
+        if arguments.flags.contains("no-run-limit") { fields["runLimit"] = NSNull() }
+        if arguments.flags.contains("once") { fields["repeats"] = false }
+        if arguments.flags.contains("repeat") { fields["repeats"] = true }
         return fields
     }
 
@@ -82,7 +100,7 @@ public enum ControlCLI {
     private static func commandFields(_ method: ControlMethod, _ arguments: Arguments) throws -> [String: Any] {
         var params: [String: Any] = [:]
         switch method {
-        case .routinesCreate, .routinesUpdate: params.merge(routineFields(arguments)) { $1 }
+        case .routinesCreate, .routinesUpdate: params.merge(try routineFields(arguments)) { $1 }
         case .routinesSetEnabled: params["enabled"] = arguments.positional.first == "on"
         case .sessionsMessage:
             let text = arguments.positional.dropFirst(2).joined(separator: " ")

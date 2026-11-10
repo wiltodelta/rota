@@ -12,8 +12,20 @@ if [[ "${1:-}" == --host ]]; then
 else
     uv run -q "$AUDIT" scope
 fi
+PREPARED=""
+if [[ "${1:-}" == --prepared && $# == 2 ]]; then
+    PREPARED="$2"
+elif [[ $# != 0 ]]; then
+    echo "Usage: $0 [--host] [--prepared MANIFEST]" >&2
+    exit 2
+fi
 ROOT="$PWD"
 APP="$ROOT/Rota.app"
+DRIVER=""
+if [[ -n "$PREPARED" ]]; then
+    paths="$(python3 scripts/ui_preparation.py validate --manifest "$PREPARED")"
+    { IFS= read -r APP; IFS= read -r DRIVER; } <<< "$paths"
+fi
 DOMAIN="com.wiltodelta.rota.dev"
 OUT="${ROTA_SCREENSHOT_OUT:-$ROOT/docs/screenshots}"
 [[ -f "$AUDIT" ]] || { echo "Set ROTA_MACAUDIT to the shared macaudit.py helper." >&2; exit 1; }
@@ -59,25 +71,31 @@ PY
 }
 trap cleanup EXIT
 trap 'echo "Capture failed at line $LINENO" >&2' ERR
-./create-app.sh
-swiftc -O scripts/ui-driver.swift -o "$WORK/driver"
+if [[ -z "$PREPARED" ]]; then
+    ./create-app.sh
+    DRIVER="$WORK/driver"
+    swiftc -O scripts/ui-driver.swift -o "$DRIVER"
+fi
 swiftc -O scripts/capture-window.swift -o "$WORK/capture"
 mkdir -p "$OUT"
 drive() {
     uv run "$AUDIT" preflight --require-unlocked >/dev/null
-    uv run "$AUDIT" notice run -- "$WORK/driver" "$@"
+    uv run "$AUDIT" notice run -- "$DRIVER" "$@"
 }
 capture() {
     local name="$1" title="$2" width="${3:-1000}"
+    if [[ -n "$PREPARED" ]]; then
+        python3 scripts/ui_preparation.py validate --manifest "$PREPARED" >/dev/null
+    fi
     drive window "$title" "$width" 680
     drive focus routineSidebar
     sleep 1
     local bounds verdict
-    bounds="$("$WORK/driver" bounds "$title")"
+    bounds="$("$DRIVER" bounds "$title")"
     awk -v expected="$width" 'NF == 4 {exit !($3 == expected && $4 == 680)}' <<< "$bounds"
-    verdict="$("$WORK/driver" gate)"
+    verdict="$("$DRIVER" gate)"
     [[ "${verdict##*$'\n'}" == "0 violations" ]] || { echo "$verdict" >&2; return 1; }
-    uv run "$AUDIT" notice run -- "$WORK/capture" "$("$WORK/driver" wid "$title")" \
+    uv run "$AUDIT" notice run -- "$WORK/capture" "$("$DRIVER" wid "$title")" \
         "$appearance" "$OUT/$name-$appearance.png"
     echo "Captured $name-$appearance ($bounds; 0 layout violations)"
 }

@@ -33,6 +33,9 @@ import ApplicationServices
 
 // The development build by default; ROTA_BUNDLE_ID=com.wiltodelta.rota drives an installed release.
 let bundleID = ProcessInfo.processInfo.environment["ROTA_BUNDLE_ID"] ?? "com.wiltodelta.rota.dev"
+// A loaded VM can apply an action before its AX reply reaches this process.
+// Wait for that reply rather than repeating a potentially delivered action.
+AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 30)
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))
@@ -55,6 +58,14 @@ func attribute<T>(_ element: AXUIElement, _ name: String) -> T? {
 
 func children(_ element: AXUIElement) -> [AXUIElement] {
     attribute(element, kAXChildrenAttribute) ?? []
+}
+
+func pressAction(_ element: AXUIElement) -> CFString {
+    var actions: CFArray?
+    AXUIElementCopyActionNames(element, &actions)
+    let names = actions as? [String] ?? []
+    return (names.contains(kAXShowMenuAction) && !names.contains(kAXPressAction)
+            ? kAXShowMenuAction : kAXPressAction) as CFString
 }
 
 func label(_ element: AXUIElement) -> String {
@@ -121,12 +132,16 @@ case "menu":
 case "press":
     guard arguments.count == 2 else { fail("press <id-or-title>") }
     var result = AXError.invalidUIElement
-    for attempt in 0..<3 {
+    for attempt in 0..<20 {
         guard let button = find({ matches($0, arguments[1]) && (attribute($0, kAXRoleAttribute) as String?) != "AXWindow" })
-        else { fail("no element \(arguments[1])") }
-        result = AXUIElementPerformAction(button, kAXPressAction as CFString)
+        else {
+            guard attempt < 19 else { fail("no element \(arguments[1])") }
+            Thread.sleep(forTimeInterval: 0.1)
+            continue
+        }
+        result = AXUIElementPerformAction(button, pressAction(button))
         // SwiftUI can replace a menu item between discovery and its action.
-        guard result == .invalidUIElement, attempt < 2 else { break }
+        guard result == .invalidUIElement, attempt < 19 else { break }
         Thread.sleep(forTimeInterval: 0.1)
     }
     guard result == .success else { fail("press failed: \(result.rawValue)") }
@@ -151,16 +166,28 @@ case "disclose":
     fail("disclosure did not reach \(arguments[2]); AX result \(result.rawValue)")
 case "set":
     guard arguments.count == 3 else { fail("set <id> <value>") }
-    guard let field = find({ matches($0, arguments[1]) }) else { fail("no element \(arguments[1])") }
-    AXUIElementSetAttributeValue(field, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-    let value: CFTypeRef
-    if (attribute(field, kAXRoleAttribute) as String?) == "AXSlider" {
-        guard let number = Double(arguments[2]) else { fail("slider value must be numeric") }
-        value = NSNumber(value: number)
-    } else {
-        value = arguments[2] as CFString
+    var result = AXError.invalidUIElement
+    for attempt in 0..<20 {
+        if let field = find({ matches($0, arguments[1]) }) {
+            AXUIElementSetAttributeValue(field, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            let target = find({ matches($0, arguments[1]) }) ?? field
+            let value: CFTypeRef
+            if (attribute(target, kAXRoleAttribute) as String?) == "AXSlider" {
+                guard let number = Double(arguments[2]) else { fail("slider value must be numeric") }
+                value = NSNumber(value: number)
+            } else {
+                value = arguments[2] as CFString
+            }
+            result = AXUIElementSetAttributeValue(target, kAXValueAttribute as CFString, value)
+            if result == .success { break }
+            guard result == .invalidUIElement || result == .cannotComplete else { break }
+            if let actual: CFTypeRef = attribute(target, kAXValueAttribute), CFEqual(actual, value) {
+                result = .success
+                break
+            }
+        }
+        if attempt < 19 { Thread.sleep(forTimeInterval: 0.1) }
     }
-    let result = AXUIElementSetAttributeValue(field, kAXValueAttribute as CFString, value)
     guard result == .success else { fail("set failed: \(result.rawValue)") }
 case "value":
     guard arguments.count == 2, let element = find({ matches($0, arguments[1]) }) else { fail("no element") }
@@ -264,13 +291,26 @@ case "choose":
         guard let popup = find({ matches($0, arguments[1]) }) else { fail("no element \(arguments[1])") }
         if (attribute(popup, kAXValueAttribute) as String?) == expected { exit(0) }
         AXUIElementSetAttributeValue(popup, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        let opened = AXUIElementPerformAction(popup, kAXPressAction as CFString)
+        let opened = AXUIElementPerformAction(popup, pressAction(popup))
         guard opened == .success else { fail("popup press failed: \(opened.rawValue)") }
         Thread.sleep(forTimeInterval: 0.6)
-        if let item = find(in: popup, first: { element in
-            (attribute(element, kAXRoleAttribute) as String?) == "AXMenuItem"
-                && (attribute(element, kAXTitleAttribute) as String?) == arguments[2]
-        }) {
+        // macOS 26 can attach a SwiftUI menu outside the button's subtree.
+        var menus = [popup]
+        var ancestor: AXUIElement? = popup
+        while let element = ancestor, (attribute(element, kAXRoleAttribute) as String?) != "AXWindow" {
+            guard let parent: AXUIElement = attribute(element, kAXParentAttribute) else { break }
+            menus.append(contentsOf: children(parent).filter {
+                (attribute($0, kAXRoleAttribute) as String?) == "AXMenu"
+            })
+            ancestor = parent
+        }
+        let item = menus.lazy.compactMap { menu in
+            find(in: menu, first: { element in
+                (attribute(element, kAXRoleAttribute) as String?) == "AXMenuItem"
+                    && (attribute(element, kAXTitleAttribute) as String?) == arguments[2]
+            })
+        }.first
+        if let item {
             AXUIElementPerformAction(item, kAXPressAction as CFString)
         }
         Thread.sleep(forTimeInterval: 0.6)
@@ -344,27 +384,44 @@ case "gate":
         return CGRect(x: visible.minX, y: primaryTop - visible.maxY,
                       width: visible.width, height: visible.height)
     }
+    func checkScreen(_ rect: CGRect, name: String) {
+        if !visibleScreens.contains(where: { $0.insetBy(dx: -1, dy: -1).contains(rect) }) {
+            violations += 1
+            print("outside visible screen  \(name)  \(rect)")
+        }
+    }
     for window in windows() {
         guard let windowFrame = frame(window) else { continue }
-        if !visibleScreens.contains(where: { $0.insetBy(dx: -1, dy: -1).contains(windowFrame) }) {
-            violations += 1
-            print("outside visible screen  \(label(window))  \(windowFrame)")
-        }
+        checkScreen(windowFrame, name: label(window))
         // `clip` is the visible part of the nearest scroll area: content scrolled
         // out of it is not on screen, so it is neither outside the window nor clipped.
-        func walk(_ element: AXUIElement, parent: CGRect, clip: CGRect) {
+        func walk(_ element: AXUIElement, parent: CGRect, clip: CGRect, windowBounds: CGRect) {
             for child in children(element) {
-                guard let rect = frame(child) else { walk(child, parent: parent, clip: clip); continue }
+                guard let rect = frame(child) else {
+                    walk(child, parent: parent, clip: clip, windowBounds: windowBounds)
+                    continue
+                }
                 let role: String = attribute(child, kAXRoleAttribute) ?? "?"
+                // An attached sheet has its own window and can extend past its presenter.
+                if role == "AXSheet" {
+                    checkScreen(rect, name: "sheet \(label(child))")
+                    walk(child, parent: rect, clip: .infinite, windowBounds: rect)
+                    continue
+                }
                 let visible = rect.width > 0 && rect.height > 0 && rect.intersects(clip)
                 let scrolls = role == "AXScrollArea" || role == "AXOutline" || role == "AXTable"
+                let inList = role == "AXCell" || role == "AXRow"
+                // Tahoe's floating split view reports up to two points of border
+                // overdraw at 150%. Text, buttons and fields keep the strict inset.
+                let structural = scrolls || inList || role == "AXColumn" || role == "AXGroup" || role == "AXSplitGroup"
+                let tolerance: CGFloat = structural ? 2 : 1
                 // An open menu floats over the window by design.
                 if role == "AXMenu" { continue }
-                if visible && !windowFrame.insetBy(dx: -1, dy: -1).contains(rect.intersection(clip)) {
+                if visible && !windowBounds.insetBy(dx: -tolerance, dy: -tolerance).contains(rect.intersection(clip)) {
                     violations += 1
                     print("outside window  \(role)  \(label(child))  \(rect)")
                 } else if visible && !scrolls && role != "AXRow" && role != "AXCell"
-                            && !parent.insetBy(dx: -1, dy: -1).contains(rect) && parent.width > 0 {
+                            && !parent.insetBy(dx: -tolerance, dy: -tolerance).contains(rect) && parent.width > 0 {
                     violations += 1
                     print("outside parent  \(role)  \(label(child))  \(rect) in \(parent)")
                 }
@@ -372,14 +429,14 @@ case "gate":
                 // cell's own frame, so it may pass the cell sideways by that much and no
                 // more. Up and down only the list bounds it: a pinned section header
                 // floats over the rows while its own row scrolls away.
-                let inList = role == "AXCell" || role == "AXRow"
                 let next = scrolls ? CGRect.infinite
                     : inList ? CGRect(x: rect.minX - 8, y: -1e6, width: rect.width + 16, height: 2e6) : rect
-                walk(child, parent: next, clip: role == "AXScrollArea" ? clip.intersection(rect) : clip)
+                walk(child, parent: next, clip: role == "AXScrollArea" ? clip.intersection(rect) : clip,
+                     windowBounds: windowBounds)
             }
         }
         // Outside any scroll area nothing is clipped: a control past the window's edge is a defect.
-        walk(window, parent: windowFrame, clip: .infinite)
+        walk(window, parent: windowFrame, clip: .infinite, windowBounds: windowFrame)
     }
     print("\(violations) violations")
 case "scroll-wheel":

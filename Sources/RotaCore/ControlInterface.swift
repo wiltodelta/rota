@@ -71,6 +71,13 @@ public enum ControlInterface {
             "schedule": property(
                 "string",
                 "Five-field cron in the Mac's local time, such as \"0 9 * * 1-5\" for weekdays at 9:00."),
+            "scheduledAt": property(
+                ["string", "null"], "ISO 8601 date and time with Z or an offset. Without schedule, runs once. "
+                    + "With a repeating schedule, this is its earliest start; null clears that bound."),
+            "repeats": property("boolean", "False for one time (scheduledAt required); true for cron repetition."),
+            "runLimit": property(
+                ["integer", "null"], "End repetition after this many scheduled attempts in total; null is unlimited. "
+                    + "Manual runs and skipped slots do not count. Changing scheduling fields resets the count."),
             "harness": property(
                 "string",
                 "Where it runs: claude (Claude Code), codex, grok (Grok Build), antigravity (agy) or shell "
@@ -108,8 +115,9 @@ public enum ControlInterface {
                 name: "create_routine", method: .routinesCreate, command: "add",
                 description:
                     "Schedule a new routine in Rota. It runs unattended on its schedule with approvals bypassed, "
-                    + "and Rota notifies the user that an agent added it. Give a prompt or a skill.",
-                properties: fields, required: ["id", "workingDirectory", "schedule"]),
+                    + "and Rota notifies the user that an agent added it. Give a prompt or a skill, and either "
+                    + "scheduledAt for one time or schedule for repetition.",
+                properties: fields, required: ["id", "workingDirectory"]),
             Tool(
                 name: "update_routine", method: .routinesUpdate, command: "update",
                 description: "Change a routine; only the fields given change.", properties: fields, required: ["id"]),

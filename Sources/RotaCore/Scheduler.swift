@@ -123,45 +123,22 @@ public final class Scheduler {
         self.timer = timer
     }
 
-    public func tick() {
-        // Offline (just woken, no Wi-Fi yet), a due slot waits rather than failing; it runs once online.
-        guard isOnline() else { return }
-        refreshSurvivingSession()
-        reconcilePending()
-        let current = now()
-        var changed = false
-        for index in routines.indices where routines[index].enabled {
-            guard let schedule = try? CronSchedule(routines[index].schedule) else { continue }
-            guard let due = routines[index].nextFire else {
-                routines[index].nextFire = schedule.next(after: current, calendar: calendar)
-                changed = true
-                continue
-            }
-            guard due <= current else { continue }
-            routines[index].nextFire = schedule.next(after: current, calendar: calendar)
-            changed = true
-            let routine = routines[index]
-            if current.timeIntervalSince(due) > Self.missedRunGrace {
-                record(skipped: "missed the \(due.formatted(date: .abbreviated, time: .shortened)) slot",
-                       routine: routine, at: current)
-            } else if hasActiveSession(routine.id)
-                || survivingSessions.values.contains(where: { $0.routineID == routine.id }) {
-                record(skipped: "the previous run was still going", routine: routine, at: current, notify: false)
-            } else {
-                // A minute late is the tick's own lag; later than that, the slot was missed.
-                run(routine, trigger: current.timeIntervalSince(due) > 120 ? .catchUp : .scheduled)
-            }
-        }
-        if changed { persist() }
-    }
-
     // MARK: Running
 
-    public func run(_ routine: Routine, trigger: RunTrigger) {
-        guard !hasActiveSession(routine.id) else { return }
+    @discardableResult
+    public func run(_ routine: Routine, trigger: RunTrigger) -> Bool {
+        run(routine, trigger: trigger, consumingScheduledSlot: true)
+    }
+
+    @discardableResult
+    func run(_ routine: Routine, trigger: RunTrigger, consumingScheduledSlot: Bool) -> Bool {
+        guard !hasActiveSession(routine.id) else { return false }
         guard !hasSurvivingSession(routine.id) else {
             lastError = "This routine still has a native session running. Close it before starting another."
-            return
+            return false
+        }
+        if consumingScheduledSlot, trigger == .scheduled || trigger == .catchUp {
+            guard reserveScheduledRun(routine) else { return false }
         }
         var record = RunRecord(routineID: routine.id, trigger: trigger, harness: routine.harness,
                                startedAt: now(), outcome: .running)
@@ -171,6 +148,7 @@ public final class Scheduler {
         record.logPath = logURL.path
         start(record, spec: spec(for: routine, record: record, harness: routine.harness, prompt: routine.prompt,
                                  log: logURL))
+        return true
     }
 
     /// How `routine` runs `prompt` on `harness`: a new session, or `resume`'s.
@@ -362,14 +340,6 @@ public final class Scheduler {
     public var unreadCount: Int {
         _ = historyVersion
         return allRecords().filter(\.isUnread).count
-    }
-
-    private func record(skipped reason: String, routine: Routine, at date: Date, notify: Bool = true) {
-        let record = RunRecord(routineID: routine.id, trigger: .scheduled, harness: routine.harness,
-                               startedAt: date, endedAt: date, outcome: .skipped(reason))
-        saveRecord(record)
-        Self.log.warning("\(routine.id, privacy: .public) skipped: \(reason, privacy: .public)")
-        if notify { notifier?.runEnded(record, routine: routine) }
     }
 
     func saveRecord(_ record: RunRecord) {

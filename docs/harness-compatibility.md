@@ -45,6 +45,9 @@ covers the other application surfaces. Run in a separate macOS VM and use the
 guest preflight procedure. The native capture notice applies only to explicitly
 agreed host diagnostics; the driver also checks the console before delivering a key. Its imported names may be personal; keep captures outside Git.
 
+For several affected surfaces, use `python3 scripts/ui-suite.py --modes harnesses questions`
+to prepare one verified bundle and driver for the whole set; see [UI suites](ui-checks.md).
+
 Codex continuation restores archived sessions through native `unarchive` before
 resume; automatic recovery must never do that. Compressed rollout verification
 must cover native expansion and relocation, rather than tailing a decompressed

@@ -113,7 +113,7 @@ struct MainWindow: View {
         }
         .onAppear {
             if model.selection == nil, model.settingsPane == nil {
-                model.selection = records.first.map { .session($0.id) }
+                model.selection = model.sessionFilter.destination(from: nil, records: records)
             }
         }
         // Picking a routine or session leaves Settings.

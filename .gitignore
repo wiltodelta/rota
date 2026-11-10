@@ -7,6 +7,7 @@
 # Build artifacts
 *.app/
 .DS_Store
+__pycache__/
 
 # Local Claude Code settings
 .claude/settings.local.json

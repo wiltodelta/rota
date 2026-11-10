@@ -117,9 +117,9 @@ To create a routine:
 1. Choose **File > New Routine…** or press **Command-N**.
 2. Choose the project folder and harness. Write a prompt or select a project
    skill. For a Shell routine, enter the command.
-3. Pick a schedule preset or enter a five-field cron expression. Rota shows
-   the next three run times. Choose a model, supported effort, and optional
-   time limit.
+3. Choose a date and time for a one-time run, or pick a repetition. Repeating
+   routines can end after a chosen number of scheduled runs. Custom repetition
+   accepts five-field cron. Choose a model, supported effort, and optional time limit.
 4. Save. The routine runs on its schedule; **Run Now** starts it immediately.
 
 Rota lives in the menu bar and runs routines while the app is open. Turn on
@@ -208,9 +208,9 @@ window width; its optional `--live` mode uses a real Codex session.
 `scripts/capture-screenshots.sh` regenerates the README images from disabled
 synthetic routines. See the [capture recipe](docs/screenshots/README.md) for
 permissions and setup. UI scripts require a separate macOS VM by default.
-Use `--host` as the first argument only for explicitly agreed host diagnostics.
-Guest runs do not display a keyboard and mouse warning. The live
-`scripts/agent-check.sh` integration check requires a VM and has no host mode.
+Use `--host` as the first shell argument, or `--host` on `scripts/ui-suite.py`,
+only for explicitly agreed host diagnostics. Guest runs do not display a
+keyboard and mouse warning.
 
 Implementation details: [architecture](docs/architecture.md),
 [transcript format](docs/transcript-format.md), and

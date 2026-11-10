@@ -130,6 +130,7 @@ extension Scheduler {
         for (key, path) in texts {
             if let text = try optional(params, key, as: String.self) { routine[keyPath: path] = text }
         }
+        try applySchedule(params, to: &routine)
         if let folder = try optional(params, "workingDirectory", as: String.self)
             ?? optional(params, "folder", as: String.self) {
             routine.workingDirectory = (folder as NSString).expandingTildeInPath
@@ -152,7 +153,29 @@ extension Scheduler {
     }
 
     private func validate(_ routine: Routine, checkingID: Bool = true) throws {
-        if let problem = routine.problem(checkingID: checkingID) { throw ControlError(problem) }
+        if let problem = routine.problem(checkingID: checkingID, now: now()) { throw ControlError(problem) }
+    }
+
+    private func applySchedule(_ params: [String: Any], to routine: inout Routine) throws {
+        if params["schedule"] != nil {
+            if !routine.repeats { routine.scheduledAt = nil }
+            routine.repeats = true
+        }
+        if params.keys.contains("scheduledAt") {
+            routine.scheduledAt = nil
+            if let text = try optional(params, "scheduledAt", as: String.self) {
+                let formatter = ISO8601DateFormatter()
+                var date = formatter.date(from: text)
+                formatter.formatOptions.insert(.withFractionalSeconds)
+                date = date ?? formatter.date(from: text)
+                guard let date else { throw ControlError("scheduledAt needs an ISO 8601 date, time and time zone.") }
+                routine.scheduledAt = date
+                if params["schedule"] == nil, params["repeats"] == nil { routine.repeats = false }
+            }
+        }
+        if let repeats = try optional(params, "repeats", as: Bool.self) { routine.repeats = repeats }
+        if !routine.repeats { routine.runLimit = nil }
+        if params.keys.contains("runLimit") { routine.runLimit = try optional(params, "runLimit", as: Int.self) }
     }
 
     private func enable(_ params: [String: Any]) throws -> Routine {
@@ -189,7 +212,11 @@ extension Scheduler {
     /// A routine as JSON, with what a caller wants to know about it now.
     func describe(_ routine: Routine) -> [String: Any] {
         var json = (try? JSONSerialization.jsonObject(with: JSONFile.encoder.encode(routine))) as? [String: Any] ?? [:]
-        json["scheduleText"] = ScheduleText.describe(routine.schedule) ?? routine.schedule
+        json["scheduleText"] = routine.scheduleDescription
+        json["scheduleState"] = routine.isScheduleComplete ? "completed" : routine.enabled ? "scheduled" : "paused"
+        if let limit = routine.repeats ? routine.runLimit : 1 {
+            json["remainingRuns"] = routine.isScheduleComplete ? 0 : max(0, limit - routine.scheduledRunCount)
+        }
         json["running"] = hasActiveSession(routine.id)
         if let last = history.records(for: routine.id).first(where: { !$0.isSkip }) {
             json["lastSession"] = describe(last)

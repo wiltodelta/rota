@@ -11,9 +11,13 @@ extension Scheduler {
     @discardableResult
     public func save(_ routine: Routine) -> Bool {
         var routine = routine
-        routine.nextFire = routine.enabled
-            ? (try? CronSchedule(routine.schedule))?.next(after: now(), calendar: calendar)
-            : nil
+        if let previous = self.routine(routine.id) {
+            let unchanged = routine.hasSameSchedule(as: previous)
+            routine.scheduledRunCount = unchanged ? previous.scheduledRunCount : 0
+            routine.scheduleCompletedAt = unchanged ? previous.scheduleCompletedAt : nil
+        }
+        if routine.isScheduleComplete { routine.enabled = false }
+        routine.nextFire = routine.enabled ? routine.nextScheduledFire(after: now(), calendar: calendar) : nil
         var next = routines
         if let index = next.firstIndex(where: { $0.id == routine.id }) {
             next[index] = routine
@@ -28,7 +32,15 @@ extension Scheduler {
     @discardableResult
     public func setEnabled(_ enabled: Bool, for id: String) -> Bool {
         guard var routine = routine(id) else { return false }
+        if enabled, routine.isScheduleComplete {
+            lastError = "This schedule is complete. Edit its date, repetition or run limit to schedule it again."
+            return false
+        }
         routine.enabled = enabled
+        if enabled, let problem = routine.scheduleProblem(now: now()) {
+            lastError = problem
+            return false
+        }
         return save(routine)
     }
 

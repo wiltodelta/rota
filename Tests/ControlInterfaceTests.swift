@@ -20,10 +20,10 @@ final class ControlInterfaceTests: XCTestCase {
         let routine = Routine(id: "digest", name: "Digest", workingDirectory: "/tmp/project",
                               schedule: "0 9 * * *", prompt: "Summarize.")
         let editable = Set(Mirror(reflecting: routine).children.compactMap(\.label))
-            .subtracting(["nextFire", "importIdentity"])
+            .subtracting(["nextFire", "importIdentity", "scheduledRunCount", "scheduleCompletedAt"])
         let raw = ["add", "digest", "--name", "Digest", "--folder", "/tmp/project", "--schedule", "0 9 * * *",
                    "--harness", "codex", "--prompt", "Summarize.", "--model", "chosen-model", "--effort", "high",
-                   "--time-limit", "30", "--off"]
+                   "--time-limit", "30", "--off", "--at", "2099-01-02T10:00:00-08:00", "--repeat", "--runs", "2"]
         let (_, params) = try ControlCLI.request("add", ControlCLI.Arguments(raw))
         XCTAssertTrue(editable.isSubset(of: Set(params.keys)))
         for method in [ControlMethod.routinesCreate, .routinesUpdate] {

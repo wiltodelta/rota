@@ -29,10 +29,18 @@ on the badge halo even when the row is selected; the native mini progress
 view became white on its light halo in a selected row.
 
 - `harness-claude`: the Claude mark, from Simple Icons (`claude`, CC0 SVG data), as super.engineering shows Claude Code sessions.
-- `harness-codex`: OpenAI, from Simple Icons (`openai`, CC0 SVG data). Codex
-  publishes no separate mark outside its app.
+- `harness-codex`: the monochrome cloud and terminal mark from the official
+  Codex desktop app's inline `codex-icon` SVG in the `.vite/build/main-*.js`
+  entry of `Contents/Resources/app.asar`.
+  The path data and 20-unit viewport are unchanged; `currentColor` becomes black
+  for asset-catalog compilation, and the view applies the template color.
 - `harness-grok`: the Grok mark, cut from the two glyph paths of
   `https://grok.com/images/favicon.svg` (the app-icon background left out).
+  Its viewport includes the complete 56...456-unit path bounds, with a 4-unit
+  margin on each side so the extended rays remain visible.
+- `harness-antigravity`: the official one-color icon from
+  [Google Antigravity's press assets](https://antigravity.google/press),
+  [`antigravity-icon__one-color.svg`](https://antigravity.google/assets/image/brand/antigravity-icon__one-color.svg),
+  with its path and viewport unchanged.
 
-Antigravity currently uses the system `sparkles` symbol as a neutral fallback;
-it is not presented as the vendor's trademark. Shell uses `apple.terminal`.
+Shell uses the system `apple.terminal` symbol.

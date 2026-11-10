@@ -6,9 +6,9 @@
 
 - **One scheduler for every harness.** Pick Claude Code, Codex, Grok Build, Antigravity or
   Shell per routine and switch at any time, with the model and reasoning
-  effort to run on: Rota lists the models each agent's CLI offers. Standard five-field cron
-  schedules, with common ones a click away and the next three run times shown
-  as you type.
+  effort to run on: Rota lists the models each agent's CLI offers. Run once at a
+  chosen date and time, repeat a limited number of times, or keep a recurring
+  schedule. Custom repetition accepts standard five-field cron and shows the next run.
 - **Sessions are the main view.** The collapsible Routines section stays at the top of the sidebar
   and remembers whether you left it expanded. Below it, the Sessions section lists every routine's sessions,
   most recently active first, grouped by the day of the latest activity. Continuing an older
@@ -217,6 +217,17 @@
   the harness, and the model it runs on. A run takes as long as it needs
   unless you turn on a time limit. A Shell routine takes a command instead of a
   prompt and runs it with `zsh -c` in the project folder.
+- **Run once or repeat.** Choose a date and time under **When**. **Does Not Repeat**
+  schedules one run. Daily, Weekdays, Weekly and Monthly use that date and time
+  to build the repetition; **Custom** exposes the cron field. Repeating schedules
+  can end after a chosen number of scheduled attempts in total, or continue
+  without a limit. Manual **Run Now** and skipped slots do not consume that count;
+  failed scheduled attempts do. Automatic recovery retries continue the same
+  scheduled attempt and do not consume another count. Counts survive restarts. After the last attempt,
+  the schedule shows **Schedule complete**, and all sessions remain available.
+  Editing the date, repetition, cron or run limit starts a new count; renaming a
+  routine or editing its prompt preserves progress. A completed schedule must be
+  edited before it can be enabled again. Existing cron routines stay recurring.
 - **Import** with the download button: pick routines from Claude Desktop or
   Codex. Turn each one off in its app before turning it on in Rota.
 - Select a session to read it and write to it. **Show Routine** in its header
@@ -242,6 +253,7 @@
   category appears as a pill below the section heading. Pills fill each row before
   wrapping to the next; press a pill's × to remove just that category.
   Choose All Sessions, or remove the last category, to show all sessions.
+  Selected categories are restored after restarting Rota; resetting to All Sessions is saved too.
   Needs Attention includes questions, approvals, explicit attention requests,
   and sessions waiting in Terminal. Completed shows successful sessions without a pending request.
   An open session stays visible if it becomes read or finishes, until you select another

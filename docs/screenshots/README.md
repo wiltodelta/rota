@@ -19,6 +19,11 @@ development app's defaults and quits its own app process on exit. Close an
 existing repository development build first; the
 script refuses to take it over.
 
+`--prepared <manifest>` reuses a sealed development bundle and AX driver from
+`ui_preparation.py`, including inputs transferred and verified with
+`ui-suite.py --artifacts`. It validates them before changing defaults and before
+each capture. The native capture helper is still compiled in the guest.
+
 ScreenCaptureKit composites can omit sidebar text fragments after resizing,
 even when the native window capture contains all the text. The helper uses
 `screencapture -l` with its own opaque backdrop behind the window, then adds the

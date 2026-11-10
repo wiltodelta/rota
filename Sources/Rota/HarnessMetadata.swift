@@ -64,8 +64,8 @@ struct HarnessLogo: View {
 
     var body: some View {
         Group {
-            if harness == .shell || harness == .antigravity {
-                Image(systemName: harness == .shell ? "apple.terminal" : "sparkles")
+            if harness == .shell {
+                Image(systemName: "apple.terminal")
                     .resizable()
                     .scaledToFit()
             } else {

@@ -5,6 +5,13 @@ public struct Routine: Codable, Identifiable, Equatable, Sendable {
     public var name: String
     public var workingDirectory: String
     public var schedule: String
+    /// A one-time date, or the earliest date for a repeating schedule.
+    public var scheduledAt: Date?
+    public var repeats: Bool
+    public var runLimit: Int?
+    /// Scheduled attempts only; manual runs and skipped slots do not count.
+    public var scheduledRunCount: Int
+    public var scheduleCompletedAt: Date?
     public var harness: Harness
     public var enabled: Bool
     public var prompt: String
@@ -21,11 +28,16 @@ public struct Routine: Codable, Identifiable, Equatable, Sendable {
 
     public init(id: String, name: String, workingDirectory: String, schedule: String,
                 harness: Harness = .claude, enabled: Bool = false, prompt: String,
-                timeLimitMinutes: Int? = nil, nextFire: Date? = nil, model: String? = nil, effort: String? = nil) {
+                timeLimitMinutes: Int? = nil, nextFire: Date? = nil, model: String? = nil, effort: String? = nil,
+                scheduledAt: Date? = nil, repeats: Bool = true, runLimit: Int? = nil) {
         self.id = id
         self.name = name
         self.workingDirectory = workingDirectory
         self.schedule = schedule
+        self.scheduledAt = scheduledAt
+        self.repeats = repeats
+        self.runLimit = runLimit
+        self.scheduledRunCount = 0
         self.harness = harness
         self.enabled = enabled
         self.prompt = prompt
@@ -45,6 +57,15 @@ public struct Routine: Codable, Identifiable, Equatable, Sendable {
         name = try values.decode(String.self, forKey: .name)
         workingDirectory = try values.decode(String.self, forKey: .workingDirectory)
         schedule = try values.decode(String.self, forKey: .schedule)
+        scheduledAt = try values.decodeIfPresent(Date.self, forKey: .scheduledAt)
+        repeats = try values.decodeIfPresent(Bool.self, forKey: .repeats) ?? true
+        runLimit = try values.decodeIfPresent(Int.self, forKey: .runLimit)
+        scheduledRunCount = try values.decodeIfPresent(Int.self, forKey: .scheduledRunCount) ?? 0
+        scheduleCompletedAt = try values.decodeIfPresent(Date.self, forKey: .scheduleCompletedAt)
+        guard scheduledRunCount >= 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .scheduledRunCount, in: values,
+                                                  debugDescription: "Scheduled run count cannot be negative.")
+        }
         harness = try values.decode(Harness.self, forKey: .harness)
         enabled = try values.decode(Bool.self, forKey: .enabled)
         prompt = try values.decode(String.self, forKey: .prompt)
@@ -76,7 +97,7 @@ public struct Routine: Codable, Identifiable, Equatable, Sendable {
     /// Why the routine cannot be saved, or nil. The window, the `rota` command
     /// and the MCP tools share it; `checkingID` is off for an existing routine,
     /// which keeps the id it was imported with.
-    public func problem(checkingID: Bool = true) -> String? {
+    public func problem(checkingID: Bool = true, now: Date = .now) -> String? {
         if checkingID, id.isEmpty { return "Give the routine an id, such as weekly-report." }
         if checkingID, !Self.isValidID(id) {
             return "An id is lowercase letters, digits, - and _, such as weekly-report."
@@ -87,9 +108,7 @@ public struct Routine: Codable, Identifiable, Equatable, Sendable {
             return workingDirectory.isEmpty ? "Choose the project folder."
                 : "The project folder \(workingDirectory) does not exist."
         }
-        do { _ = try CronSchedule(schedule) } catch {
-            return "The schedule \"\(schedule)\": \(error.localizedDescription)"
-        }
+        if let problem = scheduleProblem(now: now) { return problem }
         guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return harness.isAgent ? "Give a prompt or a skill." : "Give the command."
         }

@@ -195,7 +195,7 @@ extension Scheduler {
                       let routine = self.routine(routineID) else { return }
                 self.reruns[routineID, default: 0] += 1
                 Self.log.info("Running \(routineID, privacy: .public) again after a network failure")
-                self.run(routine, trigger: trigger)
+                self.run(routine, trigger: trigger, consumingScheduledSlot: false)
             }
         }
     }

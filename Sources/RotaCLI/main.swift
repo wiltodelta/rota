@@ -11,10 +11,10 @@ let usage = """
 
       list                         routines, their schedules and state
       show <id>                    one routine
-      add <id> --folder DIR --schedule "CRON" (--skill SKILL | --prompt TEXT)
+      add <id> --folder DIR (--at ISO_DATE | --schedule "CRON") (--skill SKILL | --prompt TEXT)
           [--harness claude|codex|grok|antigravity|shell] [--name NAME] [--model M] [--effort E]
-          [--time-limit MIN] [--off]
-      update <id> [the options of add] [--no-time-limit] [--default-model]
+          [--repeat --at ISO_DATE] [--runs N] [--time-limit MIN] [--off]
+      update <id> [the options of add] [--once] [--no-run-limit] [--no-time-limit] [--default-model]
       on <id> | off <id>           turn a routine on or off
       run <id> | stop <id>         start a run now, or stop the running one
       remove <id>                  delete a routine and its sessions
@@ -34,8 +34,9 @@ let usage = """
                                    session, and --needs-reply marks it until you answer
       mcp                          serve these as MCP tools over stdio
 
-    Add --json for the raw answer. Schedules are five-field cron in local time;
-    a routine added here runs on its schedule unless --off is given.
+    Add --json for the raw answer. --at needs an ISO 8601 date, time and zone.
+    Repeating schedules use five-field cron in local time. --runs counts scheduled
+    attempts; manual runs and skips do not count. New routines are on unless --off is given.
     """
 
 /// Starts Rota in the background when its socket does not answer, then waits for it.
@@ -72,7 +73,9 @@ func launchRota() throws {
 }
 
 func line(_ routine: [String: Any]) -> String {
-    let state = (routine["running"] as? Bool == true) ? "running" : (routine["enabled"] as? Bool == true ? "on" : "off")
+    let inactive = routine["scheduleState"] as? String == "completed" ? "completed"
+        : (routine["enabled"] as? Bool == true ? "on" : "off")
+    let state = (routine["running"] as? Bool == true) ? "running" : inactive
     let parts = [routine["id"] as? String ?? "?", state, routine["harness"] as? String ?? "",
                  routine["scheduleText"] as? String ?? "", routine["model"] as? String]
     return parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "  ")

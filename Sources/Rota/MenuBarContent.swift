@@ -233,7 +233,7 @@ struct StatusDot: View {
     private static func status(of routine: Routine, in scheduler: Scheduler, last: RunRecord?) -> String {
         if scheduler.hasActiveSession(routine.id) { return "Running" }
         if let last, last.outcome.isFailure { return "Last run: \(last.outcome.title)" }
-        return routine.enabled ? "On schedule" : "Paused"
+        return routine.isScheduleComplete ? "Schedule complete" : routine.enabled ? "On schedule" : "Paused"
     }
 }
 
@@ -265,6 +265,7 @@ extension Color {
 enum NextRunFormat {
     static func subtitle(_ routine: Routine, running: Bool) -> String {
         if running { return "Running on \(routine.harness.title)" }
+        if routine.isScheduleComplete { return "\(routine.harness.title), schedule complete" }
         guard routine.enabled, let next = routine.nextFire else { return "\(routine.harness.title), paused" }
         return "\(routine.harness.title), next run \(string(next))"
     }

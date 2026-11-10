@@ -69,7 +69,7 @@ struct RoutineForm: View {
                     .background(Color(nsColor: .textBackgroundColor),
                                 in: RoundedRectangle(cornerRadius: metrics.points(6)))
             }
-            ScheduleField(schedule: $draft.schedule)
+            RoutineScheduleForm(draft: $draft)
             TimeLimitField(minutes: $draft.timeLimitMinutes)
         }
         .formStyle(.grouped)
@@ -86,55 +86,6 @@ struct RoutineForm: View {
         }
         if panel.runModal() == .OK, let url = panel.url {
             draft.workingDirectory = url.path
-        }
-    }
-}
-
-private struct ScheduleField: View {
-    @Environment(\.interfaceScale) private var metrics
-    @Binding var schedule: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: metrics.points(4)) {
-            LabeledContent("Schedule") {
-                HStack(spacing: metrics.points(8)) {
-                    TextField("Schedule", text: $schedule, prompt: Text("minute hour day month weekday"))
-                        .accessibilityIdentifier("routineSchedule")
-                        .labelsHidden()
-                        .interfaceFont(.body).monospaced()
-                        .multilineTextAlignment(.trailing)
-                    // Common schedules, so a first routine needs no cron.
-                    Menu {
-                        ForEach(ScheduleText.presets, id: \.self) { cron in
-                            Button(ScheduleText.describe(cron) ?? cron) { schedule = cron }
-                        }
-                    } label: {
-                        Image(systemName: "clock")
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .help("Common schedules")
-                    .accessibilityLabel("Common schedules")
-                    .accessibilityIdentifier("schedulePresets")
-                }
-            }
-            .labeledContentStyle(InterfaceFormRowStyle())
-            Group {
-                switch Result(catching: { try CronSchedule(schedule) }) {
-                case .success(let cron):
-                    let times = cron.upcoming(after: .now, count: 3)
-                    let next = times.isEmpty ? "Never fires" :
-                        "Next: " + times.map { $0.formatted(date: .abbreviated, time: .shortened) }
-                            .joined(separator: ", ")
-                    Text([ScheduleText.describe(schedule), next].compactMap { $0 }.joined(separator: ". "))
-                case .failure(let error):
-                    Text(error.localizedDescription).foregroundStyle(Color.errorText)
-                }
-            }
-            .interfaceFont(.caption)
-            .foregroundStyle(Color.secondaryText)
-            .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

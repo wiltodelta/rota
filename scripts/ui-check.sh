@@ -19,6 +19,9 @@
 #   scripts/ui-check.sh --settings-only   Settings in the main window only
 #   ROTA_UI_QUESTION_HARNESS=antigravity scripts/ui-check.sh --questions-only
 #   ROTA_UI_TERMINAL=terminal scripts/ui-check.sh  use Terminal in both appearances
+#   python3 scripts/ui-suite.py --modes filters questions  build once, actions and render matrix
+# Internal suite options: --prepared MANIFEST, --phase all|actions|renders,
+# --appearance both|light|dark, --scale both|normal|zoom (filters only).
 # A failed check saves the screen, Rota's windows and its AX geometry under $OUT/failures.
 set -Eeuo pipefail  # -E: functions trip the ERR trap too
 cd "$(dirname "$0")/.."
@@ -33,7 +36,38 @@ else
 fi
 
 OUT="${ROTA_UI_OUT:-$(mktemp -d /tmp/rota-ui-results.XXXXXX)}"
+LIVE="${1:-}"
+[[ $# == 0 ]] || shift
+PREPARED=""; PHASE=all; APPEARANCE=both; SCALE=both
+while [[ $# -gt 0 ]]; do
+    [[ $# -ge 2 ]] || { echo "Missing value for $1" >&2; exit 2; }
+    case "$1" in
+        --prepared) PREPARED="$2" ;;
+        --phase) PHASE="$2" ;;
+        --appearance) APPEARANCE="$2" ;;
+        --scale) SCALE="$2" ;;
+        *) echo "Unknown UI option: $1" >&2; exit 2 ;;
+    esac
+    shift 2
+done
+case "$LIVE" in
+    ""|--full|--live|--filters-only|--questions-only|--settings-only|--harnesses-only|--restart-only|\
+        --keyboard-only|--scroll-only|--parallel-only|--paint-only|--switch-only) ;;
+    *) echo "Unknown UI mode: $LIVE" >&2; exit 2 ;;
+esac
+case "$PHASE" in all|actions|renders) ;; *) echo "Unknown UI phase: $PHASE" >&2; exit 2 ;; esac
+case "$APPEARANCE" in both) APPEARANCES=(light dark) ;; light|dark) APPEARANCES=("$APPEARANCE") ;;
+    *) echo "Unknown appearance: $APPEARANCE" >&2; exit 2 ;; esac
+case "$SCALE" in both) SCALES=(normal zoom) ;; normal|zoom) SCALES=("$SCALE") ;;
+    *) echo "Unknown scale: $SCALE" >&2; exit 2 ;; esac
+if [[ "$PHASE" != all || "$APPEARANCE" != both || "$SCALE" != both ]]; then
+    [[ "$LIVE" == --filters-only || "$LIVE" == --questions-only ]] \
+        || { echo "Phase and appearance selection require filters or questions mode" >&2; exit 2; }
+    [[ "$LIVE" == --filters-only || "$SCALE" == both ]] \
+        || { echo "Scale selection requires filters mode" >&2; exit 2; }
+fi
 WORK="$(mktemp -d /tmp/rota-ui-work.XXXXXX)"
+trap 'rm -rf "$WORK"' EXIT
 # The build under test keeps everything here; the command inside it follows ROTA_DATA_DIR too.
 export ROTA_DATA_DIR="$WORK/data"
 SUPPORT="$ROTA_DATA_DIR"
@@ -41,9 +75,14 @@ LOGS="$ROTA_DATA_DIR/Logs"
 DOMAIN="com.wiltodelta.rota.dev"
 APP="$PWD/Rota.app"
 DRIVER="$WORK/driver"
-LIVE="${1:-}"
 TERMINAL_MODE="${ROTA_UI_TERMINAL:-auto}"
 [[ -f "$AUDIT" ]] || { echo "Set ROTA_MACAUDIT to the shared macaudit.py helper." >&2; exit 1; }
+python3 scripts/ui_preparation.py idle
+if [[ -n "$PREPARED" ]]; then
+    python3 scripts/ui_preparation.py validate --manifest "$PREPARED" > "$WORK/prepared-paths"
+    { IFS= read -r APP; IFS= read -r DRIVER; } < "$WORK/prepared-paths"
+    export ROTA_BUNDLE_ID="$DOMAIN"
+fi
 
 pass() { echo "ok    $1"; }
 fail() {
@@ -59,8 +98,7 @@ check() { if "$@" >/dev/null 2>&1; then pass "${*: -1}"; else fail "${*: -1}"; f
 wait_value() {
     local actual attempt
     for ((attempt = 0; attempt < 30; attempt++)); do
-        actual="$("$DRIVER" value "$1")" || return 1
-        [[ "$actual" == "$2" ]] && return 0
+        if actual="$("$DRIVER" value "$1" 2>/dev/null)" && [[ "$actual" == "$2" ]]; then return 0; fi
         sleep 0.2
     done
     return 1
@@ -112,6 +150,12 @@ quit_rota() {
 }
 
 cleanup() {
+    if [[ ( -z "$LIVE" || "$LIVE" == --full || "$LIVE" == --live ) && -S "$SUPPORT/rota.sock" ]]; then
+        local routine
+        for routine in ui-shell-light ui-shell-dark; do
+            "$APP/Contents/Helpers/rota" stop "$routine" >/dev/null 2>&1 || true
+        done
+    fi
     if [[ "$LIVE" == --keyboard-only && -S "$SUPPORT/rota.sock" ]]; then
         "$APP/Contents/Helpers/rota" stop keyboard-running >/dev/null 2>&1 || true
     fi
@@ -198,8 +242,10 @@ case "$TERMINAL_MODE" in
     terminal) pass "terminal override: Terminal in both appearances" ;;
     *) fail "ROTA_UI_TERMINAL must be auto or terminal" ;;
 esac
-./create-app.sh >/dev/null
-swiftc -O scripts/ui-driver.swift -o "$DRIVER"
+if [[ -z "$PREPARED" ]]; then
+    RELEASE=0 ./create-app.sh >/dev/null
+    swiftc -O scripts/ui-driver.swift -o "$DRIVER"
+fi
 mkdir -p "$OUT" "$WORK/project"
 quit_rota
 defaults delete "$DOMAIN" >/dev/null 2>&1 || true
@@ -301,6 +347,11 @@ PYTHON
     launch "$appearance"
     "$DRIVER" press showQuestion
     check wait_visible cancelQuestion
+    if [[ "$PHASE" == renders && "$kind" == async ]]; then
+        render_question_forms "$appearance"
+        quit_rota
+        return
+    fi
     if [[ "$kind" == verification ]]; then
         "$DRIVER" reveal cancelQuestion
         check "$DRIVER" visible cancelQuestion
@@ -333,10 +384,11 @@ PYTHON
     "$DRIVER" set questionField-0 "A custom answer"
     wait_value composer "An unrelated draft" || fail "custom answers keep the ordinary editor independent"
     "$DRIVER" press questionOption-0-Blue
+    check wait_exists nextQuestion
     "$DRIVER" reveal nextQuestion
     "$DRIVER" press nextQuestion
     if [[ "${ROTA_UI_QUESTION_HARNESS:-codex}" == antigravity ]]; then
-        check "$DRIVER" visible questionOption-1-Pear
+        check wait_visible questionOption-1-Pear
         "$DRIVER" press questionOption-1-Pear
         "$DRIVER" press questionOption-1-Plum
         capture "UI check $appearance" "$appearance-async-question-multiple" 520
@@ -344,7 +396,7 @@ PYTHON
     fi
     local field=1
     [[ "${ROTA_UI_QUESTION_HARNESS:-codex}" == antigravity ]] && field=2
-    check "$DRIVER" exists "questionField-$field"
+    check wait_exists "questionField-$field"
     "$DRIVER" set "questionField-$field" "A separate answer"
     if [[ "$LIVE" == --scroll-only ]]; then
         local mode amount first window
@@ -398,6 +450,7 @@ PYTHON
     check wait_visible "answerQuestion-accept"
     capture "UI check $appearance" "$appearance-async-question-text" 520
     for _ in 1 2 3; do "$DRIVER" key command-plus; done
+    check wait_visible showQuestion
     "$DRIVER" press showQuestion
     check "$DRIVER" visible composer
     check wait_visible "answerQuestion-accept"
@@ -405,6 +458,36 @@ PYTHON
     "$DRIVER" key command-zero
     quit_rota
 
+}
+
+render_question_forms() {
+    local appearance="$1" field=1
+    "$DRIVER" set composer "An unrelated draft"
+    capture "UI check $appearance" "$appearance-async-question-finished" 520
+    "$DRIVER" press questionOption-0-Blue
+    check wait_exists nextQuestion
+    "$DRIVER" reveal nextQuestion
+    "$DRIVER" press nextQuestion
+    if [[ "${ROTA_UI_QUESTION_HARNESS:-codex}" == antigravity ]]; then
+        check wait_visible questionOption-1-Pear
+        "$DRIVER" press questionOption-1-Pear
+        "$DRIVER" press questionOption-1-Plum
+        capture "UI check $appearance" "$appearance-async-question-multiple" 520
+        "$DRIVER" press nextQuestion
+        field=2
+    fi
+    check wait_exists "questionField-$field"
+    "$DRIVER" set "questionField-$field" "A separate answer"
+    "$DRIVER" press showQuestion
+    check wait_visible answerQuestion-accept
+    capture "UI check $appearance" "$appearance-async-question-text" 520
+    for _ in 1 2 3; do "$DRIVER" key command-plus; done
+    # The zoom invalidates AX nodes even when the button remains visible.
+    check wait_visible showQuestion
+    "$DRIVER" press showQuestion
+    check wait_visible answerQuestion-accept
+    capture "UI check $appearance" "$appearance-async-question-text-zoom" 520
+    "$DRIVER" key command-zero
 }
 
 inject_question() {
@@ -447,26 +530,34 @@ check_mixed_questions() {
     launch "$appearance"
     "$APP/Contents/Helpers/rota" update "$routine" --harness claude --prompt "Synthetic initial message" >/dev/null
     "$DRIVER" menu "Run Now"
-    sleep 1
+    wait_text "Received: Synthetic initial message"
     session="$("$APP/Contents/Helpers/rota" sessions "$routine" --json \
         | python3 -c 'import json,sys; print(next(r["session"] for r in json.load(sys.stdin) if r["running"]))')"
     inject_question "$session" async-draft
     wait_exists questionField-note
     "$DRIVER" set questionField-note "Keep this answer"
-    "$DRIVER" set composer "Separate message"
-    "$DRIVER" press send
-    wait_text "Received: Separate message"
-    wait_value composer "" || fail "ordinary send clears only the ordinary editor"
+    if [[ "$PHASE" != renders ]]; then
+        "$DRIVER" set composer "Separate message"
+        "$DRIVER" press send
+        wait_text "Received: Separate message"
+        wait_value composer "" || fail "ordinary send clears only the ordinary editor"
+    fi
     "$DRIVER" set composer "Keep this ordinary draft"
+    if [[ "$PHASE" == renders ]]; then
+        # Read the committed binding after ending field editing, rather than the live field editor's AX value.
+        "$DRIVER" focus questionField-note
+    fi
     wait_value questionField-note "Keep this answer" || fail "the answer was entered separately"
     wait_value composer "Keep this ordinary draft" || fail "the ordinary draft was entered"
     inject_question "$session" blocking
     wait_value questionTitle "Blocking approval" || fail "blocking request takes priority"
     check "$DRIVER" visible composer
     check "$DRIVER" exists composerBlockingNote
-    "$DRIVER" focus composer
-    "$DRIVER" key return
-    wait_value composer "Keep this ordinary draft" || fail "blocking input keeps the ordinary draft"
+    if [[ "$PHASE" != renders ]]; then
+        "$DRIVER" focus composer
+        "$DRIVER" key return
+        wait_value composer "Keep this ordinary draft" || fail "blocking input keeps the ordinary draft"
+    fi
     "$DRIVER" reveal cancelQuestion
     capture "UI check $appearance" "$appearance-mixed-blocking-question" 520
     "$DRIVER" press cancelQuestion
@@ -481,15 +572,17 @@ check_mixed_questions() {
     capture "UI check $appearance" "$appearance-terminal-dialog-question" 520
     "$DRIVER" press cancelQuestion
     wait_value questionTitle "Async note" || fail "async question returns after the dialog is canceled"
-    "$DRIVER" reveal answerQuestion-accept
-    "$DRIVER" press answerQuestion-accept
-    wait_value composer "Keep this ordinary draft" || fail "answering must preserve the ordinary draft"
-    [[ "$("$DRIVER" text-count 'Received: Keep this ordinary draft')" == 0 ]] \
-        || fail "answering must not automatically send the ordinary draft"
-    "$DRIVER" focus composer
-    "$DRIVER" key return
-    wait_text "Received: Keep this ordinary draft"
-    wait_value composer "" || fail "ordinary Return sends only after an explicit send"
+    if [[ "$PHASE" != renders ]]; then
+        "$DRIVER" reveal answerQuestion-accept
+        "$DRIVER" press answerQuestion-accept
+        wait_value composer "Keep this ordinary draft" || fail "answering must preserve the ordinary draft"
+        [[ "$("$DRIVER" text-count 'Received: Keep this ordinary draft')" == 0 ]] \
+            || fail "answering must not automatically send the ordinary draft"
+        "$DRIVER" focus composer
+        "$DRIVER" key return
+        wait_text "Received: Keep this ordinary draft"
+        wait_value composer "" || fail "ordinary Return sends only after an explicit send"
+    fi
     "$APP/Contents/Helpers/rota" stop "$routine" >/dev/null
     for _ in {1..60}; do
         if [[ "$(session_value "$routine" cancelled)" == True* ]]; then stopped=1; break; fi
@@ -582,8 +675,19 @@ check_session_filter_union() {
     "$DRIVER" choose sessionFilter 'All Sessions'
 }
 
+render_session_filter_union() {
+    "$DRIVER" choose sessionFilter 'All Sessions'
+    "$DRIVER" choose sessionFilter Failed
+    "$DRIVER" choose sessionFilter 'Needs Attention' 'Needs Attention, Failed'
+    capture 'Keyboard conversations' "$appearance-combined-filters-$zoom"
+    "$DRIVER" choose sessionFilter Running 'Running, Needs Attention, Failed'
+    "$DRIVER" choose sessionFilter Unread 'Running, Needs Attention, Unread, Failed'
+    capture 'Keyboard conversations' "$appearance-all-filter-tokens-$zoom"
+    "$DRIVER" choose sessionFilter 'All Sessions'
+}
+
 if [[ "$LIVE" == --filters-only ]]; then
-    for appearance in light dark; do
+    for appearance in "${APPEARANCES[@]}"; do
         python3 scripts/fixtures/keyboard-navigation.py "$SUPPORT" "$WORK/project"
         read -r keyboard_alpha keyboard_beta keyboard_gamma < <(
             python3 - "$SUPPORT/keyboard-ids.json" <<'PYTHON_IDS'
@@ -596,9 +700,15 @@ PYTHON_IDS
         launch "$appearance"
         "$DRIVER" window 'Keyboard conversations' 820 600
         "$DRIVER" key command-zero
-        for zoom in normal zoom; do
+        for zoom in "${SCALES[@]}"; do
+            "$DRIVER" key command-zero
             if [[ "$zoom" == zoom ]]; then
                 for _ in 1 2 3; do "$DRIVER" key command-plus; done
+            fi
+            check wait_visible sessionFilter
+            if [[ "$PHASE" == renders ]]; then
+                render_session_filter_union
+                continue
             fi
             check_session_filter_union
             "$DRIVER" choose sessionFilter 'Needs Attention'
@@ -614,7 +724,7 @@ PYTHON_IDS
         done
         quit_rota
     done
-    pass 'combined session filters, individual removal, reset and keyboard navigation in both appearances'
+    pass "session filters: $PHASE, $APPEARANCE, $SCALE"
     exit 0
 fi
 
@@ -1112,7 +1222,7 @@ PYTHON
 fi
 
 if [[ "$LIVE" == --questions-only || "$LIVE" == --scroll-only ]]; then
-    for appearance in light dark; do
+    for appearance in "${APPEARANCES[@]}"; do
         rm -rf "$SUPPORT"
         check_question_forms "$appearance" "ui-shell-$appearance"
         if [[ "$LIVE" == --questions-only ]]; then
@@ -1121,7 +1231,7 @@ if [[ "$LIVE" == --questions-only || "$LIVE" == --scroll-only ]]; then
         fi
         quit_rota
     done
-    pass "question forms in both appearances"
+    pass "question forms: $PHASE, $APPEARANCE"
     exit 0
 fi
 
@@ -1170,7 +1280,9 @@ for factor, (bar, circle, actions, title, sidebar) in zip((1, 1.5), (rects[:5], 
     assert abs(actions[3] - 36 * factor) <= 0.5, ("capsule height", actions)
     for item in (circle, actions, title):
         assert abs(item[1] + item[3] / 2 - bar[1] - bar[3] / 2) <= 0.75, ("vertical center", item)
-    assert abs(circle[0] - sidebar[0] - sidebar[2] - 8 * factor) <= 0.5, ("sidebar placement", circle, sidebar)
+    # The floating sidebar's AX outline has an inset origin. Its measured width
+    # determines the toolbar padding, which starts at the toolbar's own origin.
+    assert abs(circle[0] - bar[0] - sidebar[2] - 8 * factor) <= 0.5, ("sidebar placement", circle, sidebar)
     assert abs(bar[0] + bar[2] - actions[0] - actions[2] - 12 * factor) <= 0.5, ("trailing margin", actions)
 assert abs(rects[8][3] - rects[3][3] * 1.5) <= 1.5, "title height follows zoom"
 assert abs(rects[5][1] - rects[0][1]) <= 0.5, "bar stays at the window top"
@@ -1202,9 +1314,11 @@ PYTHON
     "$DRIVER" set routineSkill "ui-shell-$appearance"
     "$DRIVER" set routineName "UI check $appearance"
     "$DRIVER" set routineFolder "$WORK/project"
+    "$DRIVER" reveal routineRepeat
+    "$DRIVER" choose routineRepeat Custom
     "$DRIVER" set routineSchedule "0 9 * * 1"
     check wait_exists routinePrompt
-    "$DRIVER" set routinePrompt 'echo hello from rota; sleep 15; echo done'
+    "$DRIVER" set routinePrompt "echo hello from rota; while [[ ! -f finish-shell-$appearance ]]; do sleep 1; done; echo done"
     # An agent shows the model and effort its CLI lists; the list loads in the background.
     "$DRIVER" choose routineHarness Codex; sleep 4
     check "$DRIVER" exists routineModel
@@ -1257,6 +1371,7 @@ PYTHON
     [[ -n "$attach" && "$(terminal_of "$attach")" == "$expected" ]] && pass "opens in $expected" \
         || fail "opens in $expected: [$(terminal_of "${attach:-0}")]"
     capture "UI check $appearance" "$appearance-running"
+    touch "$WORK/project/finish-shell-$appearance"
     for _ in $(seq 1 20); do
         sleep 1
         read -r succeeded session <<<"$(session_value "ui-shell-$appearance" succeeded)"
@@ -1276,7 +1391,7 @@ PYTHON
     check "$DRIVER" exists deleteSession
 
     # A session that asks for a reply shows it until it is answered or dismissed.
-    Rota.app/Contents/Helpers/rota notify --session "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[0]["id"])' "$SUPPORT/runs/ui-shell-$appearance.json")" \
+    "$APP/Contents/Helpers/rota" notify --session "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[0]["id"])' "$SUPPORT/runs/ui-shell-$appearance.json")" \
         --needs-reply "Approve the weekly report?" >/dev/null && pass "notify needs reply" || fail "notify needs reply"
     sleep 1.5
     # A command takes no reply, so the banner asks for a look and a Done.

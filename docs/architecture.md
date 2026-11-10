@@ -515,6 +515,24 @@ flowchart LR
   in the routine's history and out of `allRecords()`, the sessions list.
   Five failed scheduled runs in a row (`failuresBeforePause`; skips and manual
   runs do not count) turn the routine off and notify once.
+- `RoutineSchedule.swift` adds one-time dates (`scheduledAt`, `repeats: false`)
+  and optional `runLimit` for recurring cron. A recurring `scheduledAt` is a
+  not-before bound. Legacy records decode as recurring, with no bound or limit.
+  `scheduledRunCount` and `scheduleCompletedAt` belong to the routine, independent
+  of retained session history. The scheduler persists each scheduled attempt's
+  reservation before launching any harness, including Shell and both Claude
+  modes. Launch failures consume an attempt; manual runs, continuations, automatic
+  recovery retries and skipped slots do not. Recovery retries bypass a new slot
+  reservation, including after the final slot completed the schedule. A final attempt disables the schedule and clears
+  `nextFire`, while its running session continues normally. A one-time slot waits
+  for an existing session within `missedRunGrace`; beyond that grace it records
+  one skip and completes without an attempt. Routine saves preserve progress
+  unless scheduling fields change. Completed schedules require an edit to rearm.
+  CLI and MCP use the same fields and validation: `--at` alone means one time;
+  `--schedule` selects cron, `--repeat --at` adds a start bound, `--runs` sets a
+  total and `--no-run-limit` removes it. Dates require an ISO 8601 time zone and
+  display in the Mac's local zone. `scheduleState` and `remainingRuns` expose the
+  lifecycle separately from a session's outcome.
 - `Resilience.swift`: the Mac cuts runs off, and Rota picks them up. `tick`
   starts nothing while `isOnline` is false (`MacState` watches `NWPathMonitor`
   and `SleepState`), so a slot due on waking waits for the network, and one due
@@ -651,6 +669,11 @@ The native list can partly clip a wrapped last row at larger interface scales;
 this also reproduces in the published 0.2.23 build, independently of menu focus.
 
 `SessionFilters` combines selected categories with OR, using an empty set for All Sessions.
+`AppModel` persists their raw values in `sessionFilterCategories` in its own
+UserDefaults domain and restores them on launch. Unknown values are ignored.
+The initial window selection uses the restored filter's destination, so opening
+the window does not clear the filter by selecting an unrelated newest session.
+`SessionFilterPersistenceTests` covers restoration, reset and invalid saved values.
 Menu checkmarks toggle categories independently; each sidebar token removes one category.
 `SessionFilterFlow` packs tokens in reading order within the sidebar width, wrapping
 only when the next token does not fit. Its spacing follows the interface scale.
@@ -1171,6 +1194,13 @@ alignment defect remained.
 
 ## Checking the UI
 
+For several affected surfaces, `python3 scripts/ui-suite.py --modes filters questions`
+prepares one signed development bundle and AX driver, then verifies their hashes
+and the checkout inputs around every worker phase. It separates reference action
+checks from render variants for filters and questions while keeping their theme
+and scale coverage. Other modes share the preparation and retain their checks.
+The matrix, isolation, failure handling and timing outputs are in [UI suites](ui-checks.md).
+
 `scripts/ui-check.sh` builds the app and drives it through the Accessibility
 API with `scripts/ui-driver.swift` (System Events clicks and keystrokes do not
 reach the windows here; `AXPress`, `AXValue` and a key event posted to Rota's
@@ -1539,6 +1569,12 @@ parent already exited successfully. Synthetic tests cover a TERM-ignoring helper
 and an exited parent with an inherited output pipe.
 
 ## Feature coverage across harnesses
+
+One-time dates and finite repetition are enforced in the shared scheduler before
+any runner starts. They apply to Claude stream and interactive, Codex, Grok,
+Antigravity and Shell without requiring harness-specific scheduling support.
+`RoutineScheduleTests` verifies every harness's one-time reservation, persistence,
+and completion, plus finite repetition, manual-run exclusion and missed slots.
 
 Capabilities belong to `LaunchMode`, including Claude's two execution modes,
 not just to the harness name. `HarnessCapabilities` is the code contract;

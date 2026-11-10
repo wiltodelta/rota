@@ -7,7 +7,8 @@ struct NewRoutineSheet: View {
     @Environment(\.dismiss) private var dismiss
     // A routine made here runs on its schedule from the start; only imports start off.
     @State private var draft = Routine(id: "", name: "", workingDirectory: "", schedule: "0 9 * * 1-5",
-                                       enabled: true, prompt: "")
+                                       enabled: true, prompt: "", scheduledAt: RoutineScheduleForm.suggestedDate(),
+                                       repeats: false)
 
     private var identifierTaken: Bool { model.scheduler.routine(draft.id) != nil }
 

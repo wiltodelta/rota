@@ -56,7 +56,7 @@ struct RoutineDetail: View {
 
     private var summary: some View {
         VStack(alignment: .leading, spacing: metrics.points(3)) {
-            Text(ScheduleText.describe(routine.schedule) ?? routine.schedule).interfaceFont(.callout)
+            Text(routine.scheduleDescription).interfaceFont(.callout)
             // Only the folder gives way when the line is short of room.
             HStack(spacing: 0) {
                 Text("\(state) \u{00B7} \(harness) \u{00B7} ").layoutPriority(1)
@@ -79,7 +79,9 @@ struct RoutineDetail: View {
                     Text("Scheduled").interfaceFont(.body)
                 }
                 .toggleStyle(.switch)
-                .help(routine.enabled ? "Runs on schedule; turn off to pause" : "Paused; turn on to run on schedule")
+                .disabled(routine.isScheduleComplete)
+                .help(routine.isScheduleComplete ? "Schedule complete; edit its scheduling settings to start again"
+                      : routine.enabled ? "Runs on schedule; turn off to pause" : "Paused; turn on to run on schedule")
                 .accessibilityIdentifier("routineEnabled")
                 if model.scheduler.hasActiveSession(routine.id) {
                     Button(interfaceTitle: "Stop", systemImage: "stop.fill") { model.scheduler.stop(routine.id) }
@@ -108,6 +110,7 @@ struct RoutineDetail: View {
 
     /// "Next run Mon, Oct 12, 9:00 AM", or why it will not run.
     private var state: String {
+        if routine.isScheduleComplete { return "Schedule complete" }
         guard routine.enabled else { return "Paused" }
         guard let next = routine.nextFire else { return "No upcoming run" }
         return "Next run \(NextRunFormat.string(next))"

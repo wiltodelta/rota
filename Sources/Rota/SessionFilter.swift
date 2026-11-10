@@ -41,12 +41,22 @@ enum SessionFilter: String, CaseIterable, Identifiable {
 /// An empty selection means all sessions; selected categories combine with OR.
 struct SessionFilters: Equatable {
     static let all = SessionFilters()
+    static let defaultsKey = "sessionFilterCategories"
     private var categories: Set<SessionFilter> = []
 
     init() {}
 
     init(_ filter: SessionFilter) {
         if filter != .all { categories.insert(filter) }
+    }
+
+    init(defaults: UserDefaults) {
+        let values = defaults.stringArray(forKey: Self.defaultsKey) ?? []
+        categories = Set(values.compactMap(SessionFilter.init(rawValue:))).subtracting([.all])
+    }
+
+    func persist(to defaults: UserDefaults) {
+        defaults.set(selected.map(\.rawValue), forKey: Self.defaultsKey)
     }
 
     var selected: [SessionFilter] { SessionFilter.allCases.filter { categories.contains($0) } }
