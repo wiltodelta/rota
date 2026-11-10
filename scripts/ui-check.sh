@@ -23,7 +23,16 @@
 set -Eeuo pipefail  # -E: functions trip the ERR trap too
 cd "$(dirname "$0")/.."
 
-OUT="${ROTA_UI_OUT:-/tmp/rota-ui-check}"
+# Default to a disposable VM. --host is only for host diagnostics agreed with Victor.
+AUDIT="${ROTA_MACAUDIT:-$HOME/Documents/GitHub/claude-config/skills/ui-audit-macos/scripts/macaudit.py}"
+if [[ "${1:-}" == --host ]]; then
+    shift
+    uv run -q "$AUDIT" scope --allow-host
+else
+    uv run -q "$AUDIT" scope
+fi
+
+OUT="${ROTA_UI_OUT:-$(mktemp -d /tmp/rota-ui-results.XXXXXX)}"
 WORK="$(mktemp -d /tmp/rota-ui-work.XXXXXX)"
 # The build under test keeps everything here; the command inside it follows ROTA_DATA_DIR too.
 export ROTA_DATA_DIR="$WORK/data"
@@ -34,7 +43,6 @@ APP="$PWD/Rota.app"
 DRIVER="$WORK/driver"
 LIVE="${1:-}"
 TERMINAL_MODE="${ROTA_UI_TERMINAL:-auto}"
-AUDIT="${ROTA_MACAUDIT:-$HOME/Documents/GitHub/claude-config/skills/ui-audit-macos/scripts/macaudit.py}"
 [[ -f "$AUDIT" ]] || { echo "Set ROTA_MACAUDIT to the shared macaudit.py helper." >&2; exit 1; }
 
 pass() { echo "ok    $1"; }

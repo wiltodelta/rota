@@ -41,8 +41,9 @@ Run `scripts/ui-check.sh --harnesses-only` for Reasoning expansion, hidden empty
 reasoning, tool image previews, collapsed/expanded diffs and version warnings in both appearances at the minimum
 window width. It uses disabled
 synthetic sessions and requires no installed agent. The full `scripts/ui-check.sh`
-covers the other application surfaces. Use the native capture notice and preflight
-procedure; the driver also checks the console before delivering a key. Its imported names may be personal; keep captures outside Git.
+covers the other application surfaces. Run in a separate macOS VM and use the
+guest preflight procedure. The native capture notice applies only to explicitly
+agreed host diagnostics; the driver also checks the console before delivering a key. Its imported names may be personal; keep captures outside Git.
 
 Codex continuation restores archived sessions through native `unarchive` before
 resume; automatic recovery must never do that. Compressed rollout verification

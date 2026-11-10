@@ -3,11 +3,19 @@
 # Requires Accessibility and Screen Recording for the invoking terminal.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# Default to a disposable VM. --host is only for host diagnostics agreed with Victor.
+AUDIT="${ROTA_MACAUDIT:-$HOME/Documents/GitHub/claude-config/skills/ui-audit-macos/scripts/macaudit.py}"
+if [[ "${1:-}" == --host ]]; then
+    shift
+    uv run -q "$AUDIT" scope --allow-host
+else
+    uv run -q "$AUDIT" scope
+fi
 ROOT="$PWD"
 APP="$ROOT/Rota.app"
 DOMAIN="com.wiltodelta.rota.dev"
 OUT="${ROTA_SCREENSHOT_OUT:-$ROOT/docs/screenshots}"
-AUDIT="${ROTA_MACAUDIT:-$HOME/Documents/GitHub/claude-config/skills/ui-audit-macos/scripts/macaudit.py}"
 [[ -f "$AUDIT" ]] || { echo "Set ROTA_MACAUDIT to the shared macaudit.py helper." >&2; exit 1; }
 if pgrep -f "$APP/Contents/MacOS/Rota" >/dev/null; then
     echo "Close the repository's development build before capturing." >&2

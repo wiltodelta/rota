@@ -26,7 +26,9 @@ same backdrop margin in sRGB. It never repairs or replaces interface pixels.
 
 Accessibility and Screen Recording must already be allowed for the invoking
 terminal. The shared `macaudit.py` helper provides the unlocked-session check
-and on-screen driving notice. The script looks in the maintainer's shared
+and VM guard. In the guest, notice commands are silent and do not show a panel.
+A physical Mac is refused unless `--host` is explicitly selected for agreed
+host diagnostics; the on-screen driving notice then applies. The script looks in the maintainer's shared
 configuration checkout; set `ROTA_MACAUDIT` to use a different helper location.
 If another capture session owns the notice, wait for it to finish.
 

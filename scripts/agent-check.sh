@@ -7,6 +7,9 @@
 # (see CLAUDE.md). Run ./create-app.sh first.
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"; APP="$REPO/Rota.app"; R="$APP/Contents/Helpers/rota"
+# Live CLI integration creates notifications and agent sessions; run only in its disposable VM.
+AUDIT="${ROTA_MACAUDIT:-$HOME/Documents/GitHub/claude-config/skills/ui-audit-macos/scripts/macaudit.py}"
+uv run -q "$AUDIT" scope || { echo "agent-check.sh is VM-only; --host is not supported." >&2; exit 1; }
 W=$(mktemp -d /tmp/rota-e2e-work.XXXX)
 # The build under test and every command here use this data folder.
 export ROTA_DATA_DIR="$W/data"; S="$ROTA_DATA_DIR"

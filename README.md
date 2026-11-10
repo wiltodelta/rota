@@ -207,7 +207,10 @@ Run `bash maintain.sh` for lint, tests, and the signed bundle build.
 window width; its optional `--live` mode uses a real Codex session.
 `scripts/capture-screenshots.sh` regenerates the README images from disabled
 synthetic routines. See the [capture recipe](docs/screenshots/README.md) for
-permissions and setup.
+permissions and setup. UI scripts require a separate macOS VM by default.
+Use `--host` as the first argument only for explicitly agreed host diagnostics.
+Guest runs do not display a keyboard and mouse warning. The live
+`scripts/agent-check.sh` integration check requires a VM and has no host mode.
 
 Implementation details: [architecture](docs/architecture.md),
 [transcript format](docs/transcript-format.md), and
