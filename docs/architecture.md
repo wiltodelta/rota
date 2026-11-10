@@ -559,8 +559,9 @@ flowchart LR
   transport error; cancellation and routine time limits are also left alone.
 - A finished session is unread until `markRead`, which `SessionView` calls
   when it shows a finished session (`RunRecord.readAt`, `isUnread`); the
-  sidebar and the panel show unread counts. The Dock badge counts only records
-  with `attention != nil`, including pending agent questions, and clears at zero.
+  sidebar and the panel show unread counts. The Dock badge counts records with
+  `isUnread || attention != nil`, including pending agent questions, counting each
+  record once, and clears at zero.
   `AppDelegate.observeStatus` tracks the history snapshot to keep it current.
   Notification authorization includes badges so macOS can display the count.
   Opening a window clears the cached badge before entering regular activation

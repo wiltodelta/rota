@@ -145,8 +145,8 @@
   Mac notification channel.
 - **An inbox.** A session that finished since you last opened it is unread:
   bold in the list with a blue dot and counted in the menu bar panel. The Dock
-  badge counts only sessions that need your reply or attention. It clears when
-  you answer or dismiss the last request, even if unread sessions remain.
+  badge counts sessions that are unread or need your reply or attention, counting
+  each session once. It clears when all sessions are read and all requests are resolved.
 - **Interface scale.** Settings > General scales app content from 80% to 150%.
   Rota uses bundled IBM Plex Sans for interface text.
   View > Zoom In, Zoom Out and Reset (Command-Plus, Command-Minus,

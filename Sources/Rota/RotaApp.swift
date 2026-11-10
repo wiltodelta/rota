@@ -359,8 +359,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if unread > 0 { tip += ", \(unread) unread" }
         if let version = Updater.shared.pendingVersion { tip += ". Version \(version) is available" }
         button.toolTip = tip
-        // The Dock shows the icon only while a window is open; count sessions needing a response.
-        NSApp.dockTile.badgeLabel = waiting > 0 ? "\(waiting)" : nil
+        // Count each unread session or session needing a response once while the Dock icon is visible.
+        let pending = records.filter { $0.isUnread || $0.attention != nil }.count
+        NSApp.dockTile.badgeLabel = pending > 0 ? "\(pending)" : nil
     }
 
     @objc private func statusItemClicked() {
