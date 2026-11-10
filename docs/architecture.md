@@ -1399,12 +1399,15 @@ missing follow-up result cannot reuse the first turn's success. Stop and time
 limits terminate the owned CLI
 and escalate to SIGKILL after three seconds if needed.
 
-Observed on 2026-10-21: agy retried a transport timeout successfully, then
-reported that historical error again at the end of later continuations,
-including after streaming a complete response. Rota keeps the failed outcome
-and applies the bounded network recovery above; response text alone cannot
-override the CLI's failure. The stale final error remains an upstream
-verification target, not proof of a new connection failure on each continuation.
+Observed on 2026-10-21 and 2026-11-10: after `agy` recovers from an
+`error_message` step during a turn, it still reports that historical error in
+the turn's final `result` (`status: "ERROR"`, `finished_reason: "error"`, exit
+1) and repeats it at the end of later continuations of the same conversation.
+When the turn's final wire step is a completed `agent_response` (`state: "DONE"`)
+and no archive error step has a higher step index, Rota suppresses the stale
+`result` error and treats the turn and its exit code 1 as succeeded. Any error
+step after the last completed response, or a turn that ends without a completed
+`agent_response`, still fails.
 
 The model picker starts with `agy models`, then validates candidate family
 aliases with the read-only `agy -p /model --model <family> --output-format json`.

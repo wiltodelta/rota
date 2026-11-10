@@ -36,6 +36,7 @@ final class LiveHarnessTests: XCTestCase {
         nonisolated(unsafe) var control: RunControl?
         nonisolated(unsafe) var configuration = SessionConfiguration()
         let events = RunEvents(session: { id in
+            guard session != id else { return }
             session = id
             if let stopAfter {
                 DispatchQueue.main.asyncAfter(deadline: .now() + stopAfter) { control?.stop() }

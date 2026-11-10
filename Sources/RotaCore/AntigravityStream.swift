@@ -15,6 +15,8 @@ struct AntigravityStream {
     }
 
     private var hadText = false
+    private var completedResponse = false
+    private(set) var recoveredStaleError = false
     private var tools = Set<Int>()
     private var subagents = Set<String>()
     private var textStep: Int?
@@ -42,6 +44,8 @@ struct AntigravityStream {
     }
 
     private mutating func step(_ step: [String: Any]) -> [Event] {
+        completedResponse = false
+        recoveredStaleError = false
         if step["step_type"] as? String == "unknown" { return [.unknownStep] }
         if step["step_type"] as? String == "agent_response" {
             return response(step)
@@ -82,6 +86,7 @@ struct AntigravityStream {
         }
         if step["state"] as? String == "DONE" {
             writingText = false
+            completedResponse = true
             events.append(.textEnded(index))
         }
         return events
@@ -104,9 +109,15 @@ struct AntigravityStream {
         var events: [Event] = []
         if let id = result["conversation_id"] as? String, !id.isEmpty { events.append(.session(id)) }
         if !hadText, let response = result["response"] as? String, !response.isEmpty { events.append(.text(response)) }
+        // After a recovered error_message step, agy repeats that historical error in
+        // the final result of the completed turn and later continuations.
+        recoveredStaleError = completedResponse && result["status"] as? String == "ERROR"
+            && ["", "error"].contains(result["finished_reason"] as? String ?? "")
+            && !(result["error"] as? String ?? "").isEmpty
         hadText = false
+        completedResponse = false
         writingText = false
-        let (outcome, error) = Self.outcome(result)
+        let (outcome, error) = recoveredStaleError ? (.succeeded, nil) : Self.outcome(result)
         if let error { events.append(.item(.error, error)) }
         events.append(.result(outcome))
         return events

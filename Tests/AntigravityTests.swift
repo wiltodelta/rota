@@ -240,4 +240,98 @@ final class AntigravityTests: XCTestCase {
         let text = try String(contentsOf: log, encoding: .utf8)
         if status != nil { XCTAssertTrue(text.contains("answer"), text) }
     }
+
+    func testRecoveredHistoricalErrorDoesNotFailCompletedTurnOrContinuation() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("rota-stale-\(UUID())")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = UUID().uuidString.lowercased()
+        let stale = "API error (attempt 1): request failed: read tcp [2001:db8::1]:443: read: no route to host"
+        let archive = try XCTUnwrap(AntigravityQuestionArchive(session: session, home: folder))
+        try FileManager.default.createDirectory(at: archive.file.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        let initRow = #"{"event":"init","conversation_id":"\#(session)","init":{}}"#
+        let firstArchive = """
+        {"step_index":5,"type":"ERROR_MESSAGE","status":"DONE","error":"\(stale)"}
+        {"step_index":6,"type":"PLANNER_RESPONSE","status":"DONE","content":"First answer"}
+
+        """
+        try Data(firstArchive.utf8).write(to: archive.file)
+        let (firstOutcome, firstItems) = try runPeer(lines: [
+            initRow,
+            #"{"event":"step_update","step_update":{"step_index":5,"step_type":"error_message","state":"DONE"}}"#,
+            responseLine(step: 6, text: "First answer"),
+            errorResultLine(session: session, response: "First answer", error: stale)
+        ], folder: folder)
+        XCTAssertEqual(firstOutcome, .succeeded)
+        XCTAssertEqual(firstItems.filter { $0.kind == .error }.map(\.text), [stale])
+        XCTAssertEqual(firstItems.filter { $0.kind == .agent }.map(\.text), ["First answer"])
+
+        try appendArchive(#"{"step_index":7,"type":"PLANNER_RESPONSE","status":"DONE","content":"Second answer"}"#,
+                          to: archive.file)
+        let (secondOutcome, secondItems) = try runPeer(lines: [
+            initRow, responseLine(step: 7, text: "Second answer"),
+            errorResultLine(session: session, response: "Second answer", error: stale)
+        ], folder: folder, resume: session)
+        XCTAssertEqual(secondOutcome, .succeeded)
+        XCTAssertEqual(secondItems.filter { $0.kind == .error }.map(\.text), [])
+        XCTAssertEqual(secondItems.filter { $0.kind == .agent }.map(\.text), ["Second answer"])
+
+        try appendArchive(#"{"step_index":9,"type":"ERROR_MESSAGE","status":"DONE","error":"Late archive failure"}"#,
+                          to: archive.file)
+        let (thirdOutcome, thirdItems) = try runPeer(lines: [
+            initRow, responseLine(step: 8, text: "Partial"),
+            errorResultLine(session: session, response: "Partial", error: "Late archive failure")
+        ], folder: folder)
+        XCTAssertEqual(thirdOutcome, .failed(exitCode: 1))
+        XCTAssertEqual(thirdItems.filter { $0.kind == .error }.map(\.text), [stale, "Late archive failure"])
+
+        var stream = AntigravityStream()
+        _ = events(responseLine(step: 8, text: "Intermediate"), stream: &stream)
+        _ = events(#"""
+        {"event":"step_update","step_update":{"step_index":9,"step_type":"error_message","state":"DONE"}}
+        """#, stream: &stream)
+        XCTAssertEqual(events(errorResultLine(session: session, response: "", error: "Quota exhausted"),
+                              stream: &stream),
+                       [.session(session), .item(.error, "Quota exhausted"), .result(.failed(exitCode: 1))])
+    }
+
+    private func responseLine(step: Int, text: String) -> String {
+        #"{"event":"step_update","step_update":{"step_index":\#(step),"step_type":"agent_response","#
+            + #""state":"DONE","text_delta":"\#(text)"}}"#
+    }
+
+    private func errorResultLine(session: String, response: String, error: String) -> String {
+        #"{"event":"result","result":{"conversation_id":"\#(session)","status":"ERROR","#
+            + #""response":"\#(response)","error":"\#(error)","finished_reason":"error"}}"#
+    }
+
+    private func appendArchive(_ row: String, to file: URL) throws {
+        let handle = try FileHandle(forWritingTo: file)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((row + "\n").utf8))
+    }
+
+    private func runPeer(lines: [String], folder: URL, resume: String? = nil) throws -> (RunOutcome, [TranscriptItem]) {
+        let peer = folder.appendingPathComponent("peer-\(UUID())")
+        let body = lines.map { "printf '%s\\n' '\($0)'" }.joined(separator: "\n")
+        let script = "#!/bin/zsh\n[[ \"$1\" == -p ]] && exit 1\nIFS= read -r _\n\(body)\nexit 1\n"
+        try script.write(to: peer, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: peer.path)
+        let log = folder.appendingPathComponent("log-\(UUID()).log")
+        let spec = LaunchSpec(executable: peer.path, prompt: "prompt", arguments: [], workingDirectory: folder.path,
+                              environment: ["HOME": folder.path], mode: .antigravityStream, timeout: 10,
+                              log: log, resume: resume)
+        let finished = expectation(description: "peer finished")
+        var result: RunOutcome?
+        let control = try ProcessLauncher().launch(spec, events: RunEvents(session: { _ in }, finished: { outcome in
+            result = outcome
+            finished.fulfill()
+        }))
+        wait(for: [finished], timeout: 15)
+        withExtendedLifetime(control) {}
+        var reader = TranscriptReader()
+        return (try XCTUnwrap(result), reader.read(log: log, finished: true).items)
+    }
 }

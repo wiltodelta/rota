@@ -161,8 +161,14 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
     private func finishTurn(_ result: RunOutcome) {
         journal.endText()
         writingText = false
+        let completedStep = completedTextStep
         completedTextStep = nil
         readQuestions()
+        var result = result
+        if stream.recoveredStaleError, let lastError = questions?.lastErrorStep,
+           completedStep.map({ lastError > $0 }) ?? true {
+            result = .failed(exitCode: 1)
+        }
         if outcome == nil || result.isFailure { outcome = result }
         if spec.adopt { return }
         if !pending.isEmpty, stopReason == nil {
@@ -216,6 +222,7 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
         let nativeOutcome: RunOutcome
         switch status {
         case 0: nativeOutcome = outcome ?? .interrupted
+        case 1 where stream.recoveredStaleError && outcome == .succeeded: nativeOutcome = .succeeded
         case -1: nativeOutcome = .interrupted
         // A turn that ended early explains its own nonzero exit; success, failure and no result take the exit code.
         default:

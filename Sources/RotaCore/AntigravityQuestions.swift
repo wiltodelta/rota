@@ -67,6 +67,7 @@ struct AntigravityQuestionArchive {
     }
     private var reasoning: [Reasoning] = []
     private var errors: [(String, String)] = []
+    private(set) var lastErrorStep: Int?
 
     mutating func takeErrors() -> [(String, String)] {
         defer { errors = [] }
@@ -136,6 +137,7 @@ struct AntigravityQuestionArchive {
         if let skipThroughStep, step <= skipThroughStep { return [] }
         if row["type"] as? String == "ERROR_MESSAGE"
             || (row["type"] as? String == "GENERIC" && row["status"] as? String == "ERROR") {
+            lastErrorStep = max(lastErrorStep ?? step, step)
             let id = "antigravity/\(session)/\(step)/error"
             if let text = AntigravityTranscript.errorText(row),
                !text.isEmpty, seen.insert(id).inserted { errors.append((id, text)) }
