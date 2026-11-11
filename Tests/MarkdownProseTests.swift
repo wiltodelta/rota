@@ -7,6 +7,18 @@ import XCTest
 final class MarkdownProseTests: XCTestCase {
     private let settings = ChatTextSettings(defaults: UserDefaults(suiteName: "MarkdownProseTests")!)
 
+    func testLocalReportLinkOpensThroughWorkspaceSeam() throws {
+        let text = MarkdownProse.inline("[Open report](/tmp/report/index.html)",
+                                        text: settings, font: settings.appKitBody)
+        let link = try XCTUnwrap(text.attribute(.link, at: 0, effectiveRange: nil) as? URL)
+        let view = ProseTextView.make()
+        view.textStorage?.setAttributedString(text)
+        var opened: [URL] = []
+        view.openFile = { opened.append($0) }
+        view.clicked(onLink: link, at: 0)
+        XCTAssertEqual(opened, [URL(fileURLWithPath: "/tmp/report/index.html")])
+    }
+
     func testProseBlocksShareOneViewBetweenCodeTablesAndImages() {
         let blocks = MarkdownBlock.parse("""
             ## Summary

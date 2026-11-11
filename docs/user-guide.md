@@ -167,6 +167,7 @@
   including System and System monospaced, are preserved.
 - **Agent Markdown as it is meant to read:** headings, lists, code blocks and
   tables with wrapping, content-based column widths and horizontal scrolling.
+  Links to absolute local paths open the file in its default macOS application.
   Local images appear as clickable previews; new sessions keep copies with their attachments.
   Tool screenshots and Codex generated images use the same previews. Codex file
   changes show each filename with an expandable diff. Large diffs scroll within

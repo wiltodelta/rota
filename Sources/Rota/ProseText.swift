@@ -21,6 +21,7 @@ struct ProseText: NSViewRepresentable {
 }
 
 final class ProseTextView: NSTextView {
+    var openFile: (URL) -> Void = { NSWorkspace.shared.open($0) }
     /// Unbounded, but finite: a container of `greatestFiniteMagnitude` lays out one line.
     private static let unbounded: CGFloat = 1e7
     private let measurementLayout = NSLayoutManager()
@@ -52,6 +53,14 @@ final class ProseTextView: NSTextView {
     }
 
     deinit { NotificationCenter.default.removeObserver(self) }
+
+    override func clicked(onLink link: Any, at charIndex: Int) {
+        guard let url = link as? URL, url.isFileURL else {
+            super.clicked(onLink: link, at: charIndex)
+            return
+        }
+        openFile(url)
+    }
 
     @objc private func invalidateMeasurements() {
         naturalMeasurement = nil

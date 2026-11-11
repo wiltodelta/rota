@@ -3,7 +3,17 @@ import Foundation
 /// The shared inline Markdown policy for chat blocks and plain session excerpts.
 public func inlineMarkdown(_ text: String) -> AttributedString {
     let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-    return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+    var parsed = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+    for run in parsed.runs {
+        guard let link = run.link, link.scheme == nil,
+              var components = URLComponents(url: link, resolvingAgainstBaseURL: false),
+              components.host == nil, components.path.hasPrefix("/") else { continue }
+        // A Markdown absolute path needs a file scheme before macOS can open it.
+        components.scheme = "file"
+        components.host = ""
+        if let file = components.url { parsed[run.range].link = file }
+    }
+    return parsed
 }
 
 /// The block structure of an agent's Markdown message: headings, list items,

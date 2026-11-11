@@ -2,6 +2,29 @@
 import XCTest
 
 final class MarkdownTests: XCTestCase {
+    func testAbsoluteFileLinksUseFileURLs() throws {
+        for (destination, path) in [("/tmp/report/index.html", "/tmp/report/index.html"),
+                                    ("/tmp/My%20Report/Обзор.html#summary", "/tmp/My Report/Обзор.html"),
+                                    ("/tmp/report.html?view=all#cards", "/tmp/report.html")] {
+            let parsed = inlineMarkdown("[Open report](\(destination))")
+            let link = try XCTUnwrap(parsed.runs.first?.link)
+            XCTAssertTrue(link.isFileURL, destination)
+            let original = try XCTUnwrap(URL(string: "file://" + destination))
+            XCTAssertEqual(link.path, path)
+            XCTAssertEqual(link.query, original.query)
+            XCTAssertEqual(link.fragment, original.fragment)
+            XCTAssertEqual(String(parsed.characters), "Open report")
+        }
+    }
+
+    func testOtherLinkDestinationsStayUnchanged() throws {
+        for destination in ["https://example.com/report", "file:///tmp/report.html",
+                            "mailto:reader@example.com", "report.html", "#summary", "//example.com/report"] {
+            let parsed = inlineMarkdown("[Open](\(destination))")
+            XCTAssertEqual(try XCTUnwrap(parsed.runs.first?.link), URL(string: destination))
+        }
+    }
+
     func testBlocks() {
         let text = """
             ## Summary

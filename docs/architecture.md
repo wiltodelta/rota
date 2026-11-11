@@ -470,6 +470,11 @@ flowchart LR
   also applies when reading old journals; arbitrary markup remains user text.
   Rota's asynchronous answer envelopes show the selected answers with the original
   questions behind a disclosure instead of exposing their transport JSON.
+- The shared `inlineMarkdown` parser converts absolute local link destinations
+  to `file:` URLs, preserving escaped paths, queries and fragments for native
+  opening from both AppKit prose and SwiftUI tables and image-adjacent text.
+  `ProseTextView` opens file links through `NSWorkspace`; other links retain
+  the standard text-view behavior.
 - Agent text renders through `MarkdownBlock` (headings, list items, fenced
   code, pipe tables, paragraphs; inline Markdown inside each), because SwiftUI `Text` draws
   inline Markdown only. Typed messages preserve their complete text, including
