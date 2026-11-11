@@ -475,6 +475,8 @@ flowchart LR
   opening from both AppKit prose and SwiftUI tables and image-adjacent text.
   `ProseTextView` opens file links through `NSWorkspace`; other links retain
   the standard text-view behavior.
+  Foundation on macOS 26 double-encodes existing percent escapes when a destination
+  also contains raw non-ASCII characters; fully encoded destinations avoid this.
 - Agent text renders through `MarkdownBlock` (headings, list items, fenced
   code, pipe tables, paragraphs; inline Markdown inside each), because SwiftUI `Text` draws
   inline Markdown only. Typed messages preserve their complete text, including

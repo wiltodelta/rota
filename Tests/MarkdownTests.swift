@@ -4,7 +4,9 @@ import XCTest
 final class MarkdownTests: XCTestCase {
     func testAbsoluteFileLinksUseFileURLs() throws {
         for (destination, path) in [("/tmp/report/index.html", "/tmp/report/index.html"),
-                                    ("/tmp/My%20Report/Обзор.html#summary", "/tmp/My Report/Обзор.html"),
+                                    ("/tmp/My%20Report/%D0%9E%D0%B1%D0%B7%D0%BE%D1%80.html#summary",
+                                     "/tmp/My Report/Обзор.html"),
+                                    ("/tmp/Обзор.html", "/tmp/Обзор.html"),
                                     ("/tmp/report.html?view=all#cards", "/tmp/report.html")] {
             let parsed = inlineMarkdown("[Open report](\(destination))")
             let link = try XCTUnwrap(parsed.runs.first?.link)
