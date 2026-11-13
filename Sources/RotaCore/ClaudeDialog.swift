@@ -2,67 +2,128 @@ import Foundation
 import os
 
 /// A dialog an interactive Claude draws in its terminal that no hook answers, such as computer
-/// use's app-access request or a paused session's choice, read off the `screen` session so the
-/// chat can show it and answer it with the option's number key, as a user at the terminal would
-/// (a digit picks the option in Claude Code 2.1.311, checked 2026-10-27).
+/// use's app-access or macOS-permission request or a paused session's choice, read off the
+/// `screen` session so the chat can show it and answer it as a user at the terminal would: a
+/// numbered dialog takes the option's digit, and an unnumbered (`hideIndexes`) dialog steps from
+/// the focused `❯` row with Up/Down arrows and confirms with Return (Claude Code 2.1.323,
+/// checked 2026-11-13).
 ///
-/// `screen` 4.00.03's hardcopy is 8-bit: ASCII survives, any other character keeps only its
-/// low byte, so `─` reads as a blank and `╌` as `L` (checked 2026-10-27, `-U` or not). Claude's
-/// own labels are ASCII; a non-ASCII name inside one can read wrong, so what Claude asks to do
-/// comes from its transcript instead (`tool`).
+/// `screen` 4.00.03's hardcopy is 8-bit even under `-U`: ASCII survives, any other decoded
+/// codepoint keeps only its low byte, so `─` reads as NULs, `╌` as `L`, and `❯` as `o`
+/// (checked 2026-11-13; `-U` ensures UTF-8 decoding even when `LANG` is unset).
+/// Claude's own labels are ASCII; a non-ASCII name inside one can read wrong, so what Claude asks
+/// to do comes from its transcript too (`tool`).
 struct ClaudeDialog: Equatable {
-    /// The lines just above the options, such as "Do you want to proceed?".
+    /// The lines above the options, such as "Do you want to proceed?" or the dialog's header and body.
     var prompt: [String]
     var options: [String]
+    /// Index in `options` currently marked as focused (`❯`), 0-based.
+    var selected = 0
+    /// Whether Claude numbered the options (`1.`, `2.`, ...); unnumbered dialogs take arrows and Return.
+    var numbered = true
 
-    /// The dialog at the bottom of the screen: a run of options numbered from 1, exactly one
-    /// marked as selected, followed by no more than a footer. A numbered list in Claude's
-    /// answer has no selection marker, and the input box follows it.
+    /// The dialog at the bottom of the screen: a contiguous block of numbered or indented unnumbered
+    /// options with exactly one selection marker, followed by no more than a footer. A list in
+    /// Claude's answer has no selection marker, and the input box follows it.
     static func read(screen data: Data) -> ClaudeDialog? {
-        let printable = data.map { (0x20...0x7E).contains($0) || $0 == 0x0A ? $0 : 0x20 }
-        let text = String(bytes: printable, encoding: .ascii) ?? ""
-        let lines = text.components(separatedBy: "\n").map {
-            $0.replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression)
-        }
+        let lines = data.split(separator: 0x0A, omittingEmptySubsequences: false).map(ScreenLine.init)
         var found: ClaudeDialog?
         var index = 0
         while index < lines.count {
-            guard let first = Option(lines[index]), first.number == 1 else {
+            if let hit = numberedDialog(at: index, in: lines) ?? unnumberedDialog(at: index, in: lines) {
+                if let dialog = hit.dialog { found = dialog }
+                index = hit.next
+            } else {
                 index += 1
-                continue
             }
-            var options = [first.label]
-            var marked = first.marked ? 1 : 0
-            var next = index + 1
-            while next < lines.count {
-                let line = lines[next]
-                if let option = Option(line) {
-                    guard option.number == options.count + 1 else { break }
-                    options.append(option.label)
-                    marked += option.marked ? 1 : 0
-                } else if !line.isEmpty, line.prefix(while: { $0 == " " }).count >= first.labelColumn {
-                    options[options.count - 1] += " " + collapsed(line)
-                } else {
-                    break
-                }
-                next += 1
-            }
-            let footer = lines[next...].filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            if options.count >= 2, marked == 1, footer.count <= 3 {
-                found = ClaudeDialog(prompt: prompt(above: index, in: lines), options: options)
-            }
-            index = next
         }
         return found
     }
 
-    /// Up to three lines above the options, stopping at a blank line or a drawn rule.
-    private static func prompt(above index: Int, in lines: [String]) -> [String] {
+    private static func numberedDialog(at index: Int,
+                                       in lines: [ScreenLine]) -> (dialog: ClaudeDialog?, next: Int)? {
+        guard let first = lines[index].option, first.number == 1 else { return nil }
+        var options = [first.label]
+        var marked = first.marked ? 1 : 0
+        var selected = 0
+        var next = index + 1
+        while next < lines.count {
+            let line = lines[next]
+            if let option = line.option {
+                guard option.number == options.count + 1 else { break }
+                if option.marked { selected = options.count; marked += 1 }
+                options.append(option.label)
+            } else if !line.text.isEmpty, line.indent >= first.labelColumn {
+                options[options.count - 1] += " " + collapsed(line.text)
+            } else {
+                break
+            }
+            next += 1
+        }
+        guard options.count >= 2, marked == 1, isAtBottom(lines[next...]) else { return (nil, next) }
+        let dialog = ClaudeDialog(prompt: prompt(above: index, in: lines), options: options,
+                                  selected: selected, numbered: true)
+        return (dialog, next)
+    }
+
+    private static func unnumberedDialog(at focusIndex: Int,
+                                         in lines: [ScreenLine]) -> (dialog: ClaudeDialog?, next: Int)? {
+        guard let focused = lines[focusIndex].focused else { return nil }
+        func belongs(_ line: ScreenLine) -> Bool {
+            !line.text.isEmpty && line.option == nil && (line.focused != nil || line.indent >= focused.labelColumn)
+        }
+        var start = focusIndex
+        while start > 0, belongs(lines[start - 1]) { start -= 1 }
+        while start < focusIndex, lines[start].focused == nil, lines[start].indent > focused.labelColumn {
+            start += 1
+        }
+        var next = focusIndex + 1
+        while next < lines.count, belongs(lines[next]) { next += 1 }
+        var options: [String] = []
+        var marked = 0
+        var selected = 0
+        for row in start..<next {
+            if let choice = lines[row].focused {
+                selected = options.count
+                marked += 1
+                options.append(choice.label)
+            } else if lines[row].indent == focused.labelColumn {
+                options.append(collapsed(lines[row].text))
+            } else if !options.isEmpty {
+                options[options.count - 1] += " " + collapsed(lines[row].text)
+            }
+        }
+        guard options.count >= 2, marked == 1, isAtBottom(lines[next...]) else { return (nil, next) }
+        let dialog = ClaudeDialog(prompt: prompt(above: start, in: lines), options: options,
+                                  selected: selected, numbered: false)
+        return (dialog, next)
+    }
+
+    private static func isAtBottom(_ tail: ArraySlice<ScreenLine>) -> Bool {
+        guard tail.filter({ !$0.text.isEmpty }).count <= 3 else { return false }
+        if let rule = tail.firstIndex(where: \.isRule) {
+            return tail[(rule + 1)...].allSatisfy(\.text.isEmpty)
+        }
+        return true
+    }
+
+    /// The dialog's own lines above the options: indented dialog body lines up to the enclosing
+    /// rule or column-0 transcript output, or up to three unindented prompt lines before a gap.
+    private static func prompt(above index: Int, in lines: [ScreenLine]) -> [String] {
         var prompt: [String] = []
+        var unindented = false
         for line in lines[..<index].reversed() {
-            let text = collapsed(line)
-            if text.isEmpty || Set(text).count == 1 && text.count >= 10 || prompt.count == 3 { break }
-            prompt.insert(text, at: 0)
+            if line.isRule { break }
+            if line.text.isEmpty {
+                if unindented { break }
+                continue
+            }
+            if line.indent == 0 {
+                if !prompt.isEmpty && !unindented { break }
+                unindented = true
+            }
+            prompt.insert(collapsed(line.text), at: 0)
+            if prompt.count == (unindented ? 3 : 12) { break }
         }
         return prompt
     }
@@ -71,7 +132,43 @@ struct ClaudeDialog: Equatable {
         line.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
     }
 
-    /// A line such as `❯ 1. Yes` (the marker reads as `o`) or `  2. No`.
+    private struct ScreenLine {
+        let text: String
+        let indent: Int
+        let isRule: Bool
+        let option: Option?
+        let focused: FocusedOption?
+
+        init(_ raw: Data.SubSequence) {
+            var nuls = 0
+            var borderBytes = true
+            for byte in raw {
+                if byte == 0 { nuls += 1 } else if byte != 0x20, byte != 0x0D { borderBytes = false }
+            }
+            if borderBytes, nuls >= 10 {
+                text = ""; indent = 0; isRule = true; option = nil; focused = nil
+                return
+            }
+            guard let end = raw.lastIndex(where: { (0x21...0x7E).contains($0) }) else {
+                text = ""; indent = 0; isRule = false; option = nil; focused = nil
+                return
+            }
+            let trimmed = String(bytes: raw[...end].map { (0x21...0x7E).contains($0) ? $0 : 0x20 },
+                                 encoding: .ascii) ?? ""
+            let nonSpace = trimmed.drop { $0 == " " }
+            if nonSpace.count >= 10, nonSpace.allSatisfy({ $0 == nonSpace.first }) {
+                text = ""; indent = 0; isRule = true; option = nil; focused = nil
+                return
+            }
+            text = trimmed
+            indent = trimmed.count - nonSpace.count
+            isRule = false
+            option = Option(trimmed)
+            focused = option == nil ? FocusedOption(trimmed) : nil
+        }
+    }
+
+    /// A numbered line such as `❯ 1. Yes` (the marker reads as `o`) or `  2. No`.
     private struct Option {
         var number: Int
         var label: String
@@ -88,6 +185,18 @@ struct ClaudeDialog: Equatable {
         }
     }
 
+    /// A focused unnumbered option row such as `  o Allow for this session (1 app)`.
+    private struct FocusedOption {
+        var label: String
+        var labelColumn: Int
+
+        init?(_ line: String) {
+            guard let match = line.firstMatch(of: /^(\s+)([o>])(\s{1,3})(\S.*)$/) else { return nil }
+            label = ClaudeDialog.collapsed(String(match.4))
+            labelColumn = line.distance(from: line.startIndex, to: match.4.startIndex)
+        }
+    }
+
     static let defaultTitle = "Claude is waiting for your answer"
     /// Escape cancels a Claude dialog.
     static let escape = "\u{1B}"
@@ -99,17 +208,18 @@ struct ClaudeDialog: Equatable {
     static func question(for dialog: ClaudeDialog?, title: String, tool: String?) -> AgentQuestion {
         let unreadable = "Rota cannot read the choices of this dialog. Open the session in Terminal to answer it, "
             + "or cancel it here."
-        let parts = [dialog.map { $0.prompt.joined(separator: " ") }, dialog == nil ? unreadable : nil]
-        return AgentQuestion(title: title, detail: parts.compactMap { $0 }.filter { !$0.isEmpty }
-                                .joined(separator: "\n\n"),
+        return AgentQuestion(title: title, detail: dialog?.prompt.joined(separator: "\n") ?? unreadable,
                              actions: (dialog?.options ?? []).map { QuestionOption(id: $0, label: $0) },
                              context: tool)
     }
 
-    /// What to type for `action`: the option's number, or Escape.
+    /// What to type for `action`: the option's digit, Up/Down arrows plus Return, or Escape.
     func key(for action: String) -> String? {
         if Self.cancels(action) { return Self.escape }
-        return options.firstIndex(of: action).map { String($0 + 1) }
+        guard let target = options.firstIndex(of: action) else { return nil }
+        if numbered { return String(target + 1) }
+        let step = target >= selected ? "\u{1B}[B" : "\u{1B}[A"
+        return String(repeating: step, count: abs(target - selected)) + "\r"
     }
 }
 
@@ -297,23 +407,24 @@ final class ClaudeDialogBridge: @unchecked Sendable {
             if ClaudeDialog.cancels(answer.action) { type(ClaudeDialog.escape) }
             return
         }
-        guard read()?.options == dialog.options, let key = dialog.key(for: answer.action) else {
+        guard let live = read(), live.options == dialog.options, let key = live.key(for: answer.action) else {
             return journal.record(.status, "Claude's dialog had already closed; Rota typed nothing")
         }
         log.info("claude \(self.session, privacy: .public) dialog answer: \(answer.action, privacy: .public)")
         type(key)
-        if !ClaudeDialog.cancels(answer.action) { confirm(dialog) }
+        if !ClaudeDialog.cancels(answer.action) { confirm(live, sendReturn: live.numbered) }
     }
 
-    /// An option that also takes text waits for Return after its number.
-    private func confirm(_ dialog: ClaudeDialog) {
+    /// A numbered option that also takes text waits for Return after its number;
+    /// an unnumbered choice already sent Return, so confirm only checks whether it closed.
+    private func confirm(_ dialog: ClaudeDialog, sendReturn: Bool) {
         queue.asyncAfter(deadline: .now() + 0.7) { [weak self] in
             guard let self, self.read()?.options == dialog.options else { return }
-            self.type("\r")
-            self.queue.asyncAfter(deadline: .now() + 0.7) { [weak self] in
-                guard let self, self.read()?.options == dialog.options else { return }
-                self.journal.record(.status, "Claude did not take the answer; answer it in Terminal")
+            guard sendReturn else {
+                return self.journal.record(.status, "Claude did not take the answer; answer it in Terminal")
             }
+            self.type("\r")
+            self.confirm(dialog, sendReturn: false)
         }
     }
 
@@ -324,12 +435,6 @@ final class ClaudeDialogBridge: @unchecked Sendable {
     /// The dialog on the screen now, read from a hardcopy of the session's window.
     private func read() -> ClaudeDialog? {
         if let readScreen { return readScreen() }
-        let manager = FileManager.default
-        try? manager.removeItem(at: screenFile)
-        defer { try? manager.removeItem(at: screenFile) }
-        ScreenRun.command(screen, ["-p", "0", "-X", "hardcopy", screenFile.path])
-        // screen writes the copy itself, a moment after the command returns.
-        for _ in 0..<10 where !manager.fileExists(atPath: screenFile.path) { usleep(50_000) }
-        return (try? Data(contentsOf: screenFile)).flatMap(ClaudeDialog.read(screen:))
+        return ScreenRun.hardcopy(screen, to: screenFile).flatMap(ClaudeDialog.read(screen:))
     }
 }

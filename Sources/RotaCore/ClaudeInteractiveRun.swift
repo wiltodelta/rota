@@ -17,7 +17,7 @@ import os
 /// "Open in Terminal" attaches to the screen session. A dialog Claude draws there
 /// that no hook answers reaches the chat: its `Notification` hook names the
 /// dialog file, the run reads the options off the screen (`ClaudeDialog`) and
-/// types the chosen option's number.
+/// types the chosen option's keys.
 final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     static let log = Logger(subsystem: "com.wiltodelta.rota", category: "claude")
 
@@ -120,11 +120,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         var environment = spec.environment
         environment["ROTA_SESSION_EFFORT"] = effortFile.path
         environment["ROTA_SESSION_DIALOG"] = dialogs.file.path
-        let process = ProcessLauncher.loginShellProcess(ScreenRun.screen, ["-dmS", name, "/bin/zsh", "-l", script.path],
-                                                        in: spec.workingDirectory, environment: environment)
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { throw LaunchError.screenFailed(process.terminationStatus) }
+        try ScreenRun.launchDetached(name, script: script, in: spec.workingDirectory, environment: environment)
         journal.session(session)
         if let timeout = spec.timeout {
             queue.asyncAfter(deadline: .now() + timeout) { [weak self] in self?.end(as: .timedOut) }

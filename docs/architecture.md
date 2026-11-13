@@ -373,11 +373,14 @@ flowchart LR
   also marks its own question open and closed. A notification while a question
   hook waits is that request, already in the chat; once no hook waits, the run
   reads the screen again for a dialog opened alongside. Otherwise the run hardcopies
-  the screen, reads the options numbered from 1 with one marked as selected,
-  and asks the chat; the tool call Claude is waiting on comes from the
-  transcript, because `screen` 4.00.03's hardcopy keeps only each character's
-  low byte. The answer types the option's number, which Claude takes at once,
-  then Return if an option that takes text is still shown; Cancel types Escape.
+  the screen, reads either options numbered from 1 or indented unnumbered (`hideIndexes`)
+  options with exactly one row marked as focused (`❯`), and asks the chat; the tool
+  call Claude is waiting on comes from the transcript, because `screen` 4.00.03's
+  hardcopy keeps only each character's low byte (`─` reads as NULs, `╌` as `L`,
+  `❯` as `o`). Numbered dialogs are answered by typing the option's digit, then
+  Return if an option that takes text is still shown; unnumbered dialogs re-read
+  the currently focused row and step to the chosen option with Up/Down arrows
+  followed by Return (claude 2.1.323, 2026-11-13); Cancel types Escape.
   Nothing is typed unless the screen still shows the same options; a dialog
   answered at the terminal closes its question. A dialog without readable
   options can only be canceled from the chat. The bridge keeps retrying an
@@ -420,7 +423,8 @@ flowchart LR
     live method names.
   - `ScreenRun` writes a zsh script that runs the command with its output
     `tee`d to the log and writes `${pipestatus[1]}` to an exit file, starts it
-    with `screen -dmS rota-<id>` (macOS ships screen 4.00, which has no
+    with `screen -U -dmS rota-<id>` (`-U` forces UTF-8 decoding when LaunchServices
+    starts Rota without `LANG`; macOS ships screen 4.00, which has no
     `-Logfile`), and polls the exit file. When the file is missing and
     `screen -ls` no longer lists the session, it reads the file once more
     before calling the run interrupted: the script writes it just before

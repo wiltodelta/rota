@@ -46,12 +46,8 @@ final class TerminalRun: RunControl, @unchecked Sendable {
         do {
             try scriptText(spec, exitFile: exitFile, childFile: run.childFile)
                 .write(to: script, atomically: true, encoding: .utf8)
-            let process = ProcessLauncher.loginShellProcess(
-                ScreenRun.screen, ["-dmS", name, "/bin/zsh", "-l", script.path],
-                in: spec.workingDirectory, environment: spec.environment)
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { throw LaunchError.screenFailed(process.terminationStatus) }
+            try ScreenRun.launchDetached(name, script: script, in: spec.workingDirectory,
+                                         environment: spec.environment)
         } catch {
             run.cleanUp()
             throw error

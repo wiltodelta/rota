@@ -37,7 +37,7 @@ not a claim to recognize every future vendor extension.
 | Claude Code | `AskUserQuestion`, `ExitPlanMode` | Per-run `PreToolUse` hook, selected answers or plan decision | Suspended hook |
 | Claude Code | `PermissionRequest`, stream `can_use_tool` | Explicit allow/deny and original tool input | Hook or stream control request |
 | Claude Code | `Elicitation` | MCP action/content through a hook | Suspended hook |
-| Claude Code (interactive) | A terminal dialog no hook answers, announced by a `Notification` hook | The option's number typed into the `screen` session, Escape to cancel | Until answered or the dialog closes |
+| Claude Code (interactive) | A terminal dialog no hook answers, announced by a `Notification` hook | Option digit (numbered) or Up/Down arrows plus Return from live focus (unnumbered) typed into `screen`; Escape to cancel | Until answered or the dialog closes |
 | Grok | `_x.ai/ask_user_question`, `x.ai/ask_user_question` | `accepted` answers or `cancelled` | Pending ACP request |
 | Grok | `_x.ai/exit_plan_mode`, `x.ai/exit_plan_mode` | `approved` or `abandoned` | Pending ACP request |
 | Grok | `_x.ai/mcp/elicit`, `x.ai/mcp/elicit` | MCP content with Grok's `outcome` spelling | Pending ACP request |
@@ -124,8 +124,10 @@ permission dialog waits on the screen alone; it must reach the host once and
 take "No". The other keeps the hook waiting for 20 seconds; Claude's
 notification about the same dialog must not reach the host. Both passed on
 2026-10-27 with claude 2.1.311, and disabling the open-question check made the
-second fail. Computer use's own dialog was not induced: it did not load in a CLI
-started with Rota's login environment on that day.
+second fail. Computer use's own dialog was not induced on that day; an isolated
+live test (`testClaudeInteractiveUnnumberedDialogIsAnswered`) drives a real
+unnumbered (`hideIndexes`) MCP project-approval dialog in `screen -U` and answers
+it from live focus (claude 2.1.323, 2026-11-13).
 
 Live questionnaire checks do not cover every vendor approval, real MCP server,
 URL login or device-verification flow. Those variants have deterministic wire

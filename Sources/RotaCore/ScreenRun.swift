@@ -33,6 +33,31 @@ final class ScreenRun: RunControl, @unchecked Sendable {
 
     static func alive(_ name: String) -> Bool { pid(name) != nil }
 
+    /// Starts a detached UTF-8 `screen` session running `script` in a login `zsh` shell.
+    /// `-U` forces UTF-8 window decoding even when LaunchServices starts Rota without `LANG`.
+    static func launchDetached(_ name: String, script: URL, in directory: String,
+                               environment: [String: String], loginShell: Bool = true) throws {
+        let shell = loginShell ? ["/bin/zsh", "-l", script.path] : ["/bin/zsh", script.path]
+        let process = ProcessLauncher.loginShellProcess(screen, ["-U", "-dmS", name] + shell,
+                                                        in: directory, environment: environment)
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw LaunchError.screenFailed(process.terminationStatus)
+        }
+    }
+
+    /// Writes a hardcopy of window 0 of session `name` to `file` and returns its bytes.
+    static func hardcopy(_ name: String, to file: URL) -> Data? {
+        let manager = FileManager.default
+        try? manager.removeItem(at: file)
+        defer { try? manager.removeItem(at: file) }
+        command(name, ["-p", "0", "-X", "hardcopy", file.path])
+        // screen writes the copy itself, a moment after the command returns.
+        for _ in 0..<10 where !manager.fileExists(atPath: file.path) { usleep(50_000) }
+        return try? Data(contentsOf: file)
+    }
+
     /// Types `text` into the first window of session `name`, as keys.
     static func type(_ name: String, _ text: String) { command(name, ["-p", "0", "-X", "stuff", text]) }
 
@@ -83,13 +108,7 @@ final class ScreenRun: RunControl, @unchecked Sendable {
             .write(to: script, atomically: true, encoding: .utf8)
         // The command's output reaches the log through tee; keep the journal's
         // handle out of the way until the end.
-        let process = ProcessLauncher.loginShellProcess(screen, ["-dmS", name, "/bin/zsh", "-l", script.path],
-                                                        in: spec.workingDirectory, environment: spec.environment)
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw LaunchError.screenFailed(process.terminationStatus)
-        }
+        try launchDetached(name, script: script, in: spec.workingDirectory, environment: spec.environment)
         journal.session(name)
         if let timeout = spec.timeout {
             run.queue.asyncAfter(deadline: .now() + timeout) { [weak run] in run?.end(as: .timedOut) }

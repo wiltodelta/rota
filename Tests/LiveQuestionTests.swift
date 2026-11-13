@@ -95,6 +95,94 @@ final class LiveQuestionTests: XCTestCase {
         try terminalDialog(keepHook: true)
     }
 
+    /// An unnumbered (`hideIndexes`) Claude terminal dialog in a real `screen -U` session is
+    /// read off `hardcopy` and answered by stepping from live focus with arrow keys + Return.
+    func testClaudeInteractiveUnnumberedDialogIsAnswered() throws {
+        let env = try unnumberedDialogWorkspace()
+        let session = UUID().uuidString.lowercased()
+        let screen = ClaudeInteractiveRun.screenName(session)
+        let log = folder.appendingPathComponent("unnumbered.log")
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        let asked = expectation(description: "unnumbered dialog read from real screen")
+        nonisolated(unsafe) var shown: AgentQuestion?
+        let journal = RunJournal(output: try FileHandle(forWritingTo: log), events: RunEvents(
+            session: { _ in }, finished: { _ in }, question: { question, reply in
+                guard shown == nil else { return }
+                shown = question
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.6) {
+                    reply(QuestionAnswer(action: "Use this MCP server"))
+                    asked.fulfill()
+                }
+            }))
+        try ScreenRun.launchDetached(
+            screen, script: env.script, in: env.work,
+            environment: ["HOME": env.home.path, "CLAUDE_CONFIG_DIR": env.config.path, "TERM": "xterm-256color"],
+            loginShell: false)
+
+        let queue = DispatchQueue(label: "test.claude.unnumbered")
+        let bridge = ClaudeDialogBridge(screen: screen, session: session, folder: folder,
+                                        journal: journal, queue: queue)
+        defer {
+            queue.sync { journal.finish(.cancelled); bridge.cleanUp() }
+            ScreenRun.quit(screen)
+        }
+        waitForScreenText("Use this MCP", in: screen)
+        try (Data(#"{"hook_event_name":"Notification","message":"Claude needs your permission"}"#.utf8)
+            + Data([10])).write(to: bridge.file)
+        queue.sync { bridge.poll() }
+        wait(for: [asked], timeout: 5)
+        XCTAssertEqual(shown?.actions.map(\.label), [
+            "Use this MCP server",
+            "Use this and all future MCP servers in this project",
+            "Continue without using this MCP server",
+        ])
+        let localSettings = URL(fileURLWithPath: env.work).appendingPathComponent(".claude/settings.local.json")
+        for _ in 0..<25 where !FileManager.default.fileExists(atPath: localSettings.path) {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        let saved = try String(contentsOf: localSettings, encoding: .utf8)
+        XCTAssertTrue(saved.contains("local-helper"), saved)
+    }
+
+    private func unnumberedDialogWorkspace() throws -> (home: URL, config: URL, work: String, script: URL) {
+        let home = folder.appendingPathComponent("home")
+        let config = home.appendingPathComponent("cfg")
+        let rawWork = folder.appendingPathComponent("work")
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: rawWork, withIntermediateDirectories: true)
+        // Foundation's resolvingSymlinksInPath() strips /private, whereas Claude keys projects by realpath.
+        let work = rawWork.withUnsafeFileSystemRepresentation { ptr -> String? in
+            guard let ptr, let real = Darwin.realpath(ptr, nil) else { return nil }
+            defer { free(real) }
+            return String(cString: real)
+        } ?? rawWork.path
+        let onboarding: [String: Any] = [
+            "hasCompletedOnboarding": true,
+            "projects": [work: ["hasTrustDialogAccepted": true]],
+        ]
+        let onboardingData = try JSONSerialization.data(withJSONObject: onboarding)
+        try onboardingData.write(to: home.appendingPathComponent(".claude.json"))
+        try onboardingData.write(to: config.appendingPathComponent(".claude.json"))
+        let mcp: [String: Any] = ["mcpServers": ["local-helper": ["command": "/usr/bin/true"]]]
+        try JSONSerialization.data(withJSONObject: mcp).write(
+            to: URL(fileURLWithPath: work).appendingPathComponent(".mcp.json"))
+        let script = folder.appendingPathComponent("launch.zsh")
+        try "cd \(shellQuote(work))\nexec \(shellQuote(Harness.claude.defaultExecutable()))\n"
+            .write(to: script, atomically: true, encoding: .utf8)
+        return (home, config, work, script)
+    }
+
+    private func waitForScreenText(_ needle: String, in screen: String) {
+        let copy = folder.appendingPathComponent("probe.hc")
+        for _ in 0..<30 {
+            Thread.sleep(forTimeInterval: 0.25)
+            if let data = ScreenRun.hardcopy(screen, to: copy),
+               String(data: data, encoding: .isoLatin1)?.contains(needle) == true {
+                return
+            }
+        }
+    }
+
     private func terminalDialog(keepHook: Bool) throws {
         guard let directory = ProcessInfo.processInfo.environment["ROTA_INTERACTIVE_TEST_DIR"] else {
             throw XCTSkip("Set ROTA_INTERACTIVE_TEST_DIR to a trusted test workspace")

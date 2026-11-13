@@ -111,11 +111,15 @@ final class ClaudeInteractiveTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: dialogs, encoding: .utf8), payload + "\n" + payload + "\n")
     }
 
-    /// Bytes as `screen` 4.00.03 hardcopied Claude Code 2.1.311's permission dialog on
-    /// 2026-10-27: `─` reads as NUL, `╌` as `L`, `❯` as `o`, `·` as 0x14; the path is neutral.
-    private func screen(_ lines: [String]) -> Data {
-        Data(lines.joined(separator: "\n").utf8.map { $0 == UInt8(ascii: "~") ? 0x14 : $0 }
-             + [0x0A] + [UInt8](repeating: 0, count: 80))
+    /// Bytes as `screen` 4.00.03 hardcopies Claude's terminal: `===` expands to an 80-byte NUL
+    /// (`─`) rule, `╌` is `L`, `❯` is `o`, and `~` stands for non-ASCII `·` (low byte `0x14`/`0xB7`).
+    private func screen(_ lines: [String], trailingRule: Bool = true) -> Data {
+        let rows = trailingRule ? lines + ["==="] : lines
+        return Data(rows.map { line -> [UInt8] in
+            line == "==="
+                ? [UInt8](repeating: 0, count: 80)
+                : line.utf8.map { $0 == UInt8(ascii: "~") ? 0x14 : $0 }
+        }.joined(separator: [0x0A]))
     }
 
     private let permissionDialog = [
@@ -126,9 +130,17 @@ final class ClaudeInteractiveTests: XCTestCase {
         "   3. Yes, and switch to auto mode ~ auto mode handles these prompts for you", "   4. No", "",
         " Esc to cancel ~ Tab to amend"]
 
+    private let computerUseDialog = [
+        "o Check Notes", "", "===", "  Computer Use wants to control these apps", "",
+        "  Send the approved note.", "", "    ~ Notes", "", "  Also requested:", "    ~ clipboardWrite", "",
+        "  o Deny, and tell Claude what to do differently (esc)",
+        "    Allow for this session (1 app)", "", "  Enter to confirm ~ Esc to cancel"]
+
     func testDialogIsReadOffTheScreen() throws {
         let dialog = try XCTUnwrap(ClaudeDialog.read(screen: screen(permissionDialog)))
         XCTAssertEqual(dialog.prompt, ["Do you want to proceed?"])
+        XCTAssertTrue(dialog.numbered)
+        XCTAssertEqual(dialog.selected, 0)
         XCTAssertEqual(dialog.options, ["Yes", "Yes, and always allow access to /tmp/work from this project",
                                         "Yes, and switch to auto mode auto mode handles these prompts for you", "No"])
         XCTAssertEqual(dialog.key(for: "No"), "4")
@@ -141,6 +153,56 @@ final class ClaudeInteractiveTests: XCTestCase {
         XCTAssertNoThrow(try question.validate(QuestionAnswer(action: "Yes")))
     }
 
+    func testUnnumberedComputerUseDialogIsReadAndAnswered() throws {
+        let dialog = try XCTUnwrap(ClaudeDialog.read(screen: screen(computerUseDialog, trailingRule: false)))
+        XCTAssertFalse(dialog.numbered)
+        XCTAssertEqual(dialog.selected, 0)
+        XCTAssertEqual(dialog.prompt, [
+            "Computer Use wants to control these apps", "Send the approved note.", "Notes",
+            "Also requested:", "clipboardWrite"])
+        let scrolled = screen(computerUseDialog.filter { $0 != "===" }, trailingRule: false)
+        XCTAssertEqual(try XCTUnwrap(ClaudeDialog.read(screen: scrolled)).prompt, dialog.prompt)
+        let deny = "Deny, and tell Claude what to do differently (esc)"
+        let allow = "Allow for this session (1 app)"
+        XCTAssertEqual(dialog.options, [deny, allow])
+        XCTAssertEqual(dialog.key(for: deny), "\r")
+        XCTAssertEqual(dialog.key(for: allow), "\u{1B}[B\r")
+        XCTAssertEqual(dialog.key(for: "cancel"), "\u{1B}")
+        let tool = "mcp__computer-use__request_access\n{\"apps\":[\"Notes\"]}"
+        let question = ClaudeDialog.question(for: dialog, title: "Claude needs your permission", tool: tool)
+        XCTAssertFalse(question.detail.contains("cannot read"))
+        XCTAssertTrue(question.detail.contains("Computer Use wants to control these apps"))
+        XCTAssertTrue(question.detail.contains("clipboardWrite"))
+        XCTAssertEqual(question.actions.map(\.label), [deny, allow])
+    }
+
+    func testUnnumberedDialogsSupportNonZeroInitialFocusAndDescriptions() throws {
+        let mcpApproval = screen([
+            "===", "  New MCP server found in this project: local-helper", "",
+            "    Use this MCP server", "    Use this and all future MCP servers in this project",
+            "  o Continue without using this MCP server", "", "  Enter to confirm ~ Esc to cancel"],
+            trailingRule: false)
+        let mcp = try XCTUnwrap(ClaudeDialog.read(screen: mcpApproval))
+        XCTAssertEqual(mcp.selected, 2)
+        XCTAssertEqual(mcp.key(for: "Use this MCP server"), "\u{1B}[A\u{1B}[A\r")
+        XCTAssertEqual(mcp.key(for: "Use this and all future MCP servers in this project"), "\u{1B}[A\r")
+        XCTAssertEqual(mcp.key(for: "Continue without using this MCP server"), "\r")
+
+        let browser = screen([
+            "===", "  Claude wants to use your browser", "",
+            "    Install extension", "      Opens the install page in Chrome",
+            "  o Not now", "      Continue without browser tools",
+            "    Don't ask again", "      Revisit anytime with /chrome"], trailingRule: false)
+        let choice = try XCTUnwrap(ClaudeDialog.read(screen: browser))
+        XCTAssertEqual(choice.selected, 1)
+        XCTAssertEqual(choice.options, [
+            "Install extension Opens the install page in Chrome",
+            "Not now Continue without browser tools",
+            "Don't ask again Revisit anytime with /chrome"])
+        XCTAssertEqual(choice.key(for: choice.options[0]), "\u{1B}[A\r")
+        XCTAssertEqual(choice.key(for: choice.options[2]), "\u{1B}[B\r")
+    }
+
     func testANumberedAnswerIsNotADialog() {
         let answer = ["Steps:", "  1. Build", "  2. Test", "", "o ", "  ? for shortcuts"]
         XCTAssertNil(ClaudeDialog.read(screen: screen(answer)), "no option is marked as selected")
@@ -149,6 +211,17 @@ final class ClaudeInteractiveTests: XCTestCase {
         XCTAssertNil(ClaudeDialog.read(screen: screen(Array(permissionDialog.prefix(9)) + ["", "o ", "a", "b", "c"])),
                      "one option is no choice")
         XCTAssertNil(ClaudeDialog.read(screen: screen([" o 1. Yes", "   3. No"])), "options number from 1 in order")
+        let idlePrompt = screen(["o Done.", "", "===", "o", "===", "  bypass permissions on"], trailingRule: false)
+        XCTAssertNil(ClaudeDialog.read(screen: idlePrompt), "Claude's normal input box is not a dialog")
+        let passedUnnumbered = screen(
+            Array(computerUseDialog.dropLast(2)) + ["", "o Granted.", "===", "o", "===", "  status"],
+            trailingRule: false)
+        XCTAssertNil(ClaudeDialog.read(screen: passedUnnumbered),
+                     "an unnumbered dialog followed by the input box closed")
+        let twoBullets = screen(["===", "  o First", "  o Second"], trailingRule: false)
+        XCTAssertNil(ClaudeDialog.read(screen: twoBullets), "two markers are bullets")
+        let oneChoice = screen(["===", "  o Only choice"], trailingRule: false)
+        XCTAssertNil(ClaudeDialog.read(screen: oneChoice), "one option is no choice")
     }
 
     func testDialogFileLines() throws {
