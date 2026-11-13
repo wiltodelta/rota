@@ -35,6 +35,8 @@ struct MainWindowToolbar: View {
             if showsActions { actions }
         }
         .buttonStyle(.plain)
+        // SwiftUI would otherwise pick these as Tab targets; see ToolbarHostingView.
+        .focusable(false)
         .padding(.leading, sidebarWidth > 0 ? sidebarWidth + metrics.points(8) : 96)
         .padding(.trailing, metrics.points(12))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -131,8 +133,14 @@ struct WindowToolbarOverlay: NSViewRepresentable {
     }
 }
 
+/// As in a native toolbar, Tab passes over the title bar; clicks and the View and File menu
+/// shortcuts still reach its actions. As a key view it held Tab and never passed it back.
+final class ToolbarHostingView: NSHostingView<AnyView> {
+    override var canBecomeKeyView: Bool { false }
+}
+
 final class ToolbarOverlayAnchor: NSView {
-    let host = NSHostingView(rootView: AnyView(EmptyView()))
+    let host = ToolbarHostingView(rootView: AnyView(EmptyView()))
     var height: CGFloat = 52
     var title = "Rota"
     private let accessory = NSTitlebarAccessoryViewController()
@@ -172,6 +180,9 @@ final class ToolbarOverlayAnchor: NSView {
         guard let window, let content = window.contentView else { return }
         if installedWindow !== window {
             installedWindow = window
+            // The content and this overlay are hosting views nested below the content view;
+            // without a recalculated loop, Tab never moves between their SwiftUI controls.
+            window.autorecalculatesKeyViewLoop = true
             content.addSubview(toolbarView, positioned: .above, relativeTo: nil)
             window.addTitlebarAccessoryViewController(accessory)
             NotificationCenter.default.addObserver(self, selector: #selector(positionToolbar),

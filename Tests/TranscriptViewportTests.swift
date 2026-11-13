@@ -116,6 +116,47 @@ final class TranscriptViewportTests: XCTestCase {
         XCTAssertEqual(scroll.documentVisibleRect.minY, 700, accuracy: 0.5)
     }
 
+    func testKeyboardPagesKeepContextAndReportTheEnd() async {
+        XCTAssertNil(viewport.page(down: true), "Paging waits for the transcript's end marker")
+        let end = TranscriptMarker.MarkerView(frame: NSRect(x: 0, y: 1999, width: 300, height: 1))
+        document.addSubview(end)
+        viewport.register(end, id: Int.min)
+        let page = scroll.documentVisibleRect.height - scroll.verticalPageScroll
+        XCTAssertEqual(viewport.page(down: true), false)
+        XCTAssertEqual(scroll.documentVisibleRect.minY, 300 + page, accuracy: 0.5)
+        XCTAssertEqual(viewport.page(down: false), false)
+        XCTAssertEqual(scroll.documentVisibleRect.minY, 300, accuracy: 0.5)
+        for _ in 0..<10 { _ = viewport.page(down: true) }
+        XCTAssertEqual(viewport.page(down: true), true)
+        XCTAssertEqual(scroll.documentVisibleRect.maxY, document.bounds.maxY, accuracy: 0.5)
+        for _ in 0..<10 { _ = viewport.page(down: false) }
+        XCTAssertEqual(scroll.documentVisibleRect.minY, 0, accuracy: 0.5)
+        // Paging is a reading position, so a later layout update keeps it.
+        XCTAssertEqual(viewport.anchorForUpdate()?.id, 1)
+    }
+
+    func testPanelHighlightMovesLikeAMenu() {
+        let ids = ["a", "b", "c"]
+        XCTAssertEqual(PanelHighlight.moved(nil, down: true, in: ids), "a")
+        XCTAssertEqual(PanelHighlight.moved(nil, down: false, in: ids), "c")
+        XCTAssertEqual(PanelHighlight.moved("a", down: true, in: ids), "b")
+        XCTAssertEqual(PanelHighlight.moved("c", down: true, in: ids), "c")
+        XCTAssertEqual(PanelHighlight.moved("a", down: false, in: ids), "a")
+        XCTAssertEqual(PanelHighlight.moved("gone", down: true, in: ids), "a", "A deleted routine restarts the walk")
+        XCTAssertNil(PanelHighlight.moved("a", down: true, in: []))
+    }
+
+    func testClosingSessionKeepsTheNextSessionsEarlierMessages() {
+        let requests = KeyboardRequests()
+        let first = UUID(), second = UUID()
+        requests.setEarlierMessages(true, in: first)
+        requests.setEarlierMessages(true, in: second)
+        requests.setEarlierMessages(false, in: first)
+        XCTAssertEqual(requests.sessionWithEarlier, second, "The old view disappears after the new one reports")
+        requests.setEarlierMessages(false, in: second)
+        XCTAssertNil(requests.sessionWithEarlier)
+    }
+
     func testUserScrollCancelsQueuedEndRequest() async {
         viewport.register(marker, id: Int.min)
         viewport.followEnd()

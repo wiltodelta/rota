@@ -35,7 +35,7 @@ struct SessionView: View {
             if !running, current.harness.isAgent, SessionRestart.hitUsageLimit(in: transcript?.items ?? []) {
                 SessionLimitBanner(record: current)
             }
-            if current.questions?.isEmpty != false, let question = current.attention {
+            if current.showsAttentionBanner, let question = current.attention {
                 AttentionBanner(text: question, canReply: model.scheduler.canMessage(current)) {
                     model.scheduler.dismissAttention(current)
                 }
@@ -84,6 +84,13 @@ struct SessionView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Session > Show Question and Load Earlier Messages.
+        .onChange(of: model.keyboard.questionReveal) { if questionDraft != nil { questionRevealRequest += 1 } }
+        .onChange(of: model.keyboard.earlierMessages) { if transcript?.hasEarlier == true { loadEarlier() } }
+        .onChange(of: transcript?.hasEarlier == true, initial: true) { _, earlier in
+            model.keyboard.setEarlierMessages(earlier, in: record.id)
+        }
+        .onDisappear { model.keyboard.setEarlierMessages(false, in: record.id) }
         .onChange(of: current.nextQuestion?.id, initial: true) { _, id in
             if let draft = questionDraft { questionDrafts[draft.question.id] = draft }
             let pending = Set(current.questions?.map(\.id) ?? [])
@@ -198,16 +205,15 @@ struct SessionView: View {
                 .accessibilityIdentifier("stopSession")
         }
         if model.scheduler.terminalCommand(for: record) != nil {
-            Button(interfaceTitle: running ? "Open in Terminal" : "Continue in Terminal", systemImage: "terminal") {
-                ChatOpener.open(record, workingDirectory: routine.workingDirectory, scheduler: model.scheduler,
-                                terminal: model.settings.terminalApp)
+            Button(interfaceTitle: model.terminalTitle(record), systemImage: "terminal") {
+                model.openInTerminal(record)
             }
             .help(running ? "Open this session in Terminal" : "Continue this session in Terminal")
             .accessibilityIdentifier("openTerminal")
         }
         if let path = record.logPath {
             Button(interfaceTitle: "Show Log in Finder", systemImage: "folder") {
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                model.revealLog(record)
             }
             .labelStyle(.iconOnly)
             .help("Show log in Finder")
@@ -256,4 +262,38 @@ private struct AttentionBanner: View {
         .frame(maxWidth: metrics.points(760))
         .frame(maxWidth: .infinity)
     }
+}
+
+/// Session actions shared by the session header and the Session menu.
+extension AppModel {
+    func terminalTitle(_ record: RunRecord) -> String {
+        scheduler.isActive(record) ? "Open in Terminal" : "Continue in Terminal"
+    }
+
+    func openInTerminal(_ record: RunRecord) {
+        guard let routine = scheduler.routine(record.routineID) else { return }
+        ChatOpener.open(record, workingDirectory: routine.workingDirectory, scheduler: scheduler,
+                        terminal: settings.terminalApp)
+    }
+
+    func revealLog(_ record: RunRecord) {
+        record.logPath.map { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: $0)]) }
+    }
+
+    /// Agents a session can restart on: every other one, with whether it is installed.
+    func restartChoices(for record: RunRecord) -> [(harness: Harness, installed: Bool)] {
+        Harness.agents.filter { $0 != record.harness }.map {
+            ($0, FileManager.default.isExecutableFile(atPath: scheduler.executable($0)))
+        }
+    }
+
+    /// Restarts on `harness` and opens the new session.
+    func restart(_ record: RunRecord, with harness: Harness) async {
+        if let next = await scheduler.restart(record, with: harness) { selection = .session(next.id) }
+    }
+}
+
+extension RunRecord {
+    /// A request without a question form: the banner above the chat, cleared with Dismiss or Done.
+    var showsAttentionBanner: Bool { attention != nil && questions?.isEmpty != false }
 }

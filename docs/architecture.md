@@ -238,6 +238,8 @@ flowchart LR
   explicit multi-action forms and ordinary-draft restoration were exercised.
   A selected custom answer stays separate from ordinary message text. The
   numbered option rows use primary text and a neutral selected background.
+  Rows 1 to 9 carry Command-number shortcuts; an in-window shortcut is matched
+  before the focused message field, so choosing one leaves the draft unchanged.
   `QuestionDraftTests` reject mutations that drop Other selection, replace
   selected multiple choices with custom text, or lose per-field drafts.
 - Codex receives deferred JSON-RPC server requests through `onRequestAsync`;
@@ -670,6 +672,26 @@ distinguishes the list itself from the filter beside its Sessions heading.
 Arrow commands apply only to the focused filter, while list arrows retain
 native selection and scrolling.
 Shift-Tab reaches the filter from the list, and Tab returns to the list.
+`KeyboardRequests` (`AppModel.keyboard`) carries the requests that cross views:
+Return on a selected session focuses `ChatComposer`, whose `onExitCommand`
+(Escape) refocuses the list; Space, Shift-Space and the Page keys page the open
+transcript through `TranscriptViewport.page`, which keeps AppKit's page overlap
+and resumes following only on reaching the end. The list's handlers act only
+while the list itself holds focus, since keys from the filter in its header
+bubble up through it. Delete (`onDeleteCommand`) opens the session's existing
+confirmation, or the routine confirmation shared with the edit sheet
+(`routineDeleteConfirmation`).
+`SessionCommands` (the Session menu) repeats every action of the open session's
+header, banners and chat as a menu command, because Tab cannot be relied on to
+reach them: with macOS keyboard navigation on, focus that enters a SwiftUI hosting
+view from AppKit stops on the hosting view itself. A bare SwiftUI test app on macOS
+26.5 reproduces this with `NavigationSplitView` and with an `NSSplitViewController`
+of two hosting controllers alike (checked 2026-11-13), so moving the window to AppKit
+panes would not fix it. Commands that need view state go through `KeyboardRequests`
+(`revealQuestion`, `loadEarlierMessages`, `sessionWithEarlier`). Read-only
+`ProseTextView` is not a key view, since a non-editable text view keeps Tab, and the
+title-bar overlay's `ToolbarHostingView` stays out of the Tab loop like a native
+toolbar; its actions have menu shortcuts.
 The Sessions heading and native menu occupy a nonselectable list row, with a
 filled symbol when filtering. Native Section headers merge their children into
 one Accessibility element, hiding separate control actions and caching their
@@ -705,7 +727,9 @@ Each appearance resets zoom before the enlarged pass.
 `scripts/ui-check.sh --keyboard-only` additionally exercises real arrow and Tab events, text
 selection in the composer, empty results, condition reset, unread retention,
 Settings restoration, long-history focus recovery, and a disposable Shell run's
-live state changes. It covers both appearances at
+live state changes. Per appearance it then checks Return and Escape between list
+and message field, paging a long transcript, both Delete confirmations, and the
+menu bar panel's Up/Down highlight, Command-R, Command-. and Return. It covers both appearances at
 minimum width and normal and maximum interface zoom, without running an agent.
 Visibility checks reject zero-area cached Accessibility frames for offscreen controls.
 
@@ -1157,6 +1181,12 @@ Layout rules learned while measuring the narrowest window (820 pt):
   followed by its routine name, time and status. Harness logos remain the primary
   row icons. The menu panel selects the latest actual session, skipping scheduled
   slots that never ran and falling back to the routine when none exists.
+  The panel walks its rows like a menu: one highlight, set by the pointer or by
+  Up and Down (`PanelHighlight`), shows the row's Run or Stop button, and Return
+  opens it. Hidden in-panel buttons own Command-R and Command-.: a key window's
+  shortcuts are matched before the main menu, whose Run Now would otherwise act
+  on the main window's routine. Each time the panel becomes key it clears the
+  highlight and focuses the rows, so Escape and arrows work without a click.
   Sessions sort by `RunRecord.lastActivityAt`, newest activity first, and group by that day.
   `updatedAt` persists starts and continuations, sent messages, questions and answers,
   attention requests and terminal turn transitions; completion uses `endedAt`. Reading

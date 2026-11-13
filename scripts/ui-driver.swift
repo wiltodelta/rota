@@ -22,9 +22,10 @@
 //   window <title> <w> <h>       move a window to (100, 100) and resize it
 //   wid <title>                  print the window number of the window with that title
 //   focus <id>                   activate Rota and focus that element
+//   focused <id>                 exit 0 if the focused element or an ancestor has that identifier
 //   reveal <id-or-title>         scroll the nearest enclosing area to that element
 //   aligned <label> <control>    check that their vertical frame centers agree
-//   key <key>                   post Return, a zoom shortcut or Command-W to Rota's process
+//   key <key>                   post a navigation key or a shortcut (see `keys`) to Rota's process
 //   scroll-wheel <window-or-content> <delta> <pixel|line>  send real scroll input over that viewport
 //   confirm-iterm <text>         answer iTerm2's "OK to run" for a script path containing text
 //   gate                         list elements whose frame leaves their window or their parent
@@ -544,10 +545,16 @@ case "key":
         "command-minus": (27, .maskCommand), "command-w": (13, .maskCommand),
         "option-command-plus": (24, [.maskCommand, .maskAlternate, .maskShift]),
         "option-command-minus": (27, [.maskCommand, .maskAlternate]),
-        "option-command-zero": (29, [.maskCommand, .maskAlternate])
+        "option-command-zero": (29, [.maskCommand, .maskAlternate]),
+        "z": (6, []), "delete": (51, []), "space": (49, []), "shift-space": (49, .maskShift),
+        "page-up": (116, []), "page-down": (121, []),
+        "shift-command-r": (15, [.maskCommand, .maskShift]), "shift-command-a": (0, [.maskCommand, .maskShift]),
+        "shift-command-d": (2, [.maskCommand, .maskShift]), "shift-command-e": (14, [.maskCommand, .maskShift]),
+        "command-r": (15, .maskCommand), "command-period": (47, .maskCommand), "command-1": (18, .maskCommand)
     ]
     guard arguments.count == 2, let (code, flags) = keys[arguments[1]] else { fail("unknown key") }
-    let navigationKeys: Set<String> = ["up", "down", "left", "right", "tab", "shift-tab", "command-down", "shift-left"]
+    let navigationKeys: Set<String> = ["up", "down", "left", "right", "tab", "shift-tab", "command-down", "shift-left",
+                                       "delete", "space", "shift-space", "page-up", "page-down"]
     if navigationKeys.contains(arguments[1]) {
         let visible = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
         guard visible.contains(where: { window in
@@ -569,6 +576,15 @@ case "focus":
     app.activate()
     let result = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
     guard result == .success else { fail("focus failed: \(result.rawValue)") }
+case "focused":
+    guard arguments.count == 2 else { fail("focused <id>") }
+    // A focused list reports its outline or a row; the identifier sits on that or an ancestor.
+    var focused: AXUIElement? = attribute(root, kAXFocusedUIElementAttribute)
+    while let element = focused {
+        if matches(element, arguments[1]) { exit(0) }
+        focused = attribute(element, kAXParentAttribute)
+    }
+    exit(1)
 case "confirm-iterm":
     // iTerm2 asks "OK to run <script>?" before running an opened script; answer
     // for scripts whose path contains the text, and leave its setting alone.

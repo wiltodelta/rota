@@ -5,9 +5,24 @@ import SwiftUI
 struct MenuBarContent: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
+    /// The row under the pointer or chosen with Up and Down, as in a menu.
+    @State private var highlighted: String?
+    @FocusState private var keyboardFocused: Bool
 
     private var routines: [Routine] {
         RoutineOrder.byNextRun(model.scheduler.routines)
+    }
+
+    private var highlightedRoutine: Routine? {
+        highlighted.flatMap { id in routines.first { $0.id == id } }
+    }
+
+    private func hover(_ inside: Bool, _ routine: Routine) {
+        if inside { highlighted = routine.id } else if highlighted == routine.id { highlighted = nil }
+    }
+
+    private func open(_ routine: Routine) {
+        model.showMainWindow(selecting: model.latest(of: routine.id))
     }
 
     var body: some View {
@@ -22,14 +37,17 @@ struct MenuBarContent: View {
                 // fit, because one is greedy and stretched the panel to its limit.
                 let rows = VStack(spacing: metrics.points(2)) {
                     ForEach(routines) { routine in
-                        MenuRoutineRow(routine: routine) {
-                            model.showMainWindow(selecting: model.latest(of: routine.id))
-                        }
+                        MenuRoutineRow(routine: routine, isHighlighted: highlighted == routine.id,
+                                       hover: { hover($0, routine) }, open: { open(routine) })
+                            .id(routine.id)
                     }
                 }
                 .padding(metrics.points(6))
                 if routines.count > 9 {
-                    ScrollView { rows }.frame(height: metrics.points(420))
+                    ScrollViewReader { proxy in
+                        ScrollView { rows }.frame(height: metrics.points(420))
+                            .onChange(of: highlighted) { _, id in if let id { proxy.scrollTo(id) } }
+                    }
                 } else {
                     rows
                 }
@@ -112,9 +130,45 @@ struct MenuBarContent: View {
             .padding(.vertical, metrics.points(4))
         }
         .frame(width: 340)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($keyboardFocused)
+        .onKeyPress(keys: [.upArrow, .downArrow]) { press in
+            highlighted = PanelHighlight.moved(highlighted, down: press.key == .downArrow, in: routines.map(\.id))
+            return .handled
+        }
+        .onKeyPress(.return) {
+            guard let routine = highlightedRoutine else { return .ignored }
+            open(routine)
+            return .handled
+        }
+        .background { runShortcuts }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            // Each opening starts unhighlighted, with the keyboard on the routines.
+            guard note.object is MenuBarPanelWindow else { return }
+            highlighted = nil
+            keyboardFocused = true
+        }
         // One light backing preserves caption contrast while letting glass sample the backdrop.
         .background(Color(nsColor: .windowBackgroundColor).opacity(0.75))
         .environment(\.appearsActive, true)
+    }
+
+    /// Command-R and Command-. act on the highlighted row. The panel claims both
+    /// keys, so the main menu's Run Now never runs the main window's routine instead.
+    private var runShortcuts: some View {
+        ZStack {
+            Button("Run Now") {
+                guard let routine = highlightedRoutine, !model.scheduler.hasActiveSession(routine.id) else { return }
+                model.scheduler.run(routine, trigger: .manual)
+            }
+            .keyboardShortcut("r")
+            Button("Stop") { highlightedRoutine.map { model.scheduler.stop($0.id) } }
+                .keyboardShortcut(".")
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
     }
 
     private var openButton: some View {
@@ -140,8 +194,9 @@ private struct MenuRoutineRow: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let routine: Routine
+    let isHighlighted: Bool
+    let hover: (Bool) -> Void
     let open: () -> Void
-    @State private var hovering = false
 
     var body: some View {
         let running = model.scheduler.hasActiveSession(routine.id)
@@ -164,22 +219,22 @@ private struct MenuRoutineRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            if hovering {
+            if isHighlighted {
                 Button(action: toggleRun) {
                     Image(systemName: running ? "stop.fill" : "play.fill")
                 }
                 .buttonStyle(.borderless)
-                .help(running ? "Stop" : "Run now")
+                .help(running ? "Stop (Command-.)" : "Run now (Command-R)")
             }
         }
         .padding(.horizontal, metrics.points(8))
         .padding(.vertical, metrics.points(5))
-        .background(hovering ? Color.primary.opacity(0.08) : .clear,
+        .background(isHighlighted ? Color.primary.opacity(0.08) : .clear,
                     in: RoundedRectangle(cornerRadius: metrics.points(6)))
         .contentShape(Rectangle())
-        .onHover { hovering = $0 }
+        .onHover(perform: hover)
         .onTapGesture(perform: open)
-        // Hover shows Run and Stop to a pointer; VoiceOver and Full Keyboard Access get them as actions.
+        // Hover or Up and Down show Run and Stop; VoiceOver and Full Keyboard Access get them as actions.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(routine.name)
         .accessibilityValue(spokenState(running: running))

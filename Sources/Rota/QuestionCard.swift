@@ -239,6 +239,9 @@ struct QuestionCard: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // The row's number with Command picks it, also while the message field holds focus.
+        .keyboardShortcut(number < 10 ? KeyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: .command)
+                                      : nil)
         .accessibilityLabel(option.label)
         .accessibilityHint(option.detail)
         .accessibilityValue(selected ? "Selected" : "Not selected")

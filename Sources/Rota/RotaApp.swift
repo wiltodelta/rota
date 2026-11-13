@@ -31,6 +31,7 @@ struct RotaApp: App {
                 }
             }
             RoutineCommands()
+            SessionCommands()
             // A single zoom for all app content; chat fonts remain independently configurable.
             CommandGroup(after: .toolbar) {
                 SidebarToggleCommand()
@@ -102,6 +103,7 @@ final class AppModel {
     var presentingNew = false
     var presentingImport = false
     var sessionToDelete: RunRecord?
+    let keyboard = KeyboardRequests()
     /// The routine whose settings sheet is open.
     var editingRoutineID: String?
     /// Whether the sessions and routines list shows; kept across launches.

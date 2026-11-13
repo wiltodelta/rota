@@ -54,6 +54,10 @@ final class ProseTextView: NSTextView {
 
     deinit { NotificationCenter.default.removeObserver(self) }
 
+    /// Read-only text keeps Tab, so a key view loop entering it never leaves. Click or drag
+    /// still selects; the keyboard reads the chat with the Page keys from the session list.
+    override var canBecomeKeyView: Bool { false }
+
     override func clicked(onLink link: Any, at charIndex: Int) {
         guard let url = link as? URL, url.isFileURL else {
             super.clicked(onLink: link, at: charIndex)

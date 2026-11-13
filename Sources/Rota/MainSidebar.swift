@@ -10,6 +10,7 @@ struct MainSidebar: View {
     private enum Focus: Hashable { case list, filter }
     @FocusState private var focus: Focus?
     @State private var filterFocusRequested = false
+    @State private var routineToDelete: Routine?
 
     let records: [RunRecord]
 
@@ -65,11 +66,39 @@ struct MainSidebar: View {
             .accessibilityIdentifier("routineSidebar")
             .focused($focus, equals: .list)
             .onKeyPress(keys: [.tab, KeyEquivalent("\u{19}")]) { press in
-                guard press.modifiers.contains(.shift) || press.key.character == "\u{19}" else { return .ignored }
+                // Shift-Tab from the filter bubbles up here too; it continues to the previous control.
+                guard focus == .list, press.modifiers.contains(.shift) || press.key.character == "\u{19}" else {
+                    return .ignored
+                }
                 proxy.scrollTo("sessionFilterHeader", anchor: .top)
                 filterFocusRequested = true
                 return .handled
             }
+            // As in Mail: Return goes to the message, Space and Page keys read it, Delete removes it.
+            .onKeyPress(.return) {
+                guard focus == .list, case .session = model.selection else { return .ignored }
+                model.keyboard.focusComposer()
+                return .handled
+            }
+            .onKeyPress(keys: [.space, .pageUp, .pageDown]) { press in
+                guard focus == .list, case .session = model.selection else { return .ignored }
+                model.keyboard.scrollTranscript(down: press.key == .pageDown
+                                                    || (press.key == .space && !press.modifiers.contains(.shift)))
+                return .handled
+            }
+            .onDeleteCommand {
+                guard focus == .list else { return }
+                switch model.selection {
+                case .session(let id):
+                    if let record = model.scheduler.current(id), model.scheduler.canDelete(record) {
+                        model.sessionToDelete = record
+                    }
+                case .routine(let id): routineToDelete = model.scheduler.routine(id)
+                case nil: break
+                }
+            }
+            .onChange(of: model.keyboard.listFocus) { focus = .list }
+            .routineDeleteConfirmation($routineToDelete) {}
         }
     }
 
@@ -218,6 +247,34 @@ private struct SessionRow: View {
         if record.awaitsReply { return .orange }
         if record.outcome == .cancelled { return Color.secondary }
         return record.outcome.isFailure ? .red : .green
+    }
+}
+
+extension View {
+    /// Asks before deleting a routine with its sessions, from the sidebar or its edit sheet.
+    func routineDeleteConfirmation(_ routine: Binding<Routine?>, deleted: @escaping () -> Void) -> some View {
+        modifier(RoutineDeleteConfirmation(routine: routine, deleted: deleted))
+    }
+}
+
+private struct RoutineDeleteConfirmation: ViewModifier {
+    @Environment(AppModel.self) private var model
+    @Binding var routine: Routine?
+    let deleted: () -> Void
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog("Delete \(routine?.name ?? "Routine")?", isPresented: Binding(
+            get: { routine != nil }, set: { if !$0 { routine = nil } }
+        ), presenting: routine) { routine in
+            Button("Delete", role: .destructive) {
+                guard model.scheduler.delete(routine.id) else { return }
+                model.selection = nil
+                deleted()
+            }
+            .accessibilityIdentifier("confirmDeleteRoutine")
+        } message: { _ in
+            Text("Its sessions and logs are deleted too. The project skill is not touched.")
+        }
     }
 }
 

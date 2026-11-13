@@ -154,6 +154,10 @@ struct ChatTranscript: View {
                     scrollToEnd(proxy)
                 }
             }
+            .onChange(of: model.keyboard.page) { _, page in
+                guard let page, let atEnd = viewport.page(down: page.down) else { return }
+                scroll.following = atEnd
+            }
             .onChange(of: questionRevealRequest) {
                 scroll.following = false
                 scrollToEnd(proxy)

@@ -11,17 +11,15 @@ struct SessionRestartMenu: View {
 
     var body: some View {
         Menu {
-            ForEach(Harness.agents.filter { $0 != record.harness }) { harness in
+            ForEach(model.restartChoices(for: record), id: \.harness) { harness, installed in
                 Button(harness.title) {
                     restarting = true
                     Task {
                         defer { restarting = false }
-                        if let next = await model.scheduler.restart(record, with: harness) {
-                            model.selection = .session(next.id)
-                        }
+                        await model.restart(record, with: harness)
                     }
                 }
-                .disabled(!FileManager.default.isExecutableFile(atPath: model.scheduler.executable(harness)))
+                .disabled(!installed)
                 .accessibilityIdentifier("restartWith-\(harness.rawValue)")
             }
         } label: {

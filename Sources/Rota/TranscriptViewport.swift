@@ -50,6 +50,24 @@ final class TranscriptViewport: NSObject {
         }
     }
 
+    /// Pages the transcript as Page Down and Page Up do, keeping AppKit's context overlap.
+    /// Returns whether the page reached the end, or nil before the transcript is laid out.
+    func page(down: Bool) -> Bool? {
+        guard let scroll = markers[Int.min]?.view?.enclosingScrollView, let document = scroll.documentView else {
+            return nil
+        }
+        cancel()
+        scroll.layoutSubtreeIfNeeded()
+        let visible = scroll.documentVisibleRect
+        let step = max(visible.height / 2, visible.height - scroll.verticalPageScroll)
+        let end = max(document.bounds.minY, document.bounds.maxY - visible.height)
+        let position = min(end, max(document.bounds.minY, visible.minY + (down ? step : -step)))
+        scroll.contentView.scroll(to: NSPoint(x: visible.minX, y: position))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        remember()
+        return end - position < 0.5
+    }
+
     /// Native layout can settle after SwiftUI has already delivered its geometry callback.
     private func observeEnd(in scroll: NSScrollView, document: NSView) {
         guard followedScroll !== scroll || followedDocument !== document else { return }

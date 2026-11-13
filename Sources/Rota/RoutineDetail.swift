@@ -124,7 +124,7 @@ struct EditRoutineSheet: View {
     @Environment(\.dismiss) private var dismiss
     let routine: Routine
     @State private var draft: Routine
-    @State private var confirmingDelete = false
+    @State private var confirmingDelete: Routine?
 
     init(routine: Routine) {
         self.routine = routine
@@ -137,7 +137,7 @@ struct EditRoutineSheet: View {
             SheetTitle(text: "Edit Routine")
             RoutineForm(draft: $draft)
             HStack {
-                Button(interfaceTitle: "Delete Routine\u{2026}", role: .destructive) { confirmingDelete = true }
+                Button(interfaceTitle: "Delete Routine\u{2026}", role: .destructive) { confirmingDelete = routine }
                 Spacer(minLength: 12)
                 if let problem {
                     Text(problem)
@@ -161,14 +161,6 @@ struct EditRoutineSheet: View {
         // Fits the window at its minimum height; the form scrolls inside.
         .frame(width: metrics.sheetWidth(600))
         .frame(minHeight: 360, idealHeight: metrics.points(500))
-        .confirmationDialog("Delete \(routine.name)?", isPresented: $confirmingDelete) {
-            Button("Delete", role: .destructive) {
-                guard model.scheduler.delete(routine.id) else { return }
-                dismiss()
-                model.selection = nil
-            }
-        } message: {
-            Text("Its sessions and logs are deleted too. The project skill is not touched.")
-        }
+        .routineDeleteConfirmation($confirmingDelete) { dismiss() }
     }
 }

@@ -9,7 +9,11 @@ matching sources, then pass `--artifacts <directory>` in the guest. Preparation
 checks the original source, bundle and driver hashes, verifies the signature,
 copies the inputs into its own temporary folder and seals guest paths. Ordinary
 prepared manifests bind absolute repository paths and cannot be reused unchanged
-in another guest. `--host` is reserved for explicitly agreed host diagnostics.
+in another guest. In a fresh guest, run `git init` over the transferred sources
+(preparation hashes `git ls-files`), compile `scripts/ui-driver.swift` there, and
+write `prepared.json` with `ui_preparation.fingerprint` over the guest repository,
+bundle and driver before `ui-suite.py --artifacts`.
+`--host` is reserved for explicitly agreed host diagnostics.
 Guest execution suppresses the keyboard and mouse notice.
 
 Select a guest display mode whose visible work area contains the window sizes
@@ -73,6 +77,9 @@ action failures still stop immediately.
 this idempotent assignment. A failed RPC also reads the value back before retrying.
 Value waits retry a temporarily absent AX element during a form transition;
 only a successful value read can satisfy the wait, including an expected empty value.
+`focused` checks the focused element and its ancestors. Keyboard focus moved into the
+multi-line message field reports an editor without the field's identifier, so prove
+that move by typing (`key z`, then the field's value) rather than with `focused composer`.
 Toolbar placement uses the measured sidebar width from the toolbar's origin;
 the floating sidebar's AX outline can have an independent inset origin.
 An `AXSheet` is a separate window boundary: it may extend past its presenter.

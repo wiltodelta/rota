@@ -116,7 +116,9 @@
   your answer to the form. It is never sent automatically. Async questions allow
   separate messages while the form remains pending. Show Question returns to a
   card that has scrolled out of view.
-  Numbered options highlight your selection; Something else focuses the card's answer field.
+  Numbered options highlight your selection; Command and the option's number (Command-1 to
+  Command-9) choose it from the keyboard, even while you type in the message field.
+  Something else focuses the card's answer field.
   Multiple questions appear one at a time, with Back/Next and preserved drafts.
   Ordinary message drafts and attachments are kept separately. Codex's asynchronous
   questions and Antigravity questionnaires remain available after the turn ends
@@ -265,6 +267,10 @@
   its arrow keys choose a single category, and Tab returns to the list. Choosing a menu item also
   returns focus to the list. Inside the message field,
   arrows move the text cursor or selection as usual.
+- With a session selected in the focused list, Return moves to its message field and
+  Escape in the field returns to the list. Space and Page Down read further down the chat,
+  Shift-Space and Page Up back up; paging to the end follows new messages again.
+  Delete asks to delete the selected session, or the selected routine with its sessions.
 - Settings… (Command-,), or Settings at the foot of the sidebar, opens
   Settings inside the main window: the sidebar lists General, Chat and Agents,
   and Back or Escape returns to your routines and sessions. It reopens on the
@@ -272,9 +278,17 @@
 - Menus: File > New Routine… (Command-N) and Import Routines…;
   Routine > Run Now (Command-R), Stop (Command-.) and Edit Routine…
   (Command-E), acting on the selected routine or the selected session's.
+  Session > Show Routine (Shift-Command-R), Restart With, Open or Continue in
+  Terminal (Shift-Command-T), Show Log in Finder (Shift-Command-L), Show Question
+  (Shift-Command-A), Dismiss Attention (Shift-Command-D), Load Earlier Messages
+  (Shift-Command-E) and Delete Session… act on the open session wherever keyboard
+  focus is. With macOS keyboard navigation on, Tab does not reliably move between
+  the sidebar and the session's buttons (a SwiftUI limitation); these menu commands
+  and the keys above cover the same actions.
 - The menu bar panel lists every routine with its next run; hover a row to run
   or stop it (VoiceOver offers both as actions), click it to open its latest session. Right-click the icon for Settings,
-  updates and Quit.
+  updates and Quit. From the keyboard, Up and Down highlight a routine, Return opens its
+  latest session, Command-R runs it, Command-. stops it, and Escape closes the panel.
 - If the icon is hidden (behind the notch, or by a menu bar manager), open
   Rota again from Finder or Spotlight to get its window.
 

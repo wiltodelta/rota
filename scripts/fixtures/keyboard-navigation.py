@@ -70,6 +70,27 @@ for index in range(24):
     )
     records.append(record)
 ids["oldest"] = records[-1]["id"]
+# The newest history session holds a transcript several pages long for Page keys.
+long_log = root / "Logs" / "long.log"
+long_log.write_text("Synthetic long transcript.\n", encoding="utf-8")
+long_size = long_log.stat().st_size
+long_rows = [{"version": 1, "type": "header", "logSize": long_size}] + [
+    {
+        "version": 1,
+        "type": "item",
+        "logSize": long_size,
+        "id": index,
+        "kind": "agent",
+        "text": f"Long keyboard paragraph {index + 1}.",
+        "complete": True,
+    }
+    for index in range(80)
+]
+Path(str(long_log) + ".chat.jsonl").write_text(
+    "".join(json.dumps(row) + "\n" for row in long_rows), encoding="utf-8"
+)
+records[5]["logPath"] = str(long_log)
+ids["long"] = records[5]["id"]
 (root / "runs" / (routine + ".json")).write_text(json.dumps(records), encoding="utf-8")
 (root / "runs/keyboard-running.json").write_text("[]", encoding="utf-8")
 (root / "keyboard-ids.json").write_text(json.dumps(ids), encoding="utf-8")

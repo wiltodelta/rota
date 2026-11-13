@@ -99,6 +99,9 @@ struct ChatComposer: View {
                 .textFieldStyle(.plain)
                 .focused($focused)
                 .onSubmit(send)
+                // Return in the session list writes here; Escape goes back to the list.
+                .onChange(of: model.keyboard.composerFocus) { focused = true }
+                .onExitCommand { if model.sidebarShown { model.keyboard.focusList() } }
                 .help(inputHelp)
                 .accessibilityLabel("Message")
                 .accessibilityIdentifier("composer")

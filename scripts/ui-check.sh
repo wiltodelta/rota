@@ -11,7 +11,7 @@
 #   scripts/ui-check.sh --parallel-only   continue and stop independent sessions with synthetic Claude
 #   scripts/ui-check.sh --paint-only      first transcript paint without AX or scroll input
 #   scripts/ui-check.sh --filters-only    combined session categories and resets only
-#   scripts/ui-check.sh --keyboard-only   session/filter arrows, focus and live state changes
+#   scripts/ui-check.sh --keyboard-only   session/filter arrows, focus, session keys, panel keys, live states
 #   scripts/ui-check.sh --switch-only     repeated session switches, paint checked before transcript AX
 #   scripts/ui-check.sh --questions-only  finished question and verification states only
 #   scripts/ui-check.sh --harnesses-only  reasoning and CLI/service compatibility states only
@@ -374,8 +374,10 @@ PYTHON
         quit_rota
         return
     fi
-    "$DRIVER" press showQuestion
-    check "$DRIVER" visible questionOption-0-Blue
+    # Session > Show Question (Shift-Command-A) brings the card back into view.
+    "$DRIVER" focus composer
+    "$DRIVER" key shift-command-a
+    check wait_visible questionOption-0-Blue
     check "$DRIVER" visible composer
     "$DRIVER" set composer "An unrelated draft"
     capture "UI check $appearance" "$appearance-async-question-finished" 520
@@ -383,7 +385,11 @@ PYTHON
     wait_exists questionField-0
     "$DRIVER" set questionField-0 "A custom answer"
     wait_value composer "An unrelated draft" || fail "custom answers keep the ordinary editor independent"
-    "$DRIVER" press questionOption-0-Blue
+    # Command and the row's number pick it while the message field keeps focus and text.
+    "$DRIVER" focus composer
+    "$DRIVER" key command-1
+    wait_value questionOption-0-Blue Selected || fail "Command-1 picks the first option"
+    wait_value composer "An unrelated draft" || fail "Command-1 leaves the draft unchanged"
     check wait_exists nextQuestion
     "$DRIVER" reveal nextQuestion
     "$DRIVER" press nextQuestion
@@ -655,6 +661,119 @@ focus_session_filter() {
     "$DRIVER" key shift-tab
 }
 
+wait_focused() {
+    local attempt
+    for ((attempt = 0; attempt < 30; attempt++)); do
+        "$DRIVER" focused "$1" && return 0
+        sleep 0.2
+    done
+    return 1
+}
+
+# Return writes to the selected session, Escape returns to the list, Page keys and
+# Space read the transcript beside it, and Delete asks before removing a session.
+check_keyboard_session_keys() {
+    "$DRIVER" choose sessionFilter 'All Sessions'
+    "$DRIVER" select-in routineSidebar "sidebarPreview-$keyboard_alpha"
+    "$DRIVER" focus routineSidebar
+    "$DRIVER" key return
+    # SwiftUI reports the focused editor without the field's identifier: type into it instead.
+    "$DRIVER" key z
+    check wait_value composer z
+    "$DRIVER" key escape
+    check wait_focused routineSidebar
+    "$DRIVER" set composer ''
+    "$DRIVER" focus routineSidebar
+    "$DRIVER" key down
+    check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_beta"
+    "$DRIVER" select-in routineSidebar "sidebarPreview-$keyboard_long"
+    "$DRIVER" focus routineSidebar
+    wait_text 'Long keyboard paragraph 80.'
+    if "$DRIVER" exists scrollToLatest; then fail 'long transcript opens at its end'; fi
+    "$DRIVER" key page-up
+    check wait_exists scrollToLatest
+    check wait_focused routineSidebar
+    capture 'Keyboard conversations' "$appearance-keyboard-page-up"
+    "$DRIVER" key shift-space
+    check wait_exists scrollToLatest
+    for _ in {1..20}; do
+        "$DRIVER" exists scrollToLatest || break
+        "$DRIVER" key space
+        sleep 0.2
+    done
+    if "$DRIVER" exists scrollToLatest; then fail 'Space pages to the end and follows it'; fi
+    "$DRIVER" key page-down
+    check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_long"
+    "$DRIVER" key delete
+    check wait_exists confirmDeleteSession
+    capture 'Keyboard conversations' "$appearance-keyboard-delete"
+    "$DRIVER" key escape
+    for _ in {1..30}; do "$DRIVER" exists confirmDeleteSession || break; sleep 0.2; done
+    if "$DRIVER" exists confirmDeleteSession; then fail 'Escape cancels Delete Session'; fi
+    check "$DRIVER" exists "sidebarPreview-$keyboard_long"
+    "$DRIVER" select-in routineSidebar 'routineHarness-keyboard-running'
+    "$DRIVER" focus routineSidebar
+    "$DRIVER" key delete
+    check wait_exists confirmDeleteRoutine
+    "$DRIVER" key escape
+    for _ in {1..30}; do "$DRIVER" exists confirmDeleteRoutine || break; sleep 0.2; done
+    if "$DRIVER" exists confirmDeleteRoutine; then fail 'Escape cancels Delete Routine'; fi
+    check "$DRIVER" exists 'routineHarness-keyboard-running'
+    # The Session menu's shortcuts act on the open session wherever focus is.
+    "$DRIVER" select-in routineSidebar "sidebarPreview-$keyboard_long"
+    check wait_exists loadEarlierMessages
+    "$DRIVER" focus routineSidebar
+    "$DRIVER" key shift-command-e
+    wait_text 'Long keyboard paragraph 1.'
+    "$DRIVER" select-in routineSidebar "sidebarPreview-$keyboard_beta"
+    check wait_exists dismissAttention
+    "$DRIVER" focus composer
+    "$DRIVER" key shift-command-d
+    for _ in {1..30}; do "$DRIVER" exists dismissAttention || break; sleep 0.2; done
+    if "$DRIVER" exists dismissAttention; then fail 'Shift-Command-D dismisses the attention mark'; fi
+    "$DRIVER" key shift-command-r
+    check wait_selected 'routineHarness-keyboard-conversations'
+}
+
+wait_selected() {
+    local attempt
+    for ((attempt = 0; attempt < 30; attempt++)); do
+        "$DRIVER" selected-in routineSidebar "$1" && return 0
+        sleep 0.2
+    done
+    return 1
+}
+
+# The menu bar panel walks its routines like a menu: Up and Down, Command-R and
+# Command-. on the highlighted row, Return to open its latest session.
+check_keyboard_panel() {
+    local panel_id
+    open_rota --env "ROTA_APPEARANCE=$1" --env ROTA_OPEN_PANEL=1
+    check wait_exists 'Keyboard running'
+    "$DRIVER" key down
+    "$DRIVER" key down
+    "$DRIVER" key down
+    "$DRIVER" key command-r
+    for _ in {1..40}; do
+        [[ "$(session_value keyboard-running running)" == True* ]] && break
+        sleep 0.2
+    done
+    [[ "$(session_value keyboard-running running)" == True* ]] || fail 'Command-R runs the highlighted routine'
+    panel_id="$("$DRIVER" wid "")"
+    screencapture -x -o -l "$panel_id" "$OUT/$1-keyboard-panel.png" && pass "captured $1-keyboard-panel"
+    "$DRIVER" key command-period
+    for _ in {1..40}; do
+        [[ "$(session_value keyboard-running cancelled)" == True* ]] && break
+        sleep 0.2
+    done
+    [[ "$(session_value keyboard-running cancelled)" == True* ]] || fail 'Command-. stops the highlighted routine'
+    "$DRIVER" key up
+    "$DRIVER" key return
+    check wait_exists routineSidebar
+    check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_alpha"
+    quit_rota
+}
+
 check_session_filter_union() {
     "$DRIVER" choose sessionFilter 'All Sessions'
     "$DRIVER" choose sessionFilter Failed
@@ -731,12 +850,13 @@ fi
 if [[ "$LIVE" == --keyboard-only ]]; then
     for appearance in light dark; do
         python3 scripts/fixtures/keyboard-navigation.py "$SUPPORT" "$WORK/project"
-        read -r keyboard_alpha keyboard_beta keyboard_gamma keyboard_delta keyboard_epsilon keyboard_oldest < <(
+        read -r keyboard_alpha keyboard_beta keyboard_gamma keyboard_delta keyboard_epsilon keyboard_oldest \
+            keyboard_long < <(
             python3 - "$SUPPORT/keyboard-ids.json" <<'PYTHON'
 import json
 import sys
 ids = json.load(open(sys.argv[1]))
-print(*(ids[name] for name in ("alpha", "beta", "gamma", "delta", "epsilon", "oldest")))
+print(*(ids[name] for name in ("alpha", "beta", "gamma", "delta", "epsilon", "oldest", "long")))
 PYTHON
         )
         launch "$appearance"
@@ -846,6 +966,7 @@ PYTHON
             "$DRIVER" key right
             check wait_value sessionFilter Running
         done
+        check_keyboard_session_keys
         "$DRIVER" choose sessionFilter Running
         "$APP/Contents/Helpers/rota" run keyboard-running >/dev/null
         for _ in {1..40}; do
@@ -869,6 +990,7 @@ PYTHON
         "$DRIVER" choose sessionFilter 'All Sessions'
         "$DRIVER" key command-zero
         quit_rota
+        check_keyboard_panel "$appearance"
     done
     pass 'session and filter keyboard navigation in both appearances and zoom levels'
     exit 0
