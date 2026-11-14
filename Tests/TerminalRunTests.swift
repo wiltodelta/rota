@@ -102,4 +102,68 @@ final class TerminalRunTests: XCTestCase {
         XCTAssertFalse(readable.contains("Not submitted to the CLI"), "Opening must not invent a user message")
         XCTAssertTrue(inputSeen, "A real native user event must acknowledge the pending reply")
     }
+
+    func testScreenAttachmentComesFromTheMatchingSessionOnly() {
+        let list = "There are screens on:\n\t63754.rota-terminal-a\t(Attached)\n"
+            + "\t811.rota-terminal-b\t(Detached)\n2 Sockets in /tmp/.screen.\n"
+        XCTAssertTrue(ScreenRun.attached("rota-terminal-a", in: list))
+        XCTAssertFalse(ScreenRun.attached("rota-terminal-b", in: list))
+        XCTAssertFalse(ScreenRun.attached("rota-terminal-c", in: list))
+    }
+
+    /// Closing the terminal window returns the session to Rota, but only once the CLI waits for input.
+    func testClosedTerminalReturnsToRotaAfterTheTurnEnds() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let native = folder.appendingPathComponent("native.jsonl")
+        try Data().write(to: native)
+        let turnEnds = folder.appendingPathComponent("turn-ends")
+        let started = #"{"type":"event_msg","payload":{"type":"task_started"}}"#
+        let complete = #"{"type":"event_msg","payload":{"type":"task_complete"}}"#
+        let producer = "trap '' HUP INT; print -r -- \(shellQuote(started)) >> \(shellQuote(native.path)); "
+            + "while [[ ! -e \(shellQuote(turnEnds.path)) ]]; do /bin/sleep 0.2; done; "
+            + "print -r -- \(shellQuote(complete)) >> \(shellQuote(native.path)); "
+            + "while true; do /bin/sleep 1; done"
+        let log = folder.appendingPathComponent("run.log")
+        var spec = LaunchSpec(executable: "/bin/zsh", prompt: "", arguments: ["-c", producer],
+            workingDirectory: folder.path, environment: [:], mode: .terminal(.codex), timeout: nil,
+            log: log, resume: "test")
+        spec.terminalTranscript = native
+        let done = expectation(description: "returned to Rota")
+        nonisolated(unsafe) var outcome: RunOutcome?
+        let control = try ProcessLauncher().launch(spec, events: .init(session: { _ in },
+            finished: { outcome = $0; done.fulfill() }))
+        let name = try XCTUnwrap(control.attachCommand?.last)
+        defer { ScreenRun.quit(name) }
+
+        // A real terminal client: `script` gives `screen -x` a PTY, as a terminal window does.
+        let client = Process()
+        client.executableURL = URL(fileURLWithPath: "/usr/bin/script")
+        client.arguments = ["-q", "/dev/null", ScreenRun.screen, "-x", name]
+        let input = Pipe()
+        client.standardInput = input
+        client.standardOutput = FileHandle.nullDevice
+        client.environment = ["TERM": "xterm-256color", "LANG": "en_US.UTF-8"]
+        try client.run()
+        let deadline = Date().addingTimeInterval(10)
+        var attached = false
+        while !attached, Date() < deadline {
+            attached = ScreenRun.attached(name, in: ScreenRun.list(name))
+            if !attached { Thread.sleep(forTimeInterval: 0.2) }
+        }
+        XCTAssertTrue(attached)
+        Thread.sleep(forTimeInterval: 1.5)
+        client.terminate()
+        client.waitUntilExit()
+
+        Thread.sleep(forTimeInterval: 4)
+        XCTAssertNil(outcome, "A closed window must not end a turn in progress")
+        XCTAssertTrue(ScreenRun.alive(name))
+        try Data().write(to: turnEnds)
+        wait(for: [done], timeout: 15)
+        XCTAssertEqual(outcome, .succeeded)
+        XCTAssertFalse(ScreenRun.alive(name))
+        XCTAssertTrue(try String(contentsOf: log, encoding: .utf8).contains("Returned to Rota"))
+    }
 }

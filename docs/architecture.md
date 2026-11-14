@@ -1077,7 +1077,12 @@ Grok resumes over ACP using the directory encoded in that archive's group
 (or its `.cwd` file for long paths). The routine's spelling can name the same
 folder through a symlink yet point Grok's loader at a different store group.
 The detached screen is owned by Rota; `screen -x` reconnects without starting a
-second CLI. Closing a terminal window detaches, CLI exit reports its exit code,
+second CLI. Closing a terminal window detaches; once no client is attached after one
+was, and the native history shows the CLI waiting for two polls in a row, Rota ends
+the CLI as a success ("Returned to Rota") so the app composer resumes the session.
+The transition from attached excludes the moment before the window opens; an
+adopted run waits for a turn to end, since its state before the restart is unknown.
+CLI exit reports its exit code,
 and Stop first interrupts the native turn, then terminates the owned CLI and
 screen. A wrapper records the native child PID and parent; Rota captures its
 kernel birth time and checks it again before TERM or the KILL fallback. A TUI
@@ -1087,7 +1092,8 @@ It remains active between turns and blocks overlapping scheduled runs of the
 same routine until the CLI exits.
 `RunRecord.terminalState` distinguishes a turn in progress from waiting between
 turns while the CLI itself remains running. Native approval dialogs and replies
-stay in Terminal; the app composer is unavailable until the terminal run ends.
+stay in Terminal; the app composer is unavailable until the terminal run ends
+or its window closes while the CLI waits.
 Opening Terminal preserves a needs-reply mark. Only a native user message (or
 an explicit dismissal) clears it; changing a read timestamp during transcript
 lookup must not cancel the open or overwrite that timestamp.

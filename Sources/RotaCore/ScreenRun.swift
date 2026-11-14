@@ -18,9 +18,16 @@ final class ScreenRun: RunControl, @unchecked Sendable {
     }
 
     /// The pid of the session named exactly `name`, as `screen -ls` lists it.
-    static func pid(_ name: String) -> pid_t? {
-        pid(name, in: ProcessLauncher.capture(screen, ["-ls", name], in: NSTemporaryDirectory(),
-                                              loginShell: false).1)
+    static func pid(_ name: String) -> pid_t? { pid(name, in: list(name)) }
+
+    /// `screen -ls name`: one line per matching session, with its pid and attachment.
+    static func list(_ name: String) -> String {
+        ProcessLauncher.capture(screen, ["-ls", name], in: NSTemporaryDirectory(), loginShell: false).1
+    }
+
+    /// Whether a terminal is attached to the session named exactly `name` in a `screen -ls` listing.
+    static func attached(_ name: String, in list: String) -> Bool {
+        list.split(separator: "\n").contains { pid(name, in: String($0)) != nil && $0.contains("(Attached)") }
     }
 
     static func pid(_ name: String, in list: String) -> pid_t? {

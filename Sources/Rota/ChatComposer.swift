@@ -269,7 +269,8 @@ struct ChatComposer: View {
             return "Checking the native session before starting more work. Rota will retry automatically."
         }
         if running, model.scheduler.current(record.id)?.terminalState != nil {
-            return "Reply and approve actions in Terminal. Messages sync here automatically."
+            return "Reply and approve actions in Terminal, or close its window to continue here. "
+                + "Messages sync here automatically."
         }
         switch record.harness {
         case .shell:

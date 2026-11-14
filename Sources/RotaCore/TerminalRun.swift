@@ -2,7 +2,8 @@ import Foundation
 import Darwin
 
 /// Owns the resumed CLI's terminal, but follows the provider's structured history.
-/// Closing a terminal window detaches; exiting the CLI or Stop ends the run.
+/// Exiting the CLI or Stop ends the run. Closing the terminal window detaches; once the
+/// CLI waits for input with no terminal attached, the run ends and Rota's composer takes over.
 final class TerminalRun: RunControl, @unchecked Sendable {
     private let journal: RunJournal
     private let name: String
@@ -17,9 +18,14 @@ final class TerminalRun: RunControl, @unchecked Sendable {
     private var readingTranscript = true
     private let log: URL
     private var lease: RunLease?
+    /// A terminal attached since launch, so a detached screen means its window closed.
+    private var wasAttached = false
+    /// The CLI waits between turns. Unknown after adoption until a turn ends.
+    private var waiting: Bool
+    private var closedPolls = 0
 
     private init(journal: RunJournal, name: String, script: URL, exitFile: URL,
-                 transcript: NativeTranscript, log: URL) {
+                 transcript: NativeTranscript, log: URL, waiting: Bool) {
         self.journal = journal
         self.name = name
         self.script = script
@@ -27,6 +33,7 @@ final class TerminalRun: RunControl, @unchecked Sendable {
         childFile = script.appendingPathExtension("pid")
         self.transcript = transcript
         self.log = log
+        self.waiting = waiting
     }
 
     var attachCommand: [String]? { [ScreenRun.screen, "-x", name] }
@@ -42,7 +49,7 @@ final class TerminalRun: RunControl, @unchecked Sendable {
         let script = folder.appendingPathComponent(name + ".zsh")
         let exitFile = folder.appendingPathComponent(name + ".exit")
         let run = TerminalRun(journal: journal, name: name, script: script, exitFile: exitFile,
-                              transcript: transcript, log: spec.log)
+                              transcript: transcript, log: spec.log, waiting: true)
         do {
             try scriptText(spec, exitFile: exitFile, childFile: run.childFile)
                 .write(to: script, atomically: true, encoding: .utf8)
@@ -73,7 +80,7 @@ final class TerminalRun: RunControl, @unchecked Sendable {
         let run = TerminalRun(journal: journal, name: name, script: folder.appendingPathComponent(name + ".zsh"),
             exitFile: folder.appendingPathComponent(name + ".exit"),
             transcript: try NativeTranscript(url: source, harness: harness, offset: offset, since: lease.nativeSince),
-            log: spec.log)
+            log: spec.log, waiting: false)
         run.lease = lease
         run.queue.async { run.poll() }
         return run
@@ -111,7 +118,8 @@ final class TerminalRun: RunControl, @unchecked Sendable {
         if let status = exitStatus {
             return finish(stopReason ?? (status == 0 ? .succeeded : .failed(exitCode: status)))
         }
-        if !ScreenRun.alive(name) {
+        let list = ScreenRun.list(name)
+        if ScreenRun.pid(name, in: list) == nil {
             if child?.exists == true {
                 end(as: .interrupted)
                 queue.asyncAfter(deadline: .now() + 1) { self.poll() }
@@ -119,6 +127,7 @@ final class TerminalRun: RunControl, @unchecked Sendable {
             }
             return finish(stopReason ?? exitStatus.map { $0 == 0 ? .succeeded : .failed(exitCode: $0) } ?? .interrupted)
         }
+        returnIfClosed(attached: ScreenRun.attached(name, in: list))
         queue.asyncAfter(deadline: .now() + 1) { self.poll() }
     }
 
@@ -149,10 +158,23 @@ final class TerminalRun: RunControl, @unchecked Sendable {
         case .chunk(let text, let kind, let nativeID): journal.text(text, kind: kind, nativeID: nativeID)
         case .configuration(let configuration): journal.configure(configuration)
         case .state(let state):
-            if state == .waiting { journal.endText() }
+            waiting = state == .waiting
+            if waiting { journal.endText() }
             journal.terminalState(state)
-            if state == .waiting, stopReason != nil { quitScreen() }
+            if waiting, stopReason != nil { quitScreen() }
         }
+    }
+
+    /// Terminal continuation is a detour: with its window closed and the CLI idle, the session
+    /// returns to Rota. Two idle polls in a row let a reply typed just before closing reach the history.
+    private func returnIfClosed(attached: Bool) {
+        if attached { wasAttached = true }
+        let closed = wasAttached && !attached && waiting && stopReason == nil
+        closedPolls = closed ? closedPolls + 1 : 0
+        guard closedPolls >= 2 else { return }
+        journal.record(.status, "Returned to Rota")
+        stopReason = .succeeded
+        quitScreen()
     }
 
     private var exitStatus: Int32? {

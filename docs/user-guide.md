@@ -65,9 +65,10 @@
   sessions also open in their own CLI with **Continue in Terminal**. Rota follows
   that continuation: new messages and tool calls appear in the same chat and
   session preview, with **Working in Terminal** or **Waiting in Terminal** as
-  the turn progresses. Type replies and approve actions in Terminal; Rota's
-  composer returns after the CLI exits. Closing the terminal window detaches;
-  **Open in Terminal** reconnects, and **Stop** ends the owned session.
+  the turn progresses. Type replies and approve actions in Terminal. Closing the
+  terminal window returns the session to Rota once the agent waits for input: Rota
+  ends the CLI and its composer continues the same session. While a turn is still in
+  progress, **Open in Terminal** reconnects, and **Stop** ends the owned session.
   Codex continuation also finds compressed and archived native sessions; Codex
   itself restores the writable journal while Rota follows new entries.
   Continuing an archived Codex session restores it from the archive first. Terminal
