@@ -26,12 +26,18 @@ final class AppSettings {
         didSet { defaults.set(claudeInteractive, forKey: "claudeInteractive") }
     }
 
+    /// Messages sent with one click from under the chat; deleted defaults stay deleted.
+    var quickReplies: [QuickReply] {
+        didSet { defaults.set(try? JSONEncoder().encode(quickReplies), forKey: "quickReplies") }
+    }
+
     init(defaults: UserDefaults = .standard, refreshOnInit: Bool = true) {
         self.defaults = defaults
         notifyOnSuccess = defaults.bool(forKey: "notifyOnSuccess")
         executables = defaults.dictionary(forKey: "executables") as? [String: String] ?? [:]
         terminalApp = defaults.string(forKey: "terminalApp")
         claudeInteractive = defaults.object(forKey: "claudeInteractive") as? Bool ?? true
+        quickReplies = Self.storedReplies(defaults)
         if refreshOnInit { refreshInstalled() }
     }
 

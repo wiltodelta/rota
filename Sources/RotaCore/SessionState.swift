@@ -58,6 +58,11 @@ extension Scheduler {
         return mode.capabilities.messages != .terminal
     }
 
+    /// A message can go out now: the session takes messages and no question blocks them.
+    public func acceptsMessage(_ record: RunRecord) -> Bool {
+        canMessage(record) && !record.hasBlockingQuestion
+    }
+
     func updateConfiguration(_ configuration: SessionConfiguration, routineID: String, runID: UUID) {
         guard var record = active[runID], record.routineID == routineID else { return }
         let previous = record

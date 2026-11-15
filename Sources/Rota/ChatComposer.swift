@@ -39,14 +39,24 @@ struct ChatComposer: View {
     private var hasQuestion: Bool { record.questions?.isEmpty == false }
     private var running: Bool { model.scheduler.isActive(record) }
     private var canSend: Bool {
-        model.scheduler.canMessage(record) && !record.hasBlockingQuestion && !staging
+        model.scheduler.acceptsMessage(record) && !staging
             && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty)
     }
 
     var body: some View {
         Group {
             if hasQuestion || model.scheduler.canMessage(record) {
-                box
+                VStack(alignment: .leading, spacing: metrics.points(8)) {
+                    let replies = model.settings.sendableReplies
+                    // A question or attention request asks for its own answer, and at
+                    // 150% the banner, the replies and the field outgrow the minimum window.
+                    if !hasQuestion, !record.showsAttentionBanner, !replies.isEmpty {
+                        QuickReplyBar(replies: replies, enabled: model.scheduler.acceptsMessage(record),
+                                      send: sendReply)
+                            .padding(.horizontal, metrics.points(4))
+                    }
+                    box
+                }
             } else if let note {
                 Text(note)
                     .interfaceFont(.callout)
@@ -61,6 +71,10 @@ struct ChatComposer: View {
         .frame(maxWidth: metrics.points(760))
         .frame(maxWidth: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
+        // Session > Quick Replies.
+        .onChange(of: model.keyboard.quickReply) { _, request in
+            if let request { sendReply(request.reply) }
+        }
         .task(id: record.id) {
             // Selecting another session keeps keyboard focus in the sidebar.
             resolvedConfiguration = nil
@@ -282,19 +296,31 @@ struct ChatComposer: View {
 
     private func send() {
         guard canSend else { return }
+        guard deliver(text.trimmingCharacters(in: .whitespacesAndNewlines), attachments: attachments) else { return }
+        text = ""
+        model.sessionAttachments[record.id] = nil
+    }
+
+    /// A quick reply goes out alone; the draft and its attachments wait.
+    private func sendReply(_ reply: QuickReply) {
+        guard model.scheduler.acceptsMessage(record) else { return }
+        deliver(reply.text, attachments: [])
+    }
+
+    @discardableResult
+    private func deliver(_ text: String, attachments: [ChatAttachment]) -> Bool {
         do {
-            let message = try ChatMessage(text: text.trimmingCharacters(in: .whitespacesAndNewlines),
-                                          attachments: attachments).encoded()
+            let message = try ChatMessage(text: text, attachments: attachments).encoded()
             guard model.scheduler.message(message, to: record) else {
                 attachmentError = "The session cannot take a message right now. Your draft is kept."
-                return
+                return false
             }
             sent(message)
-            text = ""
-            model.sessionAttachments[record.id] = nil
             attachmentError = nil
+            return true
         } catch {
             attachmentError = "Could not prepare the message: \(error.localizedDescription)"
+            return false
         }
     }
 }

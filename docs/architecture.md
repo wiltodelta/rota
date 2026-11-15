@@ -692,6 +692,14 @@ while the list itself holds focus, since keys from the filter in its header
 bubble up through it. Delete (`onDeleteCommand`) opens the session's existing
 confirmation, or the routine confirmation shared with the edit sheet
 (`routineDeleteConfirmation`).
+Quick replies (`QuickReply`, `AppSettings.quickReplies`) are JSON in UserDefaults;
+an absent key means the shipped defaults, whose fixed ids let Restore Default
+Replies put back only removed ones, at their shipped positions, and an empty list
+stays empty. `QuickReplyBar` wraps its buttons (`SessionFilterFlow`) and sends
+through the composer's own delivery path without touching the draft or its
+attachments; Session > Quick Replies reaches it through `KeyboardRequests.sendQuickReply`.
+The bar hides while a question or attention banner shows: at 150% the banner, the
+bar and the field together outgrew the 600 pt minimum window (VM layout gate, 2026-11-14).
 `SessionCommands` (the Session menu) repeats every action of the open session's
 header, banners and chat as a menu command, because Tab cannot be relied on to
 reach them: with macOS keyboard navigation on, focus that enters a SwiftUI hosting
@@ -707,7 +715,10 @@ The Sessions heading and native menu occupy a nonselectable list row, with a
 filled symbol when filtering. Native Section headers merge their children into
 one Accessibility element, hiding separate control actions and caching their
 values. Regular rows preserve the menu and removable conditions as separate
-controls. Shift-Tab scrolls the heading into view before moving focus to the filter.
+controls. A list row's inset is wider than a header's, so the Sessions title and
+the day titles shift by the measured difference to the Routines header's edge
+(`headingShift`): about 1 to 1.5 pt, varying with macOS version and interface scale.
+Shift-Tab scrolls the heading into view before moving focus to the filter.
 Committing a menu choice returns focus to the session list, removing the menu's
 focus ring. Direct arrow-key changes keep focus on the filter until Tab.
 `SidebarSelectionScroller` re-scrolls the sidebar's `NSOutlineView` after cell

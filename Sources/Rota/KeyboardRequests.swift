@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Keyboard requests that cross views: the sidebar list hands focus to the message
 /// field and pages the transcript beside it; the field hands focus back; the Session
-/// menu reaches the open session's question and earlier messages.
+/// menu reaches the open session's question, earlier messages and quick replies.
 @MainActor
 @Observable
 final class KeyboardRequests {
@@ -11,16 +11,24 @@ final class KeyboardRequests {
         let serial: Int
     }
 
+    struct Reply: Equatable {
+        let reply: QuickReply
+        let serial: Int
+    }
+
     private(set) var composerFocus = 0
     private(set) var listFocus = 0
     private(set) var page: Page?
     private(set) var questionReveal = 0
     private(set) var earlierMessages = 0
+    /// Session > Quick Replies: the reply the open session's composer sends.
+    private(set) var quickReply: Reply?
     /// The open session whose transcript has earlier messages to load.
     private(set) var sessionWithEarlier: UUID?
 
     func revealQuestion() { questionReveal += 1 }
     func loadEarlierMessages() { earlierMessages += 1 }
+    func sendQuickReply(_ reply: QuickReply) { quickReply = Reply(reply: reply, serial: (quickReply?.serial ?? 0) + 1) }
     /// A closing view clears only its own session, so the next one's report survives.
     func setEarlierMessages(_ available: Bool, in session: UUID) {
         if available { sessionWithEarlier = session } else if sessionWithEarlier == session { sessionWithEarlier = nil }

@@ -73,10 +73,14 @@ struct GeneralSettings: View {
     }
 }
 
-/// The Chat tab: the chat's fonts and text scale.
+/// The Chat tab: the chat's fonts and text scale, and its quick replies.
 struct ChatSettings: View {
     var body: some View {
-        Form { ChatTextSection() }.settingsPane()
+        Form {
+            ChatTextSection()
+            QuickRepliesSection()
+        }
+        .settingsPane()
     }
 }
 

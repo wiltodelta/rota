@@ -11,6 +11,10 @@ struct MainSidebar: View {
     @FocusState private var focus: Focus?
     @State private var filterFocusRequested = false
     @State private var routineToDelete: Routine?
+    /// Where the native Routines header and the session rows' content start. Sessions and
+    /// the day titles are list rows, whose inset the system sets wider than a header's.
+    @State private var headerEdge: CGFloat?
+    @State private var rowEdge: CGFloat?
 
     let records: [RunRecord]
 
@@ -37,6 +41,7 @@ struct MainSidebar: View {
                     }
                 } header: {
                     SidebarHeader(title: "Routines")
+                        .leadingEdge($headerEdge)
                 }
                 Section {
                     sessionHeader
@@ -61,6 +66,7 @@ struct MainSidebar: View {
                         Text(group.title)
                             .interfaceFont(.caption)
                             .foregroundStyle(Color.secondaryText)
+                            .padding(.leading, headingShift)
                             .accessibilityAddTraits(.isHeader)
                             .selectionDisabled()
                         ForEach(group.records) { record in
@@ -111,9 +117,16 @@ struct MainSidebar: View {
         }
     }
 
+    /// Moves a heading in a list row onto the Routines header's edge, whatever insets
+    /// this macOS version and interface scale give each.
+    private var headingShift: CGFloat {
+        guard let headerEdge, let rowEdge else { return 0 }
+        return headerEdge - rowEdge
+    }
+
     private var sessionHeader: some View {
         HStack(spacing: metrics.points(8)) {
-            SidebarHeader(title: "Sessions")
+            SidebarHeader(title: "Sessions").padding(.leading, headingShift)
             Spacer(minLength: 0)
             SessionFilterMenu(filter: model.sessionFilter) { focus = .list }
                 .focused($focus, equals: .filter)
@@ -129,6 +142,7 @@ struct MainSidebar: View {
                 }
         }
         .textCase(nil)
+        .leadingEdge($rowEdge)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("sessionsSection")
     }
@@ -414,5 +428,12 @@ private struct SidebarSelectionScroller: NSViewRepresentable {
             }
             return nil
         }
+    }
+}
+
+private extension View {
+    /// Reports where this view starts, so two rows of one list can share an edge.
+    func leadingEdge(_ edge: Binding<CGFloat?>) -> some View {
+        onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minX } action: { edge.wrappedValue = $0 }
     }
 }

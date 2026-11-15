@@ -145,6 +145,17 @@ struct SessionCommands: Commands {
             Button("Dismiss Attention") { record.map { model.scheduler.dismissAttention($0) } }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
                 .disabled(record?.showsAttentionBanner != true)
+            Menu("Quick Replies") {
+                let replies = model.settings.sendableReplies
+                let canSend = record.map(model.scheduler.acceptsMessage) ?? false
+                ForEach(Array(replies.enumerated()), id: \.element.id) { index, reply in
+                    Button(reply.label) { model.keyboard.sendQuickReply(reply) }
+                        .keyboardShortcut(QuickReply.shortcut(at: index))
+                        .disabled(!canSend)
+                }
+                if !replies.isEmpty { Divider() }
+                Button("Edit Quick Replies\u{2026}") { model.showSettings(.chat) }
+            }
             Button("Load Earlier Messages") { model.keyboard.loadEarlierMessages() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(record == nil || model.keyboard.sessionWithEarlier != record?.id)

@@ -27,7 +27,12 @@
   unsupported or unavailable effort is labeled explicitly. Attach
   files with the paperclip or by dropping them into the composer. Rota keeps
   copies with the session and sends their local paths for the agent to read;
-  originals stay untouched. The chat follows the session unless you
+  originals stay untouched. Quick replies above the field send a ready message in
+  one click and leave your draft alone: Rota ships Commit, Commit and Push and
+  Continue. They step aside while a question or a request for attention waits.
+  Settings > Chat > Quick Replies edits, removes and adds them, and
+  Restore Default Replies brings back a removed default. Session > Quick Replies
+  sends the first nine with Option-Command-1 to Option-Command-9. The chat follows the session unless you
   scroll up. Adjacent tool calls stay collapsed behind a count; expand them
   to read the full commands. Code blocks name their language and copy in one click.
   Select any part of a message by dragging across its paragraphs and lists;
@@ -296,7 +301,7 @@
   Period, Next Period, Show Paused Routines);
   Routine > Run Now (Command-R), Stop (Command-.) and Edit Routine…
   (Command-E), acting on the selected routine or the selected session's.
-  Session > Show Routine (Shift-Command-R), Restart With, Open or Continue in
+  Session > Show Routine (Shift-Command-R), Restart With, Quick Replies (Option-Command-1 to 9), Open or Continue in
   Terminal (Shift-Command-T), Show Log in Finder (Shift-Command-L), Show Question
   (Shift-Command-A), Dismiss Attention (Shift-Command-D), Load Earlier Messages
   (Shift-Command-E) and Delete Session… act on the open session wherever keyboard

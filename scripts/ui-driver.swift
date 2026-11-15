@@ -25,6 +25,7 @@
 //   focused <id>                 exit 0 if the focused element or an ancestor has that identifier
 //   reveal <id-or-title>         scroll the nearest enclosing area to that element
 //   aligned <label> <control>    check that their vertical frame centers agree
+//   leading <text> <text>        check that two texts or headings start on the same edge
 //   key <key>                   post a navigation key or a shortcut (see `keys`) to Rota's process
 //   scroll-wheel <window-or-content> <delta> <pixel|line>  send real scroll input over that viewport
 //   confirm-iterm <text>         answer iTerm2's "OK to run" for a script path containing text
@@ -96,6 +97,17 @@ func matches(_ element: AXUIElement, _ key: String) -> Bool {
     let names = [kAXIdentifierAttribute, kAXTitleAttribute, kAXDescriptionAttribute]
         .compactMap { attribute(element, $0) as String? }
     return names.contains(key)
+}
+
+/// A text by identifier, title, description or value; a title with the header
+/// trait reports AXHeading rather than AXStaticText.
+func alignmentFrame(_ key: String, textOnly: Bool = false) -> CGRect? {
+    guard let element = find({
+        let isText = ["AXStaticText", "AXHeading"].contains(attribute($0, kAXRoleAttribute) as String? ?? "")
+        if textOnly && !isText { return false }
+        return matches($0, key) || (isText && (attribute($0, kAXValueAttribute) as String?) == key)
+    }) else { return nil }
+    return frame(element)
 }
 
 func dump(_ element: AXUIElement, depth: Int, max: Int) {
@@ -327,19 +339,15 @@ case "window":
     AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, AXValueCreate(.cgPoint, &origin)!)
     AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, AXValueCreate(.cgSize, &size)!)
 case "aligned":
-    func alignmentFrame(_ key: String, textOnly: Bool = false) -> CGRect? {
-        guard let element = find({
-            let isText = (attribute($0, kAXRoleAttribute) as String?) == "AXStaticText"
-            if textOnly && !isText { return false }
-            return matches($0, key) || (isText
-                && (attribute($0, kAXValueAttribute) as String?) == key)
-        }) else { return nil }
-        return frame(element)
-    }
     guard arguments.count == 3, let label = alignmentFrame(arguments[1], textOnly: true),
           let control = alignmentFrame(arguments[2]) else { fail("aligned <label> <control>") }
     let difference = abs(label.midY - control.midY)
     guard difference <= 0.75 else { fail("vertical centers differ by \(difference) pt") }
+case "leading":
+    guard arguments.count == 3, let first = alignmentFrame(arguments[1], textOnly: true),
+          let second = alignmentFrame(arguments[2], textOnly: true) else { fail("leading <text> <text>") }
+    let difference = abs(first.minX - second.minX)
+    guard difference <= 0.5 else { fail("leading edges differ by \(difference) pt") }
 case "scroll-horizontal":
     guard arguments.count == 2, let target = find({ matches($0, arguments[1]) }),
           let bar = children(target).first(where: {

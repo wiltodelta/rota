@@ -617,6 +617,20 @@ check_settings() {
             if [[ "$tab" == Chat ]]; then
                 check "$DRIVER" aligned 'Text scale' chatTextScale
                 check "$DRIVER" aligned 'Text scale' chatTextScaleValue
+                if [[ -z "$zoom" ]]; then
+                    # A removed default reply comes back with Restore Default Replies, and only then.
+                    if "$DRIVER" exists restoreQuickReplies; then fail 'all default replies present'; fi
+                    "$DRIVER" press removeQuickReply
+                    check wait_exists restoreQuickReplies
+                    "$DRIVER" press restoreQuickReplies
+                    sleep 1
+                    if "$DRIVER" exists restoreQuickReplies; then fail 'restore adds the removed reply'; fi
+                    pass 'quick replies remove and restore'
+                fi
+                "$DRIVER" scroll-wheel Chat -3000 pixel
+                check wait_visible addQuickReply
+                capture "$tab" "$appearance-settings-chat-replies$zoom"
+                "$DRIVER" scroll-wheel Chat 3000 pixel
             fi
             if [[ "$tab" == General ]]; then
                 "$DRIVER" scroll-wheel General -3000 pixel
@@ -677,6 +691,7 @@ check_keyboard_session_keys() {
     "$DRIVER" choose sessionFilter 'All Sessions'
     "$DRIVER" select-in routineSidebar "sidebarPreview-$keyboard_alpha"
     "$DRIVER" focus routineSidebar
+    check wait_exists quickReply-1
     "$DRIVER" key return
     # SwiftUI reports the focused editor without the field's identifier: type into it instead.
     "$DRIVER" key z
@@ -961,6 +976,11 @@ PYTHON
             "$DRIVER" key down
             check "$DRIVER" selected-in routineSidebar "sidebarPreview-$keyboard_alpha"
             capture 'Keyboard conversations' "$appearance-keyboard-all-$zoom"
+            # Sessions and the day titles are list rows; they still start on the Routines header's edge.
+            # At 150% the list can start scrolled past Routines, which then leaves the AX tree.
+            "$DRIVER" scroll-wheel routineSidebar 3000 pixel
+            check "$DRIVER" leading Routines Sessions
+            check "$DRIVER" leading Routines Today
             # Shift-Tab returns to the filter; Tab returns to the list.
             "$DRIVER" key shift-tab
             "$DRIVER" key right
