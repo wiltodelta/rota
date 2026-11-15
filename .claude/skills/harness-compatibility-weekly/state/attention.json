@@ -30,9 +30,9 @@
       "action": "Authorize a separate implementation and verification task for AGY-ORCHESTRATOR-CATALOG",
       "source": ".claude/harness-compatibility-weekly.md#agy-orchestrator-catalog-модели-antigravity-без-уровня-effort-и-суффикс-xhigh",
       "first_seen_at": "2026-11-15T19:19:14Z",
-      "updated_at": "2026-11-15T19:19:14Z",
-      "question_asked_at": null,
-      "question_source": null,
+      "updated_at": "2026-11-15T19:21:09Z",
+      "question_asked_at": "2026-11-15T19:20:54Z",
+      "question_source": "Antigravity session c0068ed5-f78a-425f-bb82-fda1d81999f0: harness-compatibility-weekly, ask_question delivered 2026-11-15T19:20:54Z",
       "resolution": null,
       "resolved_at": null
     }
