@@ -23,6 +23,18 @@
       "question_source": "Codex session: harness-compatibility-weekly, request_user_input_async call_820d5e5096d54e2f81efa8543e4dde9f accepted; operator approved the separate task in the same session",
       "resolution": "Operator approved 2026-11-01 and requested implementation 2026-11-08; implemented in CodexDaemonRun.handle/modelVerification and CodexItemOutput.verifications, verified against installed schema, synthetic peer regressions (failed on old code), live Codex lifecycle/recovery tests, and minimum-width light/dark UI checks",
       "resolved_at": "2026-11-09T00:42:56Z"
+    },
+    "AGY-ORCHESTRATOR-CATALOG": {
+      "status": "pending",
+      "summary": "AntigravityCatalog.family drops fixed Orchestrator models that omit effort metadata, failing check-harnesses.sh; ModelOption.title also misses (XHigh)",
+      "action": "Authorize a separate implementation and verification task for AGY-ORCHESTRATOR-CATALOG",
+      "source": ".claude/harness-compatibility-weekly.md#agy-orchestrator-catalog-модели-antigravity-без-уровня-effort-и-суффикс-xhigh",
+      "first_seen_at": "2026-11-15T19:19:14Z",
+      "updated_at": "2026-11-15T19:19:14Z",
+      "question_asked_at": null,
+      "question_source": null,
+      "resolution": null,
+      "resolved_at": null
     }
   }
 }

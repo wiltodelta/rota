@@ -1,3 +1,12 @@
+## 2026-11-15T19:18:00Z - лимит GitHub API у codex-release
+
+id: github-releases-unauth-403
+cue: `harness_review.py collect` помечает `codex-release` (`api.github.com/repos/openai/codex/releases/latest`) как `unavailable` с `HTTPError` 403.
+lesson: Оставить `codex-release` вне `accept --reviewed`, чтобы `progress.json` сохранил честный статус `unavailable` и счётчик `failures`, но прочитать `gh api repos/openai/codex/releases/latest` в режиме чтения для проверки протокольных изменений текущего выпуска в самом обзоре.
+evidence: При сборе `2026-11-15T19:08Z` неавторизованный `urlopen` получил HTTP 403 rate limit от `api.github.com`, тогда как `gh api repos/openai/codex/releases/latest` вернул карточку актуального выпуска `rust-v0.169.0`.
+confidence: low, первое наблюдение лимита на этом источнике.
+needs: code scripts/harness_review.py - использовать авторизованный GitHub-клиент или токен окружения при чтении `api.github.com/repos/*/releases/latest`.
+
 ## 2026-11-01, America/Los_Angeles - область поиска ACP
 
 cue: Запрос Context7 явно называет ACP v1, но результаты ссылаются на `/protocol/v2/` и `/rfds/`.
