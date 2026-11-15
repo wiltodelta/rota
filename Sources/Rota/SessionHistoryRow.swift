@@ -80,16 +80,10 @@ struct SessionHistoryRow: View {
             .fixedSize()
     }
 
-    private var needsAttention: Bool { record.attention != nil || record.questions?.isEmpty == false }
+    private var needsAttention: Bool { record.needsAttention }
 
     private var statusTitle: String {
-        if record.questions?.isEmpty == false { return "Needs your reply" }
-        if record.attention != nil {
-            return model.scheduler.canMessage(record) ? "Needs your reply" : "Needs your attention"
-        }
-        if case .launchFailed = record.outcome { return "Couldn't start" }
-        if case .skipped = record.outcome { return "Skipped" }
-        return record.statusTitle
+        record.compactStatusTitle(canMessage: model.scheduler.canMessage(record))
     }
 
     private var statusSymbol: String {
@@ -104,12 +98,18 @@ struct SessionHistoryRow: View {
     }
 
     private var metadata: String {
+        Self.metadata(for: record, models: model.settings.models)
+    }
+
+    static func metadata(
+        for record: RunRecord, models: [Harness: [ModelOption]], includeDuration: Bool = true
+    ) -> String {
         var parts = [record.harness.title]
         if record.reportedModel ?? record.model != nil {
-            parts.append(ModelLabel.model(record: record, models: model.settings.models))
+            parts.append(ModelLabel.model(record: record, models: models))
         }
         if let effort = ModelLabel.effort(record) { parts.append(effort) }
-        if !record.isSkip, let ended = record.endedAt {
+        if includeDuration, !record.isSkip, let ended = record.endedAt {
             parts.append(Transcript.readable(seconds: max(0, Int(ended.timeIntervalSince(record.startedAt)))))
         }
         if record.trigger == .catchUp { parts.append("Catch-up") }

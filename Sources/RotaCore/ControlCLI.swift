@@ -8,7 +8,7 @@ public enum ControlCLI {
         public var attachments: [String] = []
         public var flags: Set<String> = []
         static let flagNames: Set<String> = ["json", "off", "no-time-limit", "default-model", "help", "needs-reply",
-                                             "once", "repeat", "no-run-limit"]
+                                             "once", "repeat", "no-run-limit", "paused"]
 
         public init(_ raw: [String]) throws {
             var index = 0
@@ -75,6 +75,7 @@ public enum ControlCLI {
             throw ControlError("Unknown command \(command). Run rota help.")
         }
         if tool.method == .routinesList { return (tool.method.rawValue, [:]) }
+        if tool.method == .routinesCalendar { return (tool.method.rawValue, try calendarParams(arguments)) }
         if tool.method == .notify {
             let params = try notifyParams(arguments.positional.dropFirst(), arguments)
             return (tool.method.rawValue, ControlInterface.sessionArguments(params, method: tool.method,
@@ -144,6 +145,18 @@ public enum ControlCLI {
         } else if let session = arguments.options["session"] {
             params["session"] = session
         }
+        return params
+    }
+
+    private static func calendarParams(_ arguments: Arguments) throws -> [String: Any] {
+        var params: [String: Any] = [:]
+        if let id = arguments.positional.dropFirst().first { params["id"] = id }
+        if let from = arguments.options["from"] { params["from"] = from }
+        if let days = arguments.options["days"] {
+            guard let number = Int(days) else { throw ControlError("--days needs an integer.") }
+            params["days"] = number
+        }
+        if arguments.flags.contains("paused") { params["includePaused"] = true }
         return params
     }
 

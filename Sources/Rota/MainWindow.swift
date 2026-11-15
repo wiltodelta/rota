@@ -2,8 +2,9 @@ import AppKit
 import RotaCore
 import SwiftUI
 
-/// What the sidebar selects: a session, the main thing, or a routine.
+/// What the sidebar selects: the schedule calendar, a session, or a routine.
 enum SidebarItem: Hashable {
+    case calendar
     case session(UUID)
     case routine(String)
 
@@ -31,6 +32,7 @@ struct MainWindow: View {
     private func title(_ records: [RunRecord]) -> String {
         if let pane = model.settingsPane { return pane.title }
         return switch model.selection {
+        case .calendar: "Calendar"
         case .routine(let id): model.scheduler.routine(id)?.name ?? "Rota"
         case .session(let id):
             records.first(where: { $0.id == id }).flatMap { model.scheduler.routine($0.routineID)?.name } ?? "Rota"
@@ -132,6 +134,12 @@ struct MainWindow: View {
     @ViewBuilder
     private func sessionDetail(_ records: [RunRecord]) -> some View {
         switch model.selection {
+        case .calendar:
+            if model.scheduler.routines.isEmpty {
+                placeholder
+            } else {
+                ScheduleCalendarView()
+            }
         case .session(let id):
             if let record = records.first(where: { $0.id == id }),
                let routine = model.scheduler.routine(record.routineID) {
@@ -251,6 +259,17 @@ enum SidebarText {
         // crossover both black and white exceed 4.5:1 against an opaque fill.
         return luminance > sqrt(0.05 * 1.05) - 0.05 ? .black : .white
     }
+}
+
+extension Color {
+    /// Contrasting label color on `Color.accentColor` across all system accent colors and OS versions.
+    static let onControlAccent = Color(nsColor: NSColor(name: nil) { appearance in
+        var resolved = NSColor.white
+        appearance.performAsCurrentDrawingAppearance {
+            resolved = SidebarText.foreground(on: .controlAccentColor)
+        }
+        return resolved
+    })
 }
 
 /// Sessions grouped the way a chat app does: Today, Yesterday, then by date.

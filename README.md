@@ -122,9 +122,11 @@ To create a routine:
    accepts five-field cron. Choose a model, supported effort, and optional time limit.
 4. Save. The routine runs on its schedule; **Run Now** starts it immediately.
 
-Rota lives in the menu bar and runs routines while the app is open. Turn on
-**Launch at login** in Settings to have it available after a restart. Pause
-any routine with its switch. The panel uses Liquid Glass on macOS 26 and later.
+Rota lives in the menu bar and runs routines while the app is open. Select
+**Calendar** in the sidebar to see recorded runs and upcoming slots across your
+routines in **Week**, **Month**, or **Agenda** view. Turn on **Launch at login**
+in Settings to have Rota available after a restart, and pause any routine with
+its switch. The panel uses Liquid Glass on macOS 26 and later.
 
 ## Handle the gaps between runs
 
@@ -152,6 +154,7 @@ answering questions. Enable the command in Settings, then start with:
 
 ```bash
 rota list
+rota calendar
 rota help
 rota tools
 ```

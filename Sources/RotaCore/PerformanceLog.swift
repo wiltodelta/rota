@@ -3,7 +3,7 @@ import Foundation
 /// Only fixed categories and numeric measurements enter the performance journal.
 public struct PerformanceContext: Codable, Sendable {
     public enum Surface: String, Codable, Sendable {
-        case background, conversation, routine, settings, panel, empty
+        case background, conversation, routine, calendar, settings, panel, empty
     }
 
     public var surface: Surface = .background

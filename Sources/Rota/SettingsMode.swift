@@ -69,18 +69,9 @@ struct SettingsSidebar: View {
                 ForEach(SettingsPane.allCases) { pane in
                     // On the focused selection, name and icon take the routine rows' contrasting foreground.
                     let onAccent = appearsActive && sidebarFocused && model.settingsPane == pane
-                    // The sidebar row style replaces a font set on the whole label.
-                    Label {
-                        Text(pane.title).interfaceFont(.body)
-                            .foregroundStyle(SidebarText.primary(onAccent: onAccent))
-                    } icon: {
-                        // Accent icons as in a native sidebar, near a harness mark's size.
-                        Image(systemName: pane.symbol).font(.system(size: metrics.points(16)))
-                            .foregroundStyle(onAccent ? SidebarText.primary(onAccent: true) : Color.accentColor)
-                    }
-                    .labelStyle(ScaledSidebarLabelStyle())
-                    .tag(pane)
-                    .accessibilityIdentifier("settingsPane-" + pane.rawValue)
+                    SidebarSymbolLabel(title: pane.title, symbol: pane.symbol, onAccent: onAccent)
+                        .tag(pane)
+                        .accessibilityIdentifier("settingsPane-" + pane.rawValue)
                 }
             } header: {
                 SidebarHeader(title: "Settings")
@@ -120,6 +111,26 @@ private struct SidebarActionLabel: View {
             .labelStyle(ScaledSidebarLabelStyle())
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+    }
+}
+
+/// Primary selectable sidebar row with an accent SF Symbol (`Calendar`, `Settings` panes).
+struct SidebarSymbolLabel: View {
+    @Environment(\.interfaceScale) private var metrics
+    let title: String
+    let symbol: String
+    let onAccent: Bool
+
+    var body: some View {
+        // The sidebar row style replaces a font set on the whole label.
+        Label {
+            Text(title).interfaceFont(.body)
+                .foregroundStyle(SidebarText.primary(onAccent: onAccent))
+        } icon: {
+            Image(systemName: symbol).font(.system(size: metrics.points(16)))
+                .foregroundStyle(onAccent ? SidebarText.primary(onAccent: true) : Color.accentColor)
+        }
+        .labelStyle(ScaledSidebarLabelStyle())
     }
 }
 

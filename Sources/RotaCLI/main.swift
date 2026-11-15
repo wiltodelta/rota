@@ -10,6 +10,8 @@ let usage = """
     Usage: rota <command> [options]
 
       list                         routines, their schedules and state
+      calendar [<id>] [--from DATE] [--days N] [--paused]
+                                   recorded runs and upcoming scheduled slots by day
       show <id>                    one routine
       add <id> --folder DIR (--at ISO_DATE | --schedule "CRON") (--skill SKILL | --prompt TEXT)
           [--harness claude|codex|grok|antigravity|shell] [--name NAME] [--model M] [--effort E]
@@ -82,9 +84,12 @@ func line(_ routine: [String: Any]) -> String {
 }
 
 /// The control API's UTC timestamp in this Mac's time zone, as people read it.
-func localTime(_ value: Any?) -> String {
-    guard let text = value as? String, let date = ISO8601DateFormatter().date(from: text) else { return "" }
-    return date.formatted(date: .abbreviated, time: .shortened)
+func localTime(
+    _ value: Any?, date dateStyle: Date.FormatStyle.DateStyle = .abbreviated,
+    formatter: ISO8601DateFormatter = ISO8601DateFormatter()
+) -> String {
+    guard let text = value as? String, let date = formatter.date(from: text) else { return "" }
+    return date.formatted(date: dateStyle, time: .shortened)
 }
 
 /// "weekly-report  Running  Oct 11, 2026 at 2:31 PM  session 1E61…": a run started, stopped or messaged.
@@ -100,11 +105,47 @@ func printJSON(_ value: Any) {
     print(lossyUTF8(data))
 }
 
+func calendarDayHeader(_ day: [String: Any]) -> String {
+    let raw = day["date"] as? String ?? ""
+    let parts = raw.split(separator: "-").compactMap { Int($0) }
+    var header = raw
+    if parts.count == 3,
+       let noon = Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2],
+                                                             hour: 12)) {
+        header = noon.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year())
+    }
+    return (day["isToday"] as? Bool == true) ? "\(header) (Today)" : header
+}
+
+func calendarText(_ payload: [String: Any]) -> String {
+    let days = (payload["calendar"] as? [[String: Any]] ?? []).filter {
+        !(($0["entries"] as? [[String: Any]]) ?? []).isEmpty
+    }
+    guard !days.isEmpty else { return "No runs or scheduled slots in this range." }
+    let formatter = ISO8601DateFormatter()
+    return days.map { day in
+        let entries = (day["entries"] as? [[String: Any]] ?? []).map { entry in
+            let start = localTime(entry["startedAt"], date: .omitted, formatter: formatter)
+            let count = entry["count"] as? Int ?? 1
+            let span = count > 1
+                ? "\(start) - \(localTime(entry["endedAt"], date: .omitted, formatter: formatter))" : start
+            let status = entry["status"] as? String ?? ""
+            let suffix = count > 1 ? "\(status) (\(count) runs)" : status
+            let parts = [span, entry["routine"] as? String ?? "?", entry["harness"] as? String ?? "",
+                         suffix, entry["name"] as? String ?? ""]
+            return "  " + parts.filter { !$0.isEmpty }.joined(separator: "  ")
+        }
+        return ([calendarDayHeader(day)] + entries).joined(separator: "\n")
+    }.joined(separator: "\n\n")
+}
+
 /// A reply for people: a line per routine or session, the log as text, JSON otherwise.
 func show(_ result: Any, for command: String) {
     switch result {
     case let routines as [[String: Any]] where command == "list":
         print(routines.isEmpty ? "No routines." : routines.map(line).joined(separator: "\n"))
+    case let overview as [String: Any] where command == "calendar":
+        print(calendarText(overview))
     case let sessions as [[String: Any]] where command == "sessions":
         print(sessions.map { "\($0["session"] ?? "")  \(localTime($0["startedAt"]))  \($0["outcome"] ?? "")" }
             .joined(separator: "\n"))

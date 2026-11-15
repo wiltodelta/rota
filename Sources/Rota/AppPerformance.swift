@@ -33,6 +33,7 @@ final class AppPerformance {
                 context.surface = .panel
             } else if window?.isVisible == true {
                 switch model.selection {
+                case .calendar: context.surface = .calendar
                 case .session: context.surface = .conversation
                 case .routine: context.surface = .routine
                 case nil: context.surface = .empty

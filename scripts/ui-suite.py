@@ -16,12 +16,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.ui_preparation import DOMAIN, prepare, require_idle_development_app, validate
 
 log = logging.getLogger(__name__)
-MODES = ["filters", "questions", "settings", "harnesses", "restart", "keyboard", "scroll",
+MODES = ["filters", "calendar", "questions", "settings", "harnesses", "restart", "keyboard", "scroll",
          "parallel", "paint", "switch", "full", "live"]
 
 
 def phases(mode: str) -> list[list[str]]:
-    if mode == "filters":
+    if mode in {"filters", "calendar"}:
         return [
             ["--phase", "actions", "--appearance", "light", "--scale", "normal"],
             ["--phase", "renders", "--appearance", "light", "--scale", "zoom"],

@@ -1,9 +1,24 @@
 import Foundation
 
 extension Routine {
+    public static let missedRunGrace: TimeInterval = 7 * 24 * 3600
+
     public var isScheduleComplete: Bool {
         scheduleCompletedAt != nil || (repeats ? runLimit.map { scheduledRunCount >= $0 } ?? false
             : scheduledRunCount > 0)
+    }
+
+    public var remainingScheduledRuns: Int? {
+        guard let limit = repeats ? runLimit : 1 else { return nil }
+        return isScheduleComplete ? 0 : max(0, limit - scheduledRunCount)
+    }
+
+    func cronFloor(after date: Date) -> Date {
+        scheduledAt.map { max(date, $0.addingTimeInterval(-1)) } ?? date
+    }
+
+    func isWithinGrace(_ due: Date, at now: Date) -> Bool {
+        due <= now && now.timeIntervalSince(due) <= Self.missedRunGrace
     }
 
     public var scheduleDescription: String {
@@ -19,8 +34,7 @@ extension Routine {
     public func nextScheduledFire(after date: Date, calendar: Calendar = .current) -> Date? {
         guard !isScheduleComplete else { return nil }
         if !repeats { return scheduledAt }
-        let earliest = scheduledAt.map { max(date, $0.addingTimeInterval(-1)) } ?? date
-        return (try? CronSchedule(schedule))?.next(after: earliest, calendar: calendar)
+        return (try? CronSchedule(schedule))?.next(after: cronFloor(after: date), calendar: calendar)
     }
 
     func scheduleProblem(now: Date) -> String? {

@@ -24,7 +24,7 @@ public extension RunNotifying {
 public final class Scheduler {
     /// A slot missed by up to this long (the Mac slept, Rota was closed) runs once
     /// late, as Claude Desktop does; an older one is recorded as skipped.
-    public static let missedRunGrace: TimeInterval = 7 * 24 * 3600
+    public static let missedRunGrace: TimeInterval = Routine.missedRunGrace
     /// Scheduled runs failing this many times in a row pause the routine.
     public static let failuresBeforePause = 5
     static let log = Logger(subsystem: "com.wiltodelta.rota", category: "scheduler")

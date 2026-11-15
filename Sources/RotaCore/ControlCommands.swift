@@ -4,7 +4,16 @@ import Foundation
 /// `rota` command and the MCP server agents use. Every change goes through the
 /// scheduler, the routines file's only writer.
 extension Scheduler {
-    private static let timestamp = ISO8601DateFormatter()
+    static let timestamp = ISO8601DateFormatter()
+    private static let fractionalTimestamp: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    static func parseISODate(_ text: String) -> Date? {
+        fractionalTimestamp.date(from: text) ?? timestamp.date(from: text)
+    }
 
     public static var controlMethods: [String] { ControlMethod.allCases.map(\.rawValue) }
 
@@ -28,6 +37,7 @@ extension Scheduler {
     private func routineCommand(_ method: ControlMethod, _ params: [String: Any]) throws -> Any? {
         switch method {
         case .routinesList: return routines.map(describe)
+        case .routinesCalendar: return try calendarOverview(params)
         case .routinesGet: return describe(try existing(params))
         case .routinesCreate: return describe(try create(params))
         case .routinesUpdate: return describe(try update(params))
@@ -164,11 +174,9 @@ extension Scheduler {
         if params.keys.contains("scheduledAt") {
             routine.scheduledAt = nil
             if let text = try optional(params, "scheduledAt", as: String.self) {
-                let formatter = ISO8601DateFormatter()
-                var date = formatter.date(from: text)
-                formatter.formatOptions.insert(.withFractionalSeconds)
-                date = date ?? formatter.date(from: text)
-                guard let date else { throw ControlError("scheduledAt needs an ISO 8601 date, time and time zone.") }
+                guard let date = Self.parseISODate(text) else {
+                    throw ControlError("scheduledAt needs an ISO 8601 date, time and time zone.")
+                }
                 routine.scheduledAt = date
                 if params["schedule"] == nil, params["repeats"] == nil { routine.repeats = false }
             }
@@ -214,8 +222,8 @@ extension Scheduler {
         var json = (try? JSONSerialization.jsonObject(with: JSONFile.encoder.encode(routine))) as? [String: Any] ?? [:]
         json["scheduleText"] = routine.scheduleDescription
         json["scheduleState"] = routine.isScheduleComplete ? "completed" : routine.enabled ? "scheduled" : "paused"
-        if let limit = routine.repeats ? routine.runLimit : 1 {
-            json["remainingRuns"] = routine.isScheduleComplete ? 0 : max(0, limit - routine.scheduledRunCount)
+        if let remaining = routine.remainingScheduledRuns {
+            json["remainingRuns"] = remaining
         }
         json["running"] = hasActiveSession(routine.id)
         if let last = history.records(for: routine.id).first(where: { !$0.isSkip }) {

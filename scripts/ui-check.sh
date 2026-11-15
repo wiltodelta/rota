@@ -11,6 +11,7 @@
 #   scripts/ui-check.sh --parallel-only   continue and stop independent sessions with synthetic Claude
 #   scripts/ui-check.sh --paint-only      first transcript paint without AX or scroll input
 #   scripts/ui-check.sh --filters-only    combined session categories and resets only
+#   scripts/ui-check.sh --calendar-only   Week, Month and Agenda schedule calendar views only
 #   scripts/ui-check.sh --keyboard-only   session/filter arrows, focus, session keys, panel keys, live states
 #   scripts/ui-check.sh --switch-only     repeated session switches, paint checked before transcript AX
 #   scripts/ui-check.sh --questions-only  finished question and verification states only
@@ -51,7 +52,7 @@ while [[ $# -gt 0 ]]; do
     shift 2
 done
 case "$LIVE" in
-    ""|--full|--live|--filters-only|--questions-only|--settings-only|--harnesses-only|--restart-only|\
+    ""|--full|--live|--filters-only|--calendar-only|--questions-only|--settings-only|--harnesses-only|--restart-only|\
         --keyboard-only|--scroll-only|--parallel-only|--paint-only|--switch-only) ;;
     *) echo "Unknown UI mode: $LIVE" >&2; exit 2 ;;
 esac
@@ -61,10 +62,10 @@ case "$APPEARANCE" in both) APPEARANCES=(light dark) ;; light|dark) APPEARANCES=
 case "$SCALE" in both) SCALES=(normal zoom) ;; normal|zoom) SCALES=("$SCALE") ;;
     *) echo "Unknown scale: $SCALE" >&2; exit 2 ;; esac
 if [[ "$PHASE" != all || "$APPEARANCE" != both || "$SCALE" != both ]]; then
-    [[ "$LIVE" == --filters-only || "$LIVE" == --questions-only ]] \
-        || { echo "Phase and appearance selection require filters or questions mode" >&2; exit 2; }
-    [[ "$LIVE" == --filters-only || "$SCALE" == both ]] \
-        || { echo "Scale selection requires filters mode" >&2; exit 2; }
+    [[ "$LIVE" == --filters-only || "$LIVE" == --calendar-only || "$LIVE" == --questions-only ]] \
+        || { echo "Phase and appearance selection require filters, calendar or questions mode" >&2; exit 2; }
+    [[ "$LIVE" == --filters-only || "$LIVE" == --calendar-only || "$SCALE" == both ]] \
+        || { echo "Scale selection requires filters or calendar mode" >&2; exit 2; }
 fi
 WORK="$(mktemp -d /tmp/rota-ui-work.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
@@ -844,6 +845,68 @@ PYTHON_IDS
         quit_rota
     done
     pass "session filters: $PHASE, $APPEARANCE, $SCALE"
+    exit 0
+fi
+
+if [[ "$LIVE" == --calendar-only ]]; then
+    for appearance in "${APPEARANCES[@]}"; do
+        rm -rf "$SUPPORT"
+        python3 scripts/fixtures/schedule-calendar.py "$SUPPORT" "$WORK/project"
+        read -r calendar_review_id calendar_once_epoch < "$SUPPORT/calendar-ids.txt"
+        defaults delete "$DOMAIN" calendarMode >/dev/null 2>&1 || true
+        defaults delete "$DOMAIN" calendarShowPaused >/dev/null 2>&1 || true
+        launch "$appearance"
+        "$DRIVER" select-in routineSidebar Calendar
+        check wait_exists scheduleCalendarView
+        "$DRIVER" window Calendar 820 600
+        for zoom in "${SCALES[@]}"; do
+            "$DRIVER" key command-zero
+            if [[ "$zoom" == zoom ]]; then
+                for _ in 1 2 3; do "$DRIVER" key command-plus; done
+            fi
+            "$DRIVER" press calendarMode-week
+            "$DRIVER" press calendarToday
+            check wait_exists calendarWeekGrid
+            capture Calendar "$appearance-calendar-week-$zoom"
+
+            "$DRIVER" press calendarMode-month
+            check wait_exists calendarMonthGrid
+            check wait_exists calendarSelectedDay
+            capture Calendar "$appearance-calendar-month-$zoom"
+
+            "$DRIVER" press calendarMode-agenda
+            check wait_exists calendarAgendaList
+            capture Calendar "$appearance-calendar-agenda-$zoom"
+
+            if [[ "$PHASE" != renders ]]; then
+                "$DRIVER" press calendarTogglePaused
+                check wait_value calendarTogglePaused On
+                capture Calendar "$appearance-calendar-agenda-paused-$zoom"
+                "$DRIVER" press calendarTogglePaused
+                check wait_value calendarTogglePaused Off
+
+                "$DRIVER" press calendarNext
+                "$DRIVER" press calendarPrevious
+                "$DRIVER" press calendarToday
+
+                "$DRIVER" reveal "calendarAgendaEntry-record:$calendar_review_id" || true
+                "$DRIVER" press "calendarAgendaEntry-record:$calendar_review_id"
+                check wait_exists composer
+
+                "$DRIVER" menu 'Show Calendar'
+                check wait_exists calendarAgendaList
+
+                "$DRIVER" reveal "calendarAgendaEntry-slot:calendar-once:$calendar_once_epoch" || true
+                "$DRIVER" press "calendarAgendaEntry-slot:calendar-once:$calendar_once_epoch"
+                check wait_exists editRoutine
+
+                "$DRIVER" select-in routineSidebar Calendar
+                check wait_exists scheduleCalendarView
+            fi
+        done
+        quit_rota
+    done
+    pass "schedule calendar: $PHASE, $APPEARANCE, $SCALE"
     exit 0
 fi
 

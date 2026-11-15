@@ -71,6 +71,61 @@ public struct CronSchedule: Equatable, Sendable {
         return result
     }
 
+    /// Nominal daily fire count on a matching day before DST adjustments.
+    public var dailySlotCount: Int { hours.count * minutes.count }
+
+    /// Every valid wall-clock fire time on `day` within `[floor, ceiling)`.
+    public func times(on day: Date, notBefore floor: Date = .distantPast,
+                      before ceiling: Date = .distantFuture, calendar: Calendar = .current) -> [Date] {
+        guard floor < ceiling, matches(day: day, calendar: calendar) else { return [] }
+        let startOfDay = calendar.startOfDay(for: day)
+        if Self.isStandardLocalDay(startOfDay, calendar: calendar) {
+            return standardDayTimes(startOfDay: startOfDay, notBefore: floor, before: ceiling)
+        }
+        var result: [Date] = []
+        for hour in hours {
+            for minute in minutes {
+                guard let time = validTime(hour: hour, minute: minute, on: startOfDay, calendar: calendar),
+                      time >= floor, time < ceiling else { continue }
+                result.append(time)
+            }
+        }
+        return result
+    }
+
+    static func isStandardLocalDay(_ startOfDay: Date, calendar: Calendar) -> Bool {
+        guard let nextDay = calendar.date(byAdding: .day, value: 1, to: startOfDay),
+              nextDay.timeIntervalSince(startOfDay) == 86_400 else { return false }
+        if let transition = calendar.timeZone.nextDaylightSavingTimeTransition(
+            after: startOfDay.addingTimeInterval(-1)
+        ), transition < nextDay {
+            return false
+        }
+        let parts = calendar.dateComponents([.hour, .minute, .second], from: startOfDay)
+        return parts.hour == 0 && parts.minute == 0 && parts.second == 0
+    }
+
+    private func standardDayTimes(startOfDay: Date, notBefore floor: Date, before ceiling: Date) -> [Date] {
+        let minSeconds = floor.timeIntervalSince(startOfDay)
+        let maxSeconds = ceiling.timeIntervalSince(startOfDay)
+        guard maxSeconds > 0, minSeconds < 86_400 else { return [] }
+        var result: [Date] = []
+        result.reserveCapacity(min(dailySlotCount, 1440))
+        for hour in hours {
+            let hourEnd = Double((hour + 1) * 3600)
+            let hourStart = Double(hour * 3600)
+            if hourEnd <= minSeconds { continue }
+            if hourStart >= maxSeconds { break }
+            for minute in minutes {
+                let offset = hourStart + Double(minute * 60)
+                if offset >= minSeconds && offset < maxSeconds {
+                    result.append(startOfDay.addingTimeInterval(offset))
+                }
+            }
+        }
+        return result
+    }
+
     func matches(day: Date, calendar: Calendar) -> Bool {
         let parts = calendar.dateComponents([.month, .day, .weekday], from: day)
         guard let month = parts.month, let dayOfMonth = parts.day, let weekday = parts.weekday,
@@ -84,14 +139,19 @@ public struct CronSchedule: Equatable, Sendable {
     private func firstTime(on day: Date, notBefore floor: Date, calendar: Calendar) -> Date? {
         for hour in hours {
             for minute in minutes {
-                guard let time = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day),
-                      time >= floor else { continue }
-                // A wall-clock time skipped by a DST change resolves to another hour; skip it.
-                let parts = calendar.dateComponents([.hour, .minute], from: time)
-                if parts.hour == hour && parts.minute == minute { return time }
+                if let time = validTime(hour: hour, minute: minute, on: day, calendar: calendar), time >= floor {
+                    return time
+                }
             }
         }
         return nil
+    }
+
+    private func validTime(hour: Int, minute: Int, on day: Date, calendar: Calendar) -> Date? {
+        guard let time = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day) else { return nil }
+        // A wall-clock time skipped by a DST change resolves to another hour; skip it.
+        let parts = calendar.dateComponents([.hour, .minute], from: time)
+        return parts.hour == hour && parts.minute == minute ? time : nil
     }
 
     static func parse(_ field: String, range: ClosedRange<Int>) throws -> Set<Int> {

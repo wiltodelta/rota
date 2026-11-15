@@ -34,28 +34,7 @@ struct RotaApp: App {
             SessionCommands()
             // A single zoom for all app content; chat fonts remain independently configurable.
             CommandGroup(after: .toolbar) {
-                SidebarToggleCommand()
-                Divider()
-                Button("Zoom In") { AppModel.shared.interfaceScale.increase() }
-                    .disabled(!AppModel.shared.interfaceScale.canIncrease)
-                    .keyboardShortcut("+")
-                Button("Zoom Out") { AppModel.shared.interfaceScale.decrease() }
-                    .disabled(!AppModel.shared.interfaceScale.canDecrease)
-                    .keyboardShortcut("-")
-                Button("Reset") { AppModel.shared.interfaceScale.reset() }
-                    .keyboardShortcut("0")
-                Divider()
-                Menu("Chat Zoom") {
-                    Button("Zoom In") { AppModel.shared.chatText.increase() }
-                        .disabled(!AppModel.shared.chatText.canIncrease)
-                        .keyboardShortcut("+", modifiers: [.command, .option])
-                    Button("Zoom Out") { AppModel.shared.chatText.decrease() }
-                        .disabled(!AppModel.shared.chatText.canDecrease)
-                        .keyboardShortcut("-", modifiers: [.command, .option])
-                    Button("Reset") { AppModel.shared.chatText.reset() }
-                        .keyboardShortcut("0", modifiers: [.command, .option])
-                }
-                Divider()
+                ViewMenuCommands()
             }
             CommandGroup(replacing: .help) {
                 Button("Rota Help") {
@@ -124,7 +103,7 @@ final class AppModel {
         case .session(let id):
             _ = scheduler.historyVersion
             return scheduler.allRecords().first { $0.id == id }.flatMap { scheduler.routine($0.routineID) }
-        case nil:
+        case .calendar, nil:
             return nil
         }
     }
@@ -152,6 +131,7 @@ final class AppModel {
         }
     }
     let settings = AppSettings()
+    let calendar = CalendarPresentationState()
     let interfaceScale: InterfaceScaleSettings
     let chatText: ChatTextSettings
     private let notifier = Notifier()

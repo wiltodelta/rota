@@ -50,12 +50,13 @@ not a persistent cache across source or toolchain changes.
 
 ## Actions and renders
 
-The filters and questions modes separate behavioral checks from the remaining
+The calendar, filters and questions modes separate behavioral checks from the remaining
 render variants. The action pass also supplies the reference captures, so it
 does not need a second light-theme rendering pass at the same scale.
 
 | Surface | Actions and reference captures | Render variants |
 | --- | --- | --- |
+| Calendar | Light, 100%, Week/Month/Agenda switching, Paused toggle, period navigation, menu and session/routine navigation | Light at 150%, dark at 100% and 150% |
 | Filters | Light, 100%, category union, removal, reset and keyboard routes | Light at 150%, dark at 100% and 150% |
 | Questions | Light, choice, multiple selection, custom text, draft isolation, blocking priority and explicit send | Dark, the same captured form states with minimal setup |
 
@@ -103,9 +104,9 @@ The full traversal keeps its synthetic Shell session running until terminal
 attachment and the running-state capture pass, then signals it to finish.
 Cleanup stops these owned Shell fixtures if the traversal fails earlier.
 
-Standalone `scripts/ui-check.sh --filters-only` and `--questions-only` still run
+Standalone `scripts/ui-check.sh --calendar-only`, `--filters-only` and `--questions-only` still run
 their complete original appearance matrix and build their own inputs. The suite
-passes `--prepared`, `--phase`, `--appearance` and, for filters, `--scale` to select
+passes `--prepared`, `--phase`, `--appearance` and, for calendar and filters, `--scale` to select
 its checked matrix. Use the suite entry point for a release touching several
 surfaces, rather than assembling those internal options by hand.
 

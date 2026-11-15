@@ -105,10 +105,26 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     /// A finished turn that asked something is not done from the user's side.
     public var awaitsReply: Bool { outcome == .succeeded && questions?.isEmpty == false }
 
+    public var needsAttention: Bool { attention != nil || questions?.isEmpty == false }
+
+    /// Active runs, sessions awaiting user input, and non-skip failures stay visible individually.
+    public var isProminent: Bool {
+        outcome == .running || needsAttention || (outcome.isFailure && !isSkip)
+    }
+
     public var statusTitle: String {
         if awaitsReply { return "Needs your reply" }
         guard outcome == .running, let terminalState else { return outcome.title }
         return terminalState == .working ? "Working in Terminal" : "Waiting in Terminal"
+    }
+
+    /// Compact status label for list rows and schedule calendar entries.
+    public func compactStatusTitle(canMessage: Bool) -> String {
+        if questions?.isEmpty == false { return "Needs your reply" }
+        if attention != nil { return canMessage ? "Needs your reply" : "Needs your attention" }
+        if case .launchFailed = outcome { return "Couldn't start" }
+        if case .skipped = outcome { return "Skipped" }
+        return statusTitle
     }
 
     /// A slot that did not run: a note in the routine's history, not a session.

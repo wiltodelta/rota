@@ -20,6 +20,14 @@ struct MainSidebar: View {
         let activeList = appearsActive && focus == .list
         ScrollViewReader { proxy in
             List(selection: $model.selection) {
+                if !model.scheduler.routines.isEmpty {
+                    SidebarSymbolLabel(
+                        title: "Calendar", symbol: "calendar",
+                        onAccent: activeList && model.selection == .calendar
+                    )
+                    .tag(SidebarItem.calendar)
+                    .accessibilityIdentifier("sidebarCalendar")
+                }
                 Section(isExpanded: $routinesExpanded) {
                     ForEach(RoutineOrder.byNextRun(model.scheduler.routines)) { routine in
                         RoutineRow(routine: routine,
@@ -65,6 +73,7 @@ struct MainSidebar: View {
             }
             .accessibilityIdentifier("routineSidebar")
             .focused($focus, equals: .list)
+            .background(SidebarSelectionScroller(selection: model.selection, suppress: focus == .filter))
             .onKeyPress(keys: [.tab, KeyEquivalent("\u{19}")]) { press in
                 // Shift-Tab from the filter bubbles up here too; it continues to the previous control.
                 guard focus == .list, press.modifiers.contains(.shift) || press.key.character == "\u{19}" else {
@@ -94,7 +103,7 @@ struct MainSidebar: View {
                         model.sessionToDelete = record
                     }
                 case .routine(let id): routineToDelete = model.scheduler.routine(id)
-                case nil: break
+                case .calendar, nil: break
                 }
             }
             .onChange(of: model.keyboard.listFocus) { focus = .list }
@@ -297,5 +306,113 @@ extension AppModel {
     func latest(of routineID: String) -> SidebarItem {
         SidebarItem.latest(routineID: routineID, records: scheduler.records(for: routineID))
     }
+}
 
+/// NSTableView scrolls an unmeasured row by its estimated height first; observing its selection
+/// notifications keeps tall rows and programmatic jumps (`Show Routine`) inside the visible viewport.
+private struct SidebarSelectionScroller: NSViewRepresentable {
+    let selection: SidebarItem?
+    let suppress: Bool
+
+    func makeNSView(context: Context) -> ProbeView {
+        let view = ProbeView()
+        view.suppress = suppress
+        view.setAccessibilityElement(false)
+        return view
+    }
+
+    func updateNSView(_ view: ProbeView, context: Context) {
+        view.suppress = suppress
+        view.attachIfNeeded()
+    }
+
+    static func dismantleNSView(_ view: ProbeView, coordinator: ()) {
+        view.detach()
+    }
+
+    final class ProbeView: NSView {
+        var suppress = false
+        private var ready = false
+        private weak var outline: NSTableView?
+
+        deinit { NotificationCenter.default.removeObserver(self) }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            DispatchQueue.main.async { [weak self] in
+                self?.attachIfNeeded()
+                self?.ready = true
+            }
+        }
+
+        func attachIfNeeded() {
+            guard window != nil else { return }
+            if let current = outline, current.window === window { return }
+            detach()
+            guard let found = Self.findOutline(from: self) else { return }
+            outline = found
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(outlineSelectionChanged),
+                name: NSOutlineView.selectionDidChangeNotification, object: found
+            )
+        }
+
+        func detach() {
+            NotificationCenter.default.removeObserver(
+                self, name: NSOutlineView.selectionDidChangeNotification, object: nil
+            )
+            outline = nil
+        }
+
+        @objc private func outlineSelectionChanged(_ notification: Notification) {
+            scheduleReveal()
+        }
+
+        private func scheduleReveal() {
+            guard ready, !suppress else { return }
+            DispatchQueue.main.async { [weak self] in self?.revealSelectedRow() }
+        }
+
+        private func revealSelectedRow() {
+            guard !suppress, let window, let outline else { return }
+            window.layoutIfNeeded()
+            let row = outline.selectedRow
+            guard row >= 0 else { return }
+            outline.rowView(atRow: row, makeIfNecessary: true)?.layoutSubtreeIfNeeded()
+            outline.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
+            outline.layoutSubtreeIfNeeded()
+            outline.scrollRowToVisible(row)
+            guard let scroll = outline.enclosingScrollView else { return }
+            let rowRect = outline.rect(ofRow: row)
+            let visible = scroll.documentVisibleRect
+            if rowRect.maxY > visible.maxY {
+                scroll.contentView.scroll(to: NSPoint(x: visible.minX, y: rowRect.maxY - visible.height))
+                scroll.reflectScrolledClipView(scroll.contentView)
+            } else if rowRect.minY < visible.minY {
+                scroll.contentView.scroll(to: NSPoint(x: visible.minX, y: rowRect.minY))
+                scroll.reflectScrolledClipView(scroll.contentView)
+            }
+        }
+
+        private static func findOutline(from probe: NSView) -> NSTableView? {
+            var scope: NSView = probe
+            while let parent = scope.superview, !(parent is NSSplitView) {
+                scope = parent
+            }
+            return searchOutline(in: scope)
+        }
+
+        private static func searchOutline(in view: NSView) -> NSTableView? {
+            if let table = view as? NSTableView,
+               table.accessibilityIdentifier() == "routineSidebar" || table is NSOutlineView {
+                return table
+            }
+            for subview in view.subviews {
+                if let found = searchOutline(in: subview) { return found }
+            }
+            return nil
+        }
+    }
 }

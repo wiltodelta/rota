@@ -25,7 +25,18 @@ flowchart LR
   of week OR when both are restricted; weekday 7 is Sunday) and finds the next
   fire time day by day, skipping wall-clock times a DST change removes. Range
   endpoints must both be integers; malformed ranges are rejected rather than
-  silently dropping empty or nonnumeric components.
+  silently dropping empty or nonnumeric components. `CronSchedule.times(on:)`
+  expands all valid local fire times within a day (using direct offsets on
+  standard 24-hour non-DST days and wall-clock round-trips across DST transitions).
+- `ScheduleCalendar` combines recorded `RunRecord` history with projected
+  one-time and repeating slots into local `CalendarDay` buckets for Week, Month
+  and Agenda ranges, respecting `scheduledAt` floors, `runLimit` consumption
+  prior to the visible window, and `Routine.missedRunGrace` overdue slots. Quiet
+  record bursts and high-frequency schedules exceeding `frequentThreshold` (six
+  runs per day) collapse into a single summary `CalendarEntry` while keeping
+  running, failed and attention-needed runs individual. `ControlCalendar`
+  anchors `YYYY-MM-DD` `from` inputs at local noon before converting to the
+  start of that local day.
 - `Scheduler` owns the routines (`routines.json` in Application Support) and
   persists each routine's `nextFire`. Active records, controls, launch tokens,
   elapsed times, deferred messages and recovery reservations are keyed by the
@@ -82,7 +93,7 @@ flowchart LR
 - Other processes reach the scheduler through `ControlServer`, a Unix socket
   at `Application Support/Rota/rota.sock` (0600, one JSON request and reply
   per line), whose methods are `Scheduler.control` in `ControlCommands.swift`:
-  routines list/get/create/update/setEnabled/run/stop/delete and sessions
+  routines list/calendar/get/create/update/setEnabled/run/stop/delete and sessions
   list/get/read/message/delete/dismiss/markRead/questions/answer, all through
   the scheduler, the routines file's only writer. `ControlMethod` declares the
   socket operations; `ControlInterface` supplies the public CLI command and MCP
@@ -699,8 +710,18 @@ values. Regular rows preserve the menu and removable conditions as separate
 controls. Shift-Tab scrolls the heading into view before moving focus to the filter.
 Committing a menu choice returns focus to the session list, removing the menu's
 focus ring. Direct arrow-key changes keep focus on the filter until Tab.
-The native list can partly clip a wrapped last row at larger interface scales;
-this also reproduces in the published 0.2.23 build, independently of menu focus.
+`SidebarSelectionScroller` re-scrolls the sidebar's `NSOutlineView` after cell
+layout whenever selection changes outside filter arrow navigation, keeping
+wrapped rows at zoomed scale and programmatic jumps (`Show Routine`) inside
+the visible scroll viewport.
+
+`SidebarItem.calendar` opens `ScheduleCalendarView` (`CalendarWeekView`,
+`CalendarMonthView`, `CalendarAgendaView`), backed by `CalendarPresentationState`
+for persisted mode and paused-routine visibility. Both Week and Month pin their
+column headers inside the grid's `ScrollView` so vertical scroller gutters never
+misalign column dividers; Week separates collapsed high-frequency schedules into
+a `Freq.` banner row and caps dense hour buckets with a `+N more` popover, while
+Month caps day cells and pins the selected day's detail list below the grid.
 
 `SessionFilters` combines selected categories with OR, using an empty set for All Sessions.
 `AppModel` persists their raw values in `sessionFilterCategories` in its own

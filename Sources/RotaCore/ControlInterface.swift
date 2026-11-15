@@ -3,6 +3,7 @@ import Foundation
 /// Every socket operation is declared here. Public operations must have a CLI command and an MCP tool.
 public enum ControlMethod: String, CaseIterable, Sendable {
     case routinesList = "routines.list"
+    case routinesCalendar = "routines.calendar"
     case routinesGet = "routines.get"
     case routinesCreate = "routines.create"
     case routinesUpdate = "routines.update"
@@ -108,6 +109,17 @@ public enum ControlInterface {
                 name: "list_routines", method: .routinesList, command: "list",
                 description: "List Rota's scheduled routines with their schedules, harness, state and latest session.",
                 properties: [:], required: []),
+            Tool(
+                name: "get_calendar", method: .routinesCalendar, command: "calendar",
+                description:
+                    "Show Rota's schedule calendar of recorded runs and upcoming scheduled slots by local day.",
+                properties: [
+                    "id": property("string", "Optional routine id to filter to one routine."),
+                    "from": property("string", "Start date in YYYY-MM-DD (local time) or ISO 8601; today by default."),
+                    "days": property("integer", "Number of local calendar days to cover (1 to 366; 7 by default)."),
+                    "includePaused": property(
+                        "boolean", "Include projected slots of paused routines (false by default).")
+                ], required: []),
             Tool(
                 name: "get_routine", method: .routinesGet, command: "show", description: "Show one routine.",
                 properties: ["id": id], required: ["id"]),

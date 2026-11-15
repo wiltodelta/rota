@@ -94,12 +94,20 @@
   Delete a finished session and its local logs with the trash button or
   **Delete Session…** in its context menu. Confirmation is required; the
   routine and the agent's own history stay unchanged.
+- **Schedule calendar.** **Calendar** in the sidebar shows recorded runs and
+  projected scheduled slots across all routines in **Week**, **Month** and
+  **Agenda** views. Week uses a 24-hour grid with a separate **Freq.** row so
+  high-frequency schedules (more than six runs a day) stay readable without
+  crowding hourly slots; Month shows a seven-column grid with overflow counts and
+  a selected-day list below; Agenda lists active days over a two-week window.
+  Toggle **Paused** to preview where paused routines would run, and click any
+  entry to open its session or routine.
 - **Agents manage routines.** A Claude Code, Codex, Grok Build or Antigravity session can
   schedule a routine ("run this every weekday at 9"), change, run, pause or
-  delete one, and read or message its sessions, through Rota's MCP server.
+  delete one, inspect the schedule calendar, and read or message its sessions, through Rota's MCP server.
   Turn it on per agent in Settings > Routines from agents. A routine an agent
   adds runs on its schedule and Rota notifies you. The same works from a
-  terminal with the `rota` command: `rota list`, `rota add`, `rota run`,
+  terminal with the `rota` command: `rota list`, `rota calendar`, `rota add`, `rota run`,
   `rota log`, `rota help`. Both interfaces also expose session state and pending
   questions, explicit answers, attention dismissal, read marks, finished-session
   deletion and file attachments. `rota tools` lists the commands and MCP schemas
@@ -241,6 +249,13 @@
   shows its schedule and next run, the switch that pauses it, **Run Now** and its
   sessions; **Edit…** opens its settings, Delete included. A new routine runs
   on its schedule from the start.
+- Select **Calendar** at the top of the sidebar (or **View > Show Calendar**) to
+  inspect past runs and upcoming scheduled slots across routines. Switch between
+  **Week**, **Month** and **Agenda**, step backward or forward with the arrows,
+  return to **Today**, or turn on **Paused** to include paused routines'
+  projected slots. Click a recorded session entry to open its conversation, or a
+  scheduled or skipped entry to open its routine. `rota calendar [<id>] [--from YYYY-MM-DD] [--days N] [--paused]`
+  and MCP `get_calendar` expose the same day-by-day view from the terminal and agents.
 - Chat shows messages and basic tool activity. Unsupported tool-result content
   shows a notice with its type and available details. Resource links retain
   their name and URI as text; binary formats have no dedicated viewer. Optional
@@ -277,6 +292,8 @@
   and Back or Escape returns to your routines and sessions. It reopens on the
   section you used last.
 - Menus: File > New Routine… (Command-N) and Import Routines…;
+  View > Show Calendar and View > Calendar (Week, Month, Agenda, Today, Previous
+  Period, Next Period, Show Paused Routines);
   Routine > Run Now (Command-R), Stop (Command-.) and Edit Routine…
   (Command-E), acting on the selected routine or the selected session's.
   Session > Show Routine (Shift-Command-R), Restart With, Open or Continue in

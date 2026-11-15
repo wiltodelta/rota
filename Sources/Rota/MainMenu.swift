@@ -12,15 +12,67 @@ enum MainMenu {
     }
 }
 
-/// View > Hide Sidebar / Show Sidebar, Control-Command-S as in Finder and Mail.
-struct SidebarToggleCommand: View {
+/// View > Hide Sidebar / Show Sidebar, Calendar navigation, and interface/chat zoom.
+struct ViewMenuCommands: View {
     @State private var model = AppModel.shared
 
     var body: some View {
+        @Bindable var calendar = model.calendar
+        let unavailable = model.scheduler.routines.isEmpty || model.settingsPane != nil
         Button(model.sidebarShown ? "Hide Sidebar" : "Show Sidebar") { model.sidebarVisible.toggle() }
             .keyboardShortcut("s", modifiers: [.control, .command])
             // Settings' sections and Back live in the sidebar.
             .disabled(model.settingsPane != nil)
+        Button("Show Calendar") { model.showCalendar() }
+            .disabled(unavailable)
+        Menu("Calendar") {
+            Picker("Mode", selection: Binding(
+                get: { calendar.mode },
+                set: { calendar.mode = $0; model.showCalendar() }
+            )) {
+                ForEach(CalendarViewMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.inline)
+            Divider()
+            Button("Today") {
+                model.showCalendar()
+                calendar.goToToday(now: model.scheduler.now(), calendar: model.scheduler.calendar)
+            }
+            Button("Previous Period") {
+                model.showCalendar()
+                calendar.step(-1, calendar: model.scheduler.calendar)
+            }
+            Button("Next Period") {
+                model.showCalendar()
+                calendar.step(1, calendar: model.scheduler.calendar)
+            }
+            Divider()
+            Toggle("Show Paused Routines", isOn: $calendar.showPaused)
+        }
+        .disabled(unavailable)
+        Divider()
+        Button("Zoom In") { model.interfaceScale.increase() }
+            .disabled(!model.interfaceScale.canIncrease)
+            .keyboardShortcut("+")
+        Button("Zoom Out") { model.interfaceScale.decrease() }
+            .disabled(!model.interfaceScale.canDecrease)
+            .keyboardShortcut("-")
+        Button("Reset") { model.interfaceScale.reset() }
+            .keyboardShortcut("0")
+        Divider()
+        Menu("Chat Zoom") {
+            Button("Zoom In") { model.chatText.increase() }
+                .disabled(!model.chatText.canIncrease)
+                .keyboardShortcut("+", modifiers: [.command, .option])
+            Button("Zoom Out") { model.chatText.decrease() }
+                .disabled(!model.chatText.canDecrease)
+                .keyboardShortcut("-", modifiers: [.command, .option])
+            Button("Reset") { model.chatText.reset() }
+                .keyboardShortcut("0", modifiers: [.command, .option])
+        }
+        Divider()
     }
 }
 
