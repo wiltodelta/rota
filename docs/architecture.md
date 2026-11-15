@@ -29,8 +29,8 @@ flowchart LR
   expands all valid local fire times within a day (using direct offsets on
   standard 24-hour non-DST days and wall-clock round-trips across DST transitions).
 - `ScheduleCalendar` combines recorded `RunRecord` history with projected
-  one-time and repeating slots into local `CalendarDay` buckets for Week, Month
-  and Agenda ranges, respecting `scheduledAt` floors, `runLimit` consumption
+  one-time and repeating slots into local `CalendarDay` buckets for a range of
+  days, respecting `scheduledAt` floors, `runLimit` consumption
   prior to the visible window, and `Routine.missedRunGrace` overdue slots. Quiet
   record bursts and high-frequency schedules exceeding `frequentThreshold` (six
   runs per day) collapse into a single summary `CalendarEntry` while keeping
@@ -726,13 +726,14 @@ layout whenever selection changes outside filter arrow navigation, keeping
 wrapped rows at zoomed scale and programmatic jumps (`Show Routine`) inside
 the visible scroll viewport.
 
-`SidebarItem.calendar` opens `ScheduleCalendarView` (`CalendarWeekView`,
-`CalendarMonthView`, `CalendarAgendaView`), backed by `CalendarPresentationState`
-for persisted mode and paused-routine visibility. Both Week and Month pin their
-column headers inside the grid's `ScrollView` so vertical scroller gutters never
-misalign column dividers; Week separates collapsed high-frequency schedules into
-a `Freq.` banner row and caps dense hour buckets with a `+N more` popover, while
-Month caps day cells and pins the selected day's detail list below the grid.
+`SidebarItem.calendar` opens `ScheduleView`: a toolbar action and View > Show
+Schedule select it, with no sidebar row, and `selectionBeforeSchedule` is what
+the button, the shortcut or Escape restore (`AppModel.closeSchedule`). It shows
+seven days from `SchedulePresentationState.start` (today at launch): a strip of
+day cells and a `CalendarAgendaRow` list. Records reach it only when skipped,
+because Sessions shows the rest and hides skips. The earlier Week hour grid and
+Month grid gave way to this (2026-11-15): at the detail column's working width
+their cells truncated names and frequent schedules filled every day.
 
 `SessionFilters` combines selected categories with OR, using an empty set for All Sessions.
 `AppModel` persists their raw values in `sessionFilterCategories` in its own

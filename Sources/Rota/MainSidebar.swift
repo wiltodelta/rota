@@ -24,14 +24,6 @@ struct MainSidebar: View {
         let activeList = appearsActive && focus == .list
         ScrollViewReader { proxy in
             List(selection: $model.selection) {
-                if !model.scheduler.routines.isEmpty {
-                    SidebarSymbolLabel(
-                        title: "Calendar", symbol: "calendar",
-                        onAccent: activeList && model.selection == .calendar
-                    )
-                    .tag(SidebarItem.calendar)
-                    .accessibilityIdentifier("sidebarCalendar")
-                }
                 Section(isExpanded: $routinesExpanded) {
                     ForEach(RoutineOrder.byNextRun(model.scheduler.routines)) { routine in
                         RoutineRow(routine: routine,

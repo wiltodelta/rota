@@ -32,7 +32,7 @@ struct MainWindow: View {
     private func title(_ records: [RunRecord]) -> String {
         if let pane = model.settingsPane { return pane.title }
         return switch model.selection {
-        case .calendar: "Calendar"
+        case .calendar: "Schedule"
         case .routine(let id): model.scheduler.routine(id)?.name ?? "Rota"
         case .session(let id):
             records.first(where: { $0.id == id }).flatMap { model.scheduler.routine($0.routineID)?.name } ?? "Rota"
@@ -85,6 +85,9 @@ struct MainWindow: View {
                                               toggleSidebar: { model.sidebarVisible.toggle() },
                                               importRoutines: { model.presentingImport = true },
                                               newRoutine: { model.presentingNew = true },
+                                              schedule: .init(shown: model.showsSchedule,
+                                                              available: !model.scheduler.routines.isEmpty,
+                                                              toggle: { model.toggleSchedule() }),
                                               showsActions: model.settingsPane == nil)
                 .interfaceScale(model.interfaceScale)),
             height: max(52, metrics.points(52)), title: title
@@ -138,7 +141,7 @@ struct MainWindow: View {
             if model.scheduler.routines.isEmpty {
                 placeholder
             } else {
-                ScheduleCalendarView()
+                ScheduleView()
             }
         case .session(let id):
             if let record = records.first(where: { $0.id == id }),

@@ -1,21 +1,5 @@
 import Foundation
 
-public enum CalendarViewMode: String, CaseIterable, Codable, Sendable, Identifiable {
-    case week
-    case month
-    case agenda
-
-    public var id: Self { self }
-
-    public var title: String {
-        switch self {
-        case .week: return "Week"
-        case .month: return "Month"
-        case .agenda: return "Agenda"
-        }
-    }
-}
-
 public struct CalendarEntry: Identifiable, Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
         case record(RunRecord)
@@ -44,18 +28,13 @@ public struct CalendarEntry: Identifiable, Equatable, Sendable {
         return nil
     }
 
-    public var isProminent: Bool { record?.isProminent == true }
 }
 
 public struct CalendarDay: Identifiable, Equatable, Sendable {
     public let id: String
     public let date: Date
-    public let isCurrentMonth: Bool
     public let isToday: Bool
     public var entries: [CalendarEntry]
-
-    public var frequentEntries: [CalendarEntry] { entries.filter(\.isFrequent) }
-    public var timedEntries: [CalendarEntry] { entries.filter { !$0.isFrequent } }
 
     public var recordedCount: Int {
         entries.reduce(0) { $0 + ($1.record == nil ? 0 : $1.count) }
@@ -69,73 +48,20 @@ public struct CalendarDay: Identifiable, Equatable, Sendable {
 /// Combines recorded session history with upcoming scheduled slots on a local calendar.
 public enum ScheduleCalendar {
     public static let frequentThreshold = 6
-    public static let agendaDays = 14
 
     private struct DayRoutineKey: Hashable {
         let dayID: String
         let routineID: String
     }
 
-    public static func weekInterval(containing anchor: Date, calendar: Calendar = .current) -> DateInterval {
-        let start = calendar.dateInterval(of: .weekOfYear, for: anchor)?.start ?? calendar.startOfDay(for: anchor)
-        let end = calendar.date(byAdding: .day, value: 7, to: start) ?? start.addingTimeInterval(7 * 86_400)
-        return DateInterval(start: start, end: end)
-    }
-
-    public static func monthGridInterval(
-        containing anchor: Date, calendar: Calendar = .current
-    ) -> (month: DateInterval, grid: DateInterval) {
-        let fallback = weekInterval(containing: anchor, calendar: calendar)
-        let month = calendar.dateInterval(of: .month, for: anchor) ?? fallback
-        let gridStart = weekInterval(containing: month.start, calendar: calendar).start
-        let lastMoment = month.end.addingTimeInterval(-1)
-        let gridEnd = weekInterval(containing: lastMoment, calendar: calendar).end
-        return (month, DateInterval(start: gridStart, end: max(gridEnd, month.end)))
-    }
-
     public static func agendaInterval(
-        startingAt anchor: Date, days: Int = agendaDays, calendar: Calendar = .current
+        startingAt anchor: Date, days: Int, calendar: Calendar = .current
     ) -> DateInterval {
         let start = calendar.startOfDay(for: anchor)
         let clamped = max(1, min(days, 366))
         let end = calendar.date(byAdding: .day, value: clamped, to: start)
             ?? start.addingTimeInterval(Double(clamped) * 86_400)
         return DateInterval(start: start, end: end)
-    }
-
-    public struct Window: Sendable {
-        public let visible: DateInterval
-        public let query: DateInterval
-        public let currentMonth: DateInterval?
-    }
-
-    public static func window(
-        for mode: CalendarViewMode, anchor: Date, calendar: Calendar = .current
-    ) -> Window {
-        switch mode {
-        case .week:
-            let interval = weekInterval(containing: anchor, calendar: calendar)
-            return Window(visible: interval, query: interval, currentMonth: nil)
-        case .month:
-            let (month, grid) = monthGridInterval(containing: anchor, calendar: calendar)
-            return Window(visible: month, query: grid, currentMonth: month)
-        case .agenda:
-            let interval = agendaInterval(startingAt: anchor, days: agendaDays, calendar: calendar)
-            return Window(visible: interval, query: interval, currentMonth: nil)
-        }
-    }
-
-    public static func stepped(
-        _ anchor: Date, mode: CalendarViewMode, by offset: Int, calendar: Calendar = .current
-    ) -> Date {
-        switch mode {
-        case .week:
-            return calendar.date(byAdding: .day, value: 7 * offset, to: anchor) ?? anchor
-        case .month:
-            return calendar.date(byAdding: .month, value: offset, to: anchor) ?? anchor
-        case .agenda:
-            return calendar.date(byAdding: .day, value: agendaDays * offset, to: anchor) ?? anchor
-        }
     }
 
     public static func dayIdentifier(for date: Date, calendar: Calendar = .current) -> String {
@@ -145,18 +71,16 @@ public enum ScheduleCalendar {
 
     public struct Query: Sendable {
         public var interval: DateInterval
-        public var currentMonth: DateInterval?
         public var now: Date
         public var includePaused: Bool
         public var routineID: String?
         public var calendar: Calendar
 
         public init(
-            interval: DateInterval, currentMonth: DateInterval? = nil, now: Date,
+            interval: DateInterval, now: Date,
             includePaused: Bool = false, routineID: String? = nil, calendar: Calendar = .current
         ) {
             self.interval = interval
-            self.currentMonth = currentMonth
             self.now = now
             self.includePaused = includePaused
             self.routineID = routineID
@@ -211,10 +135,9 @@ public enum ScheduleCalendar {
         var cursor = query.calendar.startOfDay(for: query.interval.start)
         while cursor < query.interval.end {
             let id = dayIdentifier(for: cursor, calendar: query.calendar)
-            let inMonth = query.currentMonth.map { cursor >= $0.start && cursor < $0.end } ?? true
             let today = query.calendar.isDate(cursor, inSameDayAs: query.now)
             let sorted = (entriesByDay[id] ?? []).sorted(by: entryOrder)
-            days.append(CalendarDay(id: id, date: cursor, isCurrentMonth: inMonth, isToday: today, entries: sorted))
+            days.append(CalendarDay(id: id, date: cursor, isToday: today, entries: sorted))
             guard let next = query.calendar.date(byAdding: .day, value: 1, to: cursor), next > cursor else { break }
             cursor = next
         }

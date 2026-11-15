@@ -131,7 +131,7 @@ final class AppModel {
         }
     }
     let settings = AppSettings()
-    let calendar = CalendarPresentationState()
+    let schedule = SchedulePresentationState()
     let interfaceScale: InterfaceScaleSettings
     let chatText: ChatTextSettings
     private let notifier = Notifier()
@@ -175,6 +175,8 @@ final class AppModel {
     }
     /// What Back returns to.
     @ObservationIgnored var selectionBeforeSettings: SidebarItem?
+    /// What closing the Schedule returns to.
+    @ObservationIgnored var selectionBeforeSchedule: SidebarItem?
     /// Settings shows the sidebar without changing the saved preference.
     var sidebarShown: Bool { sidebarVisible || settingsPane != nil }
 }

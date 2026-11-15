@@ -9,6 +9,7 @@ struct MainWindowToolbar: View {
     let toggleSidebar: () -> Void
     let importRoutines: () -> Void
     let newRoutine: () -> Void
+    let schedule: ScheduleToggle
     /// Settings keeps its sections in the sidebar: it dims the toggle and hides the routine actions.
     let showsActions: Bool
 
@@ -42,8 +43,27 @@ struct MainWindowToolbar: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// The Schedule replaces the detail; the button shows it and takes it away again.
+    struct ScheduleToggle {
+        let shown: Bool
+        let available: Bool
+        let toggle: () -> Void
+    }
+
     private var actions: some View {
         HStack(spacing: 0) {
+            Button(action: schedule.toggle) {
+                symbol("calendar", title: schedule.shown ? "Hide Schedule" : "Show Schedule")
+                    .foregroundStyle(schedule.shown ? Color.accentColor : Color.primary)
+                    .frame(width: metrics.points(28), height: metrics.points(28))
+                    .background { if schedule.shown { Circle().fill(Color.accentColor.opacity(0.16)) } }
+                    .frame(height: metrics.points(36))
+                    .contentShape(Rectangle())
+            }
+            .disabled(!schedule.available)
+            .help("\(schedule.shown ? "Hide" : "Show") the schedule (Shift-Command-S)")
+            .accessibilityAddTraits(schedule.shown ? [.isSelected] : [])
+            .accessibilityIdentifier("scheduleButton")
             Button(action: importRoutines) {
                 symbol("square.and.arrow.down", title: "Import Routines")
                     .frame(width: metrics.points(28), height: metrics.points(36))

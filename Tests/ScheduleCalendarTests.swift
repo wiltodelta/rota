@@ -32,38 +32,16 @@ final class ScheduleCalendarTests: XCTestCase {
         )
     }
 
-    func testWeekMonthAndAgendaIntervalsRespectFirstWeekdayAndMonthBounds() {
-        let anchor = date("2026-11-18 14:30") // Wednesday
-        let sundayWeek = ScheduleCalendar.weekInterval(containing: anchor, calendar: calendar)
-        XCTAssertEqual(sundayWeek.start, date("2026-11-15 00:00"))
-        XCTAssertEqual(sundayWeek.end, date("2026-11-22 00:00"))
-
-        var mondayCalendar = calendar
-        mondayCalendar.firstWeekday = 2
-        let mondayWeek = ScheduleCalendar.weekInterval(containing: anchor, calendar: mondayCalendar)
-        XCTAssertEqual(mondayWeek.start, date("2026-11-16 00:00"))
-        XCTAssertEqual(mondayWeek.end, date("2026-11-23 00:00"))
-
-        let octAnchor = date("2026-10-15 12:00")
-        let (octMonth, octGrid) = ScheduleCalendar.monthGridInterval(containing: octAnchor, calendar: calendar)
-        let query = ScheduleCalendar.Query(
-            interval: octGrid, currentMonth: octMonth, now: octAnchor, calendar: calendar
-        )
-        let days = ScheduleCalendar.days(query: query, routines: [], records: [])
-        XCTAssertEqual(days.count, 35)
-        XCTAssertEqual(days.first?.id, "2026-09-27")
-        XCTAssertEqual(days.first?.isCurrentMonth, false)
-        XCTAssertEqual(days.first { $0.id == "2026-10-01" }?.isCurrentMonth, true)
-        XCTAssertEqual(days.first { $0.id == "2026-10-15" }?.isToday, true)
-        XCTAssertEqual(days.last?.id, "2026-10-31")
-
-        let agenda = ScheduleCalendar.agendaInterval(startingAt: anchor, days: 14, calendar: calendar)
-        XCTAssertEqual(agenda.start, date("2026-11-18 00:00"))
-        XCTAssertEqual(agenda.end, date("2026-12-02 00:00"))
-        XCTAssertEqual(ScheduleCalendar.stepped(anchor, mode: .week, by: 1, calendar: calendar),
-                       date("2026-11-25 14:30"))
-        XCTAssertEqual(ScheduleCalendar.stepped(anchor, mode: .agenda, by: 1, calendar: calendar),
-                       date("2026-12-02 14:30"))
+    func testScheduleIntervalStartsAtLocalMidnightAndMarksToday() {
+        let anchor = date("2026-11-18 14:30")
+        let interval = ScheduleCalendar.agendaInterval(startingAt: anchor, days: 7, calendar: calendar)
+        XCTAssertEqual(interval.start, date("2026-11-18 00:00"))
+        XCTAssertEqual(interval.end, date("2026-11-25 00:00"))
+        let days = ScheduleCalendar.days(
+            query: .init(interval: interval, now: anchor, calendar: calendar), routines: [], records: [])
+        XCTAssertEqual(days.map(\.id).first, "2026-11-18")
+        XCTAssertEqual(days.count, 7)
+        XCTAssertEqual(days.filter(\.isToday).map(\.id), ["2026-11-18"])
     }
 
     func testMultiSlotCronProjectsRemainingTodayAndFullTomorrow() throws {
@@ -226,7 +204,7 @@ final class ScheduleCalendarTests: XCTestCase {
         let now = date("2027-03-14 00:30")
         var routine = makeRoutine(schedule: "30 2 * * *")
         routine.nextFire = try CronSchedule(routine.schedule).next(after: now, calendar: calendar)
-        let interval = ScheduleCalendar.weekInterval(containing: now, calendar: calendar)
+        let interval = ScheduleCalendar.agendaInterval(startingAt: now, days: 7, calendar: calendar)
         let days = ScheduleCalendar.days(
             query: .init(interval: interval, now: now, calendar: calendar),
             routines: [routine], records: []
@@ -330,18 +308,21 @@ final class ControlCalendarTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let now = localDate("2026-11-16 10:30", calendar: scheduler.calendar)
-        let state = CalendarPresentationState(defaults: defaults, now: now)
-        XCTAssertEqual(state.mode, .week)
+        let state = SchedulePresentationState(defaults: defaults, now: now, calendar: scheduler.calendar)
+        let today = scheduler.calendar.startOfDay(for: now)
+        XCTAssertEqual(state.start, today)
         XCTAssertFalse(state.showPaused)
-        state.mode = .month
         state.showPaused = true
         state.step(1, calendar: scheduler.calendar)
+        XCTAssertEqual(state.start, scheduler.calendar.date(byAdding: .day, value: 7, to: today))
 
-        let reloaded = CalendarPresentationState(defaults: defaults, now: now)
-        XCTAssertEqual(reloaded.mode, .month)
+        let reloaded = SchedulePresentationState(defaults: defaults, now: now, calendar: scheduler.calendar)
         XCTAssertTrue(reloaded.showPaused)
+        XCTAssertEqual(reloaded.start, today, "the Schedule always reopens at today")
+        reloaded.step(-2, calendar: scheduler.calendar)
         reloaded.goToToday(now: now, calendar: scheduler.calendar)
-        XCTAssertEqual(reloaded.anchor, now)
+        XCTAssertEqual(reloaded.start, today)
+        XCTAssertEqual(reloaded.selectedDay, today)
     }
 }
 

@@ -101,15 +101,13 @@ struct SessionHistoryRow: View {
         Self.metadata(for: record, models: model.settings.models)
     }
 
-    static func metadata(
-        for record: RunRecord, models: [Harness: [ModelOption]], includeDuration: Bool = true
-    ) -> String {
+    static func metadata(for record: RunRecord, models: [Harness: [ModelOption]]) -> String {
         var parts = [record.harness.title]
         if record.reportedModel ?? record.model != nil {
             parts.append(ModelLabel.model(record: record, models: models))
         }
         if let effort = ModelLabel.effort(record) { parts.append(effort) }
-        if includeDuration, !record.isSkip, let ended = record.endedAt {
+        if !record.isSkip, let ended = record.endedAt {
             parts.append(Transcript.readable(seconds: max(0, Int(ended.timeIntervalSince(record.startedAt)))))
         }
         if record.trigger == .catchUp { parts.append("Catch-up") }

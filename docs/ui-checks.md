@@ -56,7 +56,7 @@ does not need a second light-theme rendering pass at the same scale.
 
 | Surface | Actions and reference captures | Render variants |
 | --- | --- | --- |
-| Calendar | Light, 100%, Week/Month/Agenda switching, Paused toggle, period navigation, menu and session/routine navigation | Light at 150%, dark at 100% and 150% |
+| Calendar | Light, 100%: toolbar and menu entry, skipped slot shown and finished session hidden, paused toggle, week navigation, routine navigation, Escape and button return | Light at 150%, dark at 100% and 150% |
 | Filters | Light, 100%, category union, removal, reset and keyboard routes | Light at 150%, dark at 100% and 150% |
 | Questions | Light, choice, multiple selection, custom text, draft isolation, blocking priority and explicit send | Dark, the same captured form states with minimal setup |
 

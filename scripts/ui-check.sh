@@ -11,7 +11,7 @@
 #   scripts/ui-check.sh --parallel-only   continue and stop independent sessions with synthetic Claude
 #   scripts/ui-check.sh --paint-only      first transcript paint without AX or scroll input
 #   scripts/ui-check.sh --filters-only    combined session categories and resets only
-#   scripts/ui-check.sh --calendar-only   Week, Month and Agenda schedule calendar views only
+#   scripts/ui-check.sh --calendar-only   the Schedule view, its toolbar button and menu only
 #   scripts/ui-check.sh --keyboard-only   session/filter arrows, focus, session keys, panel keys, live states
 #   scripts/ui-check.sh --switch-only     repeated session switches, paint checked before transcript AX
 #   scripts/ui-check.sh --questions-only  finished question and verification states only
@@ -867,61 +867,60 @@ if [[ "$LIVE" == --calendar-only ]]; then
     for appearance in "${APPEARANCES[@]}"; do
         rm -rf "$SUPPORT"
         python3 scripts/fixtures/schedule-calendar.py "$SUPPORT" "$WORK/project"
-        read -r calendar_review_id calendar_once_epoch < "$SUPPORT/calendar-ids.txt"
-        defaults delete "$DOMAIN" calendarMode >/dev/null 2>&1 || true
+        read -r calendar_review_id calendar_once_epoch calendar_skip_id < "$SUPPORT/calendar-ids.txt"
         defaults delete "$DOMAIN" calendarShowPaused >/dev/null 2>&1 || true
         launch "$appearance"
-        "$DRIVER" select-in routineSidebar Calendar
-        check wait_exists scheduleCalendarView
-        "$DRIVER" window Calendar 820 600
+        # The Schedule is a toolbar action, not a sidebar row.
+        "$DRIVER" press scheduleButton
+        check wait_exists scheduleView
+        "$DRIVER" window Schedule 820 600
         for zoom in "${SCALES[@]}"; do
             "$DRIVER" key command-zero
             if [[ "$zoom" == zoom ]]; then
                 for _ in 1 2 3; do "$DRIVER" key command-plus; done
             fi
-            "$DRIVER" press calendarMode-week
-            "$DRIVER" press calendarToday
-            check wait_exists calendarWeekGrid
-            capture Calendar "$appearance-calendar-week-$zoom"
-
-            "$DRIVER" press calendarMode-month
-            check wait_exists calendarMonthGrid
-            check wait_exists calendarSelectedDay
-            capture Calendar "$appearance-calendar-month-$zoom"
-
-            "$DRIVER" press calendarMode-agenda
-            check wait_exists calendarAgendaList
-            capture Calendar "$appearance-calendar-agenda-$zoom"
+            "$DRIVER" press scheduleToday
+            check wait_exists scheduleWeekStrip
+            check wait_exists scheduleList
+            # Past runs stay in Sessions; only the skipped slot appears here.
+            check wait_exists "scheduleEntry-record:$calendar_skip_id"
+            if "$DRIVER" exists "scheduleEntry-record:$calendar_review_id"; then
+                fail 'finished sessions stay out of the Schedule'
+            fi
+            capture Schedule "$appearance-schedule-$zoom"
 
             if [[ "$PHASE" != renders ]]; then
-                "$DRIVER" press calendarTogglePaused
-                check wait_value calendarTogglePaused On
-                capture Calendar "$appearance-calendar-agenda-paused-$zoom"
-                "$DRIVER" press calendarTogglePaused
-                check wait_value calendarTogglePaused Off
+                "$DRIVER" menu 'Show Paused Routines'
+                capture Schedule "$appearance-schedule-paused-$zoom"
+                "$DRIVER" menu 'Show Paused Routines'
 
-                "$DRIVER" press calendarNext
-                "$DRIVER" press calendarPrevious
-                "$DRIVER" press calendarToday
+                title="$("$DRIVER" value schedulePeriodTitle)"
+                "$DRIVER" press scheduleNext
+                [[ "$("$DRIVER" value schedulePeriodTitle)" != "$title" ]] || fail 'Next Week moves the days'
+                "$DRIVER" press schedulePrevious
+                "$DRIVER" press scheduleToday
+                check wait_value schedulePeriodTitle "$title"
 
-                "$DRIVER" reveal "calendarAgendaEntry-record:$calendar_review_id" || true
-                "$DRIVER" press "calendarAgendaEntry-record:$calendar_review_id"
-                check wait_exists composer
-
-                "$DRIVER" menu 'Show Calendar'
-                check wait_exists calendarAgendaList
-
-                "$DRIVER" reveal "calendarAgendaEntry-slot:calendar-once:$calendar_once_epoch" || true
-                "$DRIVER" press "calendarAgendaEntry-slot:calendar-once:$calendar_once_epoch"
+                "$DRIVER" reveal "scheduleEntry-slot:calendar-once:$calendar_once_epoch" || true
+                "$DRIVER" press "scheduleEntry-slot:calendar-once:$calendar_once_epoch"
                 check wait_exists editRoutine
 
-                "$DRIVER" select-in routineSidebar Calendar
-                check wait_exists scheduleCalendarView
+                # The toolbar button and Escape take the Schedule away and return to the routine.
+                "$DRIVER" press scheduleButton
+                check wait_exists scheduleView
+                "$DRIVER" key escape
+                check wait_exists editRoutine
+                "$DRIVER" menu 'Show Schedule'
+                check wait_exists scheduleView
+                "$DRIVER" press scheduleButton
+                check wait_exists editRoutine
+                "$DRIVER" press scheduleButton
+                check wait_exists scheduleView
             fi
         done
         quit_rota
     done
-    pass "schedule calendar: $PHASE, $APPEARANCE, $SCALE"
+    pass "schedule: $PHASE, $APPEARANCE, $SCALE"
     exit 0
 fi
 

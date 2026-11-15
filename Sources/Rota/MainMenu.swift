@@ -12,44 +12,36 @@ enum MainMenu {
     }
 }
 
-/// View > Hide Sidebar / Show Sidebar, Calendar navigation, and interface/chat zoom.
+/// View > Hide Sidebar / Show Sidebar, the Schedule, and interface/chat zoom.
 struct ViewMenuCommands: View {
     @State private var model = AppModel.shared
 
     var body: some View {
-        @Bindable var calendar = model.calendar
+        @Bindable var schedule = model.schedule
         let unavailable = model.scheduler.routines.isEmpty || model.settingsPane != nil
         Button(model.sidebarShown ? "Hide Sidebar" : "Show Sidebar") { model.sidebarVisible.toggle() }
             .keyboardShortcut("s", modifiers: [.control, .command])
             // Settings' sections and Back live in the sidebar.
             .disabled(model.settingsPane != nil)
-        Button("Show Calendar") { model.showCalendar() }
+        // A checkmark rather than Show/Hide: AppKit refreshes a command's title only when its menu opens.
+        Toggle("Show Schedule", isOn: Binding(get: { model.showsSchedule }, set: { _ in model.toggleSchedule() }))
+            .keyboardShortcut("s", modifiers: [.shift, .command])
             .disabled(unavailable)
-        Menu("Calendar") {
-            Picker("Mode", selection: Binding(
-                get: { calendar.mode },
-                set: { calendar.mode = $0; model.showCalendar() }
-            )) {
-                ForEach(CalendarViewMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
-            .pickerStyle(.inline)
-            Divider()
+        Menu("Schedule") {
             Button("Today") {
-                model.showCalendar()
-                calendar.goToToday(now: model.scheduler.now(), calendar: model.scheduler.calendar)
+                model.showSchedule()
+                schedule.goToToday(now: model.scheduler.now(), calendar: model.scheduler.calendar)
             }
-            Button("Previous Period") {
-                model.showCalendar()
-                calendar.step(-1, calendar: model.scheduler.calendar)
+            Button("Previous Week") {
+                model.showSchedule()
+                schedule.step(-1, calendar: model.scheduler.calendar)
             }
-            Button("Next Period") {
-                model.showCalendar()
-                calendar.step(1, calendar: model.scheduler.calendar)
+            Button("Next Week") {
+                model.showSchedule()
+                schedule.step(1, calendar: model.scheduler.calendar)
             }
             Divider()
-            Toggle("Show Paused Routines", isOn: $calendar.showPaused)
+            Toggle("Show Paused Routines", isOn: $schedule.showPaused)
         }
         .disabled(unavailable)
         Divider()

@@ -114,7 +114,7 @@ private struct SidebarActionLabel: View {
     }
 }
 
-/// Primary selectable sidebar row with an accent SF Symbol (`Calendar`, `Settings` panes).
+/// A Settings section's sidebar row, with an accent SF Symbol.
 struct SidebarSymbolLabel: View {
     @Environment(\.interfaceScale) private var metrics
     let title: String

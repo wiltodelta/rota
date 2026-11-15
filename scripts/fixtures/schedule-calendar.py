@@ -1,4 +1,4 @@
-"""Synthetic routines and recorded sessions for the Schedule Calendar UI checks."""
+"""Synthetic routines, sessions and a skipped slot for the Schedule UI checks."""
 
 from datetime import datetime, timedelta, timezone
 import json
@@ -34,6 +34,7 @@ def main() -> None:
     once_fire = (now + timedelta(hours=3)).replace(minute=30)
     review_id = str(uuid.uuid4()).upper()
     digest_id = str(uuid.uuid4()).upper()
+    skip_id = str(uuid.uuid4()).upper()
 
     (root / "routines.json").write_text(
         json.dumps([
@@ -105,6 +106,15 @@ def main() -> None:
             "outcome": {"succeeded": {}},
             "logPath": str(digest_log),
             "sessionID": "synthetic-calendar-digest",
+        }, {
+            # Sessions hide skipped slots; the Schedule shows them.
+            "id": skip_id,
+            "routineID": "calendar-digest",
+            "trigger": "scheduled",
+            "harness": "codex",
+            "startedAt": stamp(now - timedelta(minutes=30)),
+            "endedAt": stamp(now - timedelta(minutes=30)),
+            "outcome": {"skipped": {"_0": "Mac was asleep"}},
         }]),
         encoding="utf-8",
     )
@@ -124,7 +134,7 @@ def main() -> None:
         encoding="utf-8",
     )
     (root / "calendar-ids.txt").write_text(
-        f"{review_id} {int(once_fire.timestamp())}\n",
+        f"{review_id} {int(once_fire.timestamp())} {skip_id}\n",
         encoding="utf-8",
     )
 

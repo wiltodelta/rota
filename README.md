@@ -122,9 +122,9 @@ To create a routine:
    accepts five-field cron. Choose a model, supported effort, and optional time limit.
 4. Save. The routine runs on its schedule; **Run Now** starts it immediately.
 
-Rota lives in the menu bar and runs routines while the app is open. Select
-**Calendar** in the sidebar to see recorded runs and upcoming slots across your
-routines in **Week**, **Month**, or **Agenda** view. Turn on **Launch at login**
+Rota lives in the menu bar and runs routines while the app is open. The
+calendar button in the toolbar shows what runs next across your routines, day
+by day, and any slot that was skipped. Turn on **Launch at login**
 in Settings to have Rota available after a restart, and pause any routine with
 its switch. The panel uses Liquid Glass on macOS 26 and later.
 
