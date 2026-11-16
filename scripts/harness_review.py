@@ -13,7 +13,7 @@ import re
 import subprocess
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
-from functools import partial
+from functools import cache, partial
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.error import HTTPError
@@ -107,14 +107,34 @@ def comparison(previous, current):
     return "unchanged" if previous["sha256"] == current["sha256"] else "changed"
 
 
+@cache
+def github_token():
+    """The environment token, else the gh CLI login; an anonymous read hits the 60-per-hour limit."""
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        return token
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "token"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        log.warning("gh auth token unavailable: %s", type(error).__name__)
+        return None
+    return result.stdout.strip() or None
+
+
 def fetch_source(source, output):
     key, url = source["id"], source["url"]
-    log.info("GET %s", url)
+    headers = {"User-Agent": "Rota-compatibility-review"}
+    if url.startswith("https://api.github.com/") and (token := github_token()):
+        headers["Authorization"] = "Bearer " + token
+    log.info("GET %s authenticated=%s", url, "Authorization" in headers)
     try:
-        with urlopen(
-            Request(url, headers={"User-Agent": "Rota-compatibility-review"}),
-            timeout=40,
-        ) as response:
+        with urlopen(Request(url, headers=headers), timeout=40) as response:
             body = response.read(4_000_001)
             log.info("GET %s status=%s bytes=%s", url, response.status, len(body))
         if len(body) > 4_000_000:

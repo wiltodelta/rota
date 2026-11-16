@@ -91,7 +91,9 @@ owns the recurring review. Its live schedule, harness and enabled state belong
 to Rota's registration, not a second schedule table here. Public sources live in
 its `sources.json`; `scripts/harness_review.py` collects fingerprints with bounded
 concurrent requests, preserves manifest order and updates
-only explicitly reviewed baselines. Installed contracts export model metadata
+only explicitly reviewed baselines. It reads `api.github.com` sources with
+`GH_TOKEN`, `GITHUB_TOKEN` or the `gh auth token` login, because anonymous reads
+hit GitHub's rate limit; the token never reaches a log. Installed contracts export model metadata
 through `ROTA_HARNESS_REVIEW_OUTPUT`; raw catalogs stay in task-owned scratch.
 
 The report is `.claude/harness-compatibility-weekly.md`. It links primary evidence,
@@ -102,5 +104,5 @@ proposals; application changes remain a separate reviewed task.
 
 Run `uv run python -B -m unittest discover -s scripts/tests -p 'test_harness_review.py' -v`
 for unavailable-source handling, explicit review, bounded history, release noise,
-code indentation, concurrent collection, damaged state and dry-run persistence. CI runs these checks too. A first review
+code indentation, concurrent collection, the GitHub token header, damaged state and dry-run persistence. CI runs these checks too. A first review
 establishes a baseline, not an invented history of upstream changes.

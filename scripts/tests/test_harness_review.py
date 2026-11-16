@@ -16,6 +16,8 @@ from scripts.harness_review import (
     atomic_json,
     collect,
     comparison,
+    fetch_source,
+    github_token,
     load_state,
     normalize,
 )
@@ -58,6 +60,35 @@ class ReviewTests(unittest.TestCase):
                     for key in ["first", "second"]
                 )
             )
+
+    def test_github_api_source_is_read_with_the_token_and_never_logs_it(self):
+        seen = []
+
+        def response(request, timeout):
+            seen.append(request)
+            body = io.BytesIO(json.dumps({"name": "release notes " * 20}).encode())
+            body.status = 200
+            return body
+
+        source = {
+            "id": "codex-release",
+            "url": "https://api.github.com/repos/openai/codex/releases/latest",
+            "marker": "release",
+        }
+        github_token.cache_clear()
+        self.addCleanup(github_token.cache_clear)
+        with (
+            tempfile.TemporaryDirectory(prefix="rota-review-test-") as folder,
+            patch.dict("os.environ", {"GH_TOKEN": "secret-token"}),
+            patch("scripts.harness_review.urlopen", response),
+            self.assertLogs("scripts.harness_review", level="INFO") as logs,
+        ):
+            _, result = fetch_source(source, Path(folder))
+            fetch_source(dict(source, url="https://example.invalid/docs"), Path(folder))
+        self.assertNotIn("error", result)
+        self.assertEqual(seen[0].get_header("Authorization"), "Bearer secret-token")
+        self.assertIsNone(seen[1].get_header("Authorization"))
+        self.assertNotIn("secret-token", "\n".join(logs.output))
 
     def test_markdown_fingerprints_preserve_code_indentation(self):
         inside = "```python\nif ready:\n    send()\n```"
