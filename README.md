@@ -73,6 +73,9 @@ of the same routine.
 If a session hits a usage limit, **Restart with…** lets you continue in another
 harness with the conversation as context. The same action is available for any
 finished agent session, without changing the routine's scheduled harness.
+Under a finished Shell session, ask the agent of your choice about the run: it
+reads the command's output, helps find the problem and, once you agree, fixes
+the routine's command or script.
 
 When an agent needs a decision, supported questions appear with their
 choices or input fields. The session stays marked as needing your reply

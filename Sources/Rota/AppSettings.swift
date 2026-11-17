@@ -31,6 +31,11 @@ final class AppSettings {
         didSet { defaults.set(try? JSONEncoder().encode(quickReplies), forKey: "quickReplies") }
     }
 
+    /// The agent a finished Shell session's field asks about its run.
+    var discussionAgent: Harness {
+        didSet { defaults.set(discussionAgent.rawValue, forKey: "discussionAgent") }
+    }
+
     init(defaults: UserDefaults = .standard, refreshOnInit: Bool = true) {
         self.defaults = defaults
         notifyOnSuccess = defaults.bool(forKey: "notifyOnSuccess")
@@ -38,6 +43,8 @@ final class AppSettings {
         terminalApp = defaults.string(forKey: "terminalApp")
         claudeInteractive = defaults.object(forKey: "claudeInteractive") as? Bool ?? true
         quickReplies = Self.storedReplies(defaults)
+        discussionAgent = defaults.string(forKey: "discussionAgent").flatMap(Harness.init(rawValue:))
+            .flatMap { $0.isAgent ? $0 : nil } ?? .claude
         if refreshOnInit { refreshInstalled() }
     }
 

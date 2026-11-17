@@ -1674,7 +1674,7 @@ service that may host somebody else's work.
 | Model and effort | native configuration | native configuration | native configuration | native model/options verified | native family/options verified | n/a |
 | Message while running | joins turn | terminal input | steer | queued prompt | queued prompt | Terminal |
 | Continue finished session | yes | yes | yes | yes | yes | n/a |
-| Restart with another agent | new session | new session | new session | new session | new session | n/a |
+| Restart with another agent | new session | new session | new session | new session | new session | discuss with an agent instead |
 | Stop and routine time limit | owned process tree | owned screen/tree | native turn confirmation | native prompt confirmation | owned process tree | owned screen/tree |
 | Native images | image blocks | file references | localImage | ACP image blocks | file references | n/a |
 | Questions | hooks/control | hooks, terminal dialogs | RPC/message | ACP | later message | n/a |
@@ -1716,7 +1716,15 @@ opening in Terminal or reserved for recovery. Another session of that routine
 does not block the restart. Both Claude modes use the current
 interactive preference and folder trust through the existing launch-spec builder.
 Shell sources and destinations are excluded because command text is not an agent
-request. `SessionRestart.hitUsageLimit` recognizes common textual quota/rate-limit
+request. A finished Shell session is discussed instead (`Scheduler.discuss`, from
+`ShellDiscussionComposer` or Session > Ask Agent About Run): a separate manual agent
+session opened by the user's message, sharing restart's launch path (`launchFresh`)
+and transcript excerpt. The routine, command, outcome and output excerpt (read with the
+shell flag) go into the new session's `run-context.md` attachment, which also names
+`rota update` for changing the command once the user agrees, so the chat's first message
+is the user's own words with a one-line pointer on every harness, including those whose
+transcript comes from native history. `RunRecord.discussedSessionID` links the discussion
+back for `Scheduler.discussions(of:)` and the header's link to the Shell run. `SessionRestart.hitUsageLimit` recognizes common textual quota/rate-limit
 errors only in the latest turn's agent answer or error notes; it is a UI suggestion,
 not an automatic retry or a structured provider limit signal.
 `scripts/ui-check.sh --restart-only` exercises the choice, context transfer and

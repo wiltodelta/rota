@@ -83,6 +83,8 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     public var sessionID: String?
     /// The root request carried across harness restarts, so handoff prompts never nest.
     public var originalRequest: String?
+    /// The Shell session this agent session was started to discuss.
+    public var discussedSessionID: UUID?
     /// When the user last looked at the session; it is unread if it ended after that.
     public var readAt: Date?
     /// What the session asked the user through `rota notify --needs-reply`, until

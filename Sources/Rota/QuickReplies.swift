@@ -77,10 +77,7 @@ struct QuickReplyBar: View {
     private func button(_ reply: QuickReply, index: Int) -> some View {
         Button { send(reply) } label: {
             // A label wider than the window truncates; the flow proposes the row's width.
-            Text(reply.label).interfaceFont(.callout).lineLimit(1)
-                .padding(.horizontal, metrics.points(10))
-                .frame(minHeight: metrics.points(26))
-                .modifier(ControlSurface(shape: Capsule()))
+            Text(reply.label).interfaceFont(.callout).lineLimit(1).modifier(Chip())
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
@@ -137,5 +134,17 @@ struct QuickRepliesSection: View {
                  + "with Option-Command-1 to 9.")
                 .foregroundStyle(Color.secondaryText)
         }
+    }
+}
+
+/// A capsule button face for the one-click rows above the message field.
+struct Chip: ViewModifier {
+    @Environment(\.interfaceScale) private var metrics
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, metrics.points(10))
+            .frame(minHeight: metrics.points(26))
+            .modifier(ControlSurface(shape: Capsule()))
     }
 }

@@ -17,6 +17,7 @@
 #   scripts/ui-check.sh --questions-only  finished question and verification states only
 #   scripts/ui-check.sh --harnesses-only  reasoning and CLI/service compatibility states only
 #   scripts/ui-check.sh --restart-only   cross-harness restart with synthetic agent output
+#   scripts/ui-check.sh --discussion-only Shell discussion field: picker, keys, zoom, link, no agent
 #   scripts/ui-check.sh --settings-only   Settings in the main window only
 #   ROTA_UI_QUESTION_HARNESS=antigravity scripts/ui-check.sh --questions-only
 #   ROTA_UI_TERMINAL=terminal scripts/ui-check.sh  use Terminal in both appearances
@@ -52,7 +53,7 @@ while [[ $# -gt 0 ]]; do
     shift 2
 done
 case "$LIVE" in
-    ""|--full|--live|--filters-only|--calendar-only|--questions-only|--settings-only|--harnesses-only|--restart-only|\
+    ""|--full|--live|--filters-only|--calendar-only|--questions-only|--settings-only|--harnesses-only|--restart-only|--discussion-only|\
         --keyboard-only|--scroll-only|--parallel-only|--paint-only|--switch-only) ;;
     *) echo "Unknown UI mode: $LIVE" >&2; exit 2 ;;
 esac
@@ -1210,7 +1211,45 @@ if [[ "$LIVE" == --settings-only ]]; then
     exit 0
 fi
 
-if [[ "$LIVE" == --restart-only ]]; then
+# Restart and discussion fixtures: one disabled routine with one finished session, and a
+# synthetic Antigravity that answers at once.
+seed_restart_source() {
+    python3 - "$SUPPORT" "$WORK/project" "$@" <<'PYTHON'
+from datetime import datetime, timedelta, timezone
+import json
+from pathlib import Path
+import sys
+import uuid
+root, folder, routine, name, harness, exit_code, text, extra = sys.argv[1:]
+runs = Path(root) / "runs"
+runs.mkdir(parents=True, exist_ok=True)
+for old in runs.glob("*.json"):
+    old.unlink()
+log = Path(root) / "Logs" / routine / "source.log"
+log.parent.mkdir(parents=True, exist_ok=True)
+log.write_text(text)
+now = datetime.now(timezone.utc)
+stamp = lambda value: value.isoformat(timespec="seconds").replace("+00:00", "Z")
+(Path(root) / "routines.json").write_text(json.dumps([{
+    "id": routine, "name": name, "harness": harness, "enabled": False, "schedule": "0 15 * * *",
+    "workingDirectory": folder, "prompt": "Routine task", **json.loads(extra)}]))
+(runs / (routine + ".json")).write_text(json.dumps([{
+    "id": str(uuid.uuid4()).upper(), "routineID": routine, "trigger": "scheduled", "harness": harness,
+    "startedAt": stamp(now - timedelta(seconds=20)), "endedAt": stamp(now),
+    "outcome": {"failed": {"exitCode": int(exit_code)}}, "logPath": str(log)}]))
+PYTHON
+}
+antigravity_session_id() {
+    python3 - "$SUPPORT/runs/$1.json" <<'PYTHON'
+import json
+import sys
+from pathlib import Path
+rows = json.loads(Path(sys.argv[1]).read_text()) if Path(sys.argv[1]).exists() else []
+# Empty until the session is saved, so a polling caller does not trip the ERR trap.
+print(next((row["id"] for row in rows if row["harness"] == "antigravity"), ""))
+PYTHON
+}
+write_synthetic_agent() {
     cat > "$WORK/agy-restart" <<'AGENT'
 #!/bin/bash
 if [[ "${1:-}" == --version ]]; then echo 'agy restart fixture'; exit 0; fi
@@ -1219,34 +1258,98 @@ printf '%s\n' '{"event":"init","conversation_id":"rota-ui-restart","init":{}}'
 printf '%s\n' '{"event":"result","result":{"status":"SUCCESS","response":"Continued the synthetic task."}}'
 AGENT
     chmod +x "$WORK/agy-restart"
+    only_antigravity "$WORK/agy-restart"
+}
+# Every agent unavailable except Antigravity at the given path.
+only_antigravity() {
     defaults write "$DOMAIN" executables -dict claude /unavailable/claude codex /unavailable/codex \
-        grok /unavailable/grok antigravity "$WORK/agy-restart"
-    for appearance in light dark; do
+        grok /unavailable/grok antigravity "$1"
+}
+
+# A finished Shell session's field asks an agent about the run: the picker, the message,
+# keyboard entry, the opened discussion, the link back and the state without any agent.
+check_discussion() {
+    local appearance="$1" discussion_id pid
+    write_synthetic_agent
+    seed_restart_source discuss-check "Nightly backup" shell 3 \
+        $'[you] ./synthetic-backup.sh\ncopied 12 files\ndisk full\n[result: failed with exit code 3 after 4 s]\n' \
+        '{"prompt": "./synthetic-backup.sh"}'
+    launch "$appearance"
+    "$DRIVER" key command-zero
+    check wait_exists discussionAgent
+    if "$DRIVER" exists restartSession; then fail "a Shell session offered Restart with"; fi
+    capture "Nightly backup" "$appearance-discussion-empty"
+    "$DRIVER" press discussionAgent
+    check wait_exists discussWith-antigravity
+    check "$DRIVER" exists discussionAgentSettings
+    capture "Nightly backup" "$appearance-discussion-agents"
+    "$DRIVER" press discussWith-antigravity
+    # The Session menu's keyboard route to the picker.
+    "$DRIVER" menu "Ask Agent About Run"
+    "$DRIVER" key escape
+    # Return in the session list writes into the field; Escape returns to the list.
+    "$DRIVER" select-in routineSidebar "copied 12 files"
+    "$DRIVER" focus routineSidebar
+    "$DRIVER" key return
+    "$DRIVER" key z
+    check wait_value composer z
+    "$DRIVER" key escape
+    check wait_focused routineSidebar
+    "$DRIVER" set composer 'Why is the disk full? Fix the script if it needs it.'
+    "$DRIVER" focus composer
+    capture "Nightly backup" "$appearance-discussion-typed"
+    for _ in 1 2 3; do "$DRIVER" key command-plus; sleep 0.2; done
+    capture "Nightly backup" "$appearance-discussion-typed-zoom"
+    "$DRIVER" key command-zero
+    "$DRIVER" focus composer
+    "$DRIVER" key return
+    discussion_id=""
+    for _ in {1..50}; do
+        discussion_id="$(antigravity_session_id discuss-check)"
+        [[ -n "$discussion_id" ]] && break
+        sleep 0.2
+    done
+    [[ -n "$discussion_id" ]] || fail "Return started a discussion"
+    check wait_value "sidebarPreview-$discussion_id" 'Continued the synthetic task.'
+    check wait_exists discussedSession
+    check wait_exists attachment-run-context.md
+    capture "Nightly backup" "$appearance-discussion-session"
+    for _ in 1 2 3; do "$DRIVER" key command-plus; sleep 0.2; done
+    capture "Nightly backup" "$appearance-discussion-session-zoom"
+    "$DRIVER" key command-zero
+    # The discussion leads back to its Shell run.
+    "$DRIVER" press discussedSession
+    check wait_exists "shellDiscussion-$discussion_id"
+    check wait_value composer ''
+    capture "Nightly backup" "$appearance-discussion-linked"
+    pid="$(pgrep -f "^$APP/Contents/MacOS/Rota$" | head -1)"
+    uv run -q "$AUDIT" geometry --pid "$pid" --state "$appearance-discussion-linked" \
+        > "$OUT/$appearance-discussion-linked.json" || true
+    "$DRIVER" press "shellDiscussion-$discussion_id"
+    check wait_value "sidebarPreview-$discussion_id" 'Continued the synthetic task.'
+    quit_rota
+    only_antigravity /unavailable/agy
+    # The newest session, the discussion, opens at launch.
+    launch "$appearance"
+    "$DRIVER" select "copied 12 files"
+    check wait_exists discussionAgent
+    capture "Nightly backup" "$appearance-discussion-no-agent"
+    quit_rota
+}
+
+if [[ "$LIVE" == --discussion-only ]]; then
+    for appearance in "${APPEARANCES[@]}"; do check_discussion "$appearance"; done
+    pass "Shell discussion in both appearances"
+    exit 0
+fi
+
+if [[ "$LIVE" == --restart-only ]]; then
+    write_synthetic_agent
+    for appearance in "${APPEARANCES[@]}"; do
         quit_rota
-        python3 - "$SUPPORT" "$WORK/project" <<'PYTHON'
-from datetime import datetime, timedelta, timezone
-import json
-from pathlib import Path
-import sys
-import uuid
-root = Path(sys.argv[1])
-(root / "runs").mkdir(parents=True, exist_ok=True)
-routine = "restart-check"
-log = root / "Logs" / routine / "source.log"
-log.parent.mkdir(parents=True, exist_ok=True)
-log.write_text("[you] Complete the synthetic task.\nStep one is finished.\n"
-               "[error] You've hit your weekly limit · resets 10pm (America/Los_Angeles)\n")
-now = datetime.now(timezone.utc)
-stamp = lambda value: value.isoformat(timespec="seconds").replace("+00:00", "Z")
-(root / "routines.json").write_text(json.dumps([{
-    "id": routine, "name": "Session restart check", "harness": "claude", "enabled": False,
-    "schedule": "0 15 * * *", "workingDirectory": sys.argv[2], "prompt": "Routine task",
-    "model": "source-only-model", "effort": "high"}]))
-(root / "runs" / (routine + ".json")).write_text(json.dumps([{
-    "id": str(uuid.uuid4()).upper(), "routineID": routine, "trigger": "scheduled", "harness": "claude",
-    "startedAt": stamp(now - timedelta(seconds=20)), "endedAt": stamp(now),
-    "outcome": {"failed": {"exitCode": 1}}, "logPath": str(log)}]))
-PYTHON
+        seed_restart_source restart-check "Session restart check" claude 1 \
+            $'[you] Complete the synthetic task.\nStep one is finished.\n[error] You\'ve hit your weekly limit · resets 10pm (America/Los_Angeles)\n' \
+            '{"model": "source-only-model", "effort": "high"}'
         launch "$appearance"
         "$DRIVER" key command-zero
         check wait_exists sessionUsageLimit
@@ -1261,12 +1364,7 @@ PYTHON
         check wait_exists Antigravity
         "$DRIVER" press Antigravity
         check wait_exists composer
-        restarted_id="$(python3 - "$SUPPORT/runs/restart-check.json" <<'PYTHON'
-import json
-import sys
-print(next(row["id"] for row in json.load(open(sys.argv[1])) if row["harness"] == "antigravity"))
-PYTHON
-)"
+        restarted_id="$(antigravity_session_id restart-check)"
         check wait_value "sidebarPreview-$restarted_id" 'Continued the synthetic task.'
         if "$DRIVER" exists sessionUsageLimit; then fail "old usage limit leaked into the new session"; fi
         python3 - "$SUPPORT" <<'PYTHON'

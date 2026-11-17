@@ -121,6 +121,15 @@ struct SessionCommands: Commands {
                 }
             }
             .disabled(record.map { !$0.harness.isAgent || !model.scheduler.canRestart($0) } ?? true)
+            // The keyboard route to a Shell session's agent picker: choose, then write in the field.
+            Menu("Ask Agent About Run") {
+                if let record, model.scheduler.canDiscuss(record) {
+                    let choices = model.restartChoices(for: record)
+                    DiscussionAgentChoices(model: model, choices: choices, agent: model.discussionAgent(in: choices),
+                                           picked: model.keyboard.focusComposer)
+                }
+            }
+            .disabled(record.map { !model.scheduler.canDiscuss($0) } ?? true)
             Button(record.map(model.terminalTitle) ?? "Continue in Terminal") { record.map(model.openInTerminal) }
             .keyboardShortcut("t", modifiers: [.command, .shift])
             .disabled(record.map { model.scheduler.terminalCommand(for: $0) == nil } ?? true)

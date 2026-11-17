@@ -62,6 +62,17 @@
     answered as a later message.
   - Shell commands run in a detached `screen` session; **Open in Terminal**
     attaches with `screen -r`, where you can type into the command or stop it.
+    Once the command ends, the field asks an agent about the run: pick Claude
+    Code, Codex, Grok Build or Antigravity beside Send (or from Session > Ask
+    Agent About Run), and your message starts that agent's session in the
+    routine's folder. The chat shows your message; the command, its result and
+    the end of its output go along as an attached `run-context.md`. Rota opens
+    the discussion, its header leads back to the Shell run, and the Shell session
+    keeps a button for each discussion above its field. The agent checks before
+    it changes anything, never reruns the command unless you ask, and changes the
+    routine's command (with `rota update`) or the script it calls only once you
+    agree. It uses its default model. With no agent installed, the picker offers
+    Agent Settings.
   A continued session runs again and appends to the same chat. Older conversations
   can continue while another session of the same routine runs. **Stop** in a
   session stops that session; the routine-level Stop action stops all its sessions.
@@ -94,7 +105,7 @@
   model, effort and next run stay unchanged; the new session uses the target
   harness's default model and effort. Stop an active run before restarting it.
   When the latest turn reports a usage or rate limit, a banner offers the same
-  choice. Shell commands are excluded. A missing or unreadable source log must
+  choice. Shell sessions are discussed from their field instead. A missing or unreadable source log must
   be resolved before restarting.
   Delete a finished session and its local logs with the trash button or
   **Delete Session…** in its context menu. Confirmation is required; the
@@ -298,7 +309,7 @@
   Week, Next Week, Show Paused Routines);
   Routine > Run Now (Command-R), Stop (Command-.) and Edit Routine…
   (Command-E), acting on the selected routine or the selected session's.
-  Session > Show Routine (Shift-Command-R), Restart With, Quick Replies (Option-Command-1 to 9), Open or Continue in
+  Session > Show Routine (Shift-Command-R), Restart With, Ask Agent About Run, Quick Replies (Option-Command-1 to 9), Open or Continue in
   Terminal (Shift-Command-T), Show Log in Finder (Shift-Command-L), Show Question
   (Shift-Command-A), Dismiss Attention (Shift-Command-D), Load Earlier Messages
   (Shift-Command-E) and Delete Session… act on the open session wherever keyboard

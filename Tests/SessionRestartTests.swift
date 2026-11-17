@@ -110,6 +110,54 @@ final class SessionRestartTests: XCTestCase {
         XCTAssertEqual(launcher.specs.count, 2)
     }
 
+    func testShellSessionStartsAnAgentDiscussionOfItsOutput() async throws {
+        let log = directory.appendingPathComponent("shell.log")
+        let body = Transcript.userLines("./backup.sh --verbose") + "\ncopied 12 files\n```\ndisk full\n"
+            + "[result: failed with exit code 3 after 4 s]\n"
+        try Data(body.utf8).write(to: log)
+        var shell = try XCTUnwrap(source)
+        shell.harness = .shell
+        shell.sessionID = "rota-shell-screen"
+        shell.outcome = .failed(exitCode: 3)
+        shell.logPath = log.path
+        scheduler.saveRecord(shell)
+        XCTAssertTrue(scheduler.canDiscuss(shell))
+        XCTAssertFalse(scheduler.canDiscuss(try XCTUnwrap(source)))
+        let started = await scheduler.discuss(shell, with: .codex, message: "Why is the disk full?")
+        let discussion = try XCTUnwrap(started)
+        let spec = try XCTUnwrap(launcher.specs.last)
+        XCTAssertEqual(launcher.specs.count, 1)
+        XCTAssertEqual(discussion.harness, .codex)
+        XCTAssertEqual(discussion.discussedSessionID, shell.id)
+        XCTAssertEqual(scheduler.discussions(of: shell).map(\.id), [discussion.id])
+        XCTAssertNil(discussion.originalRequest)
+        XCTAssertNil(spec.model)
+        XCTAssertEqual(spec.workingDirectory, directory.path)
+        // The chat shows the user's words; the run's context travels as an attached file.
+        let message = ChatMessage.decode(spec.prompt)
+        XCTAssertTrue(message.text.hasPrefix("Why is the disk full?\n\nAbout a run of the Rota routine"))
+        XCTAssertTrue(message.text.contains("(Failed (exit 3))"))
+        let attached = try XCTUnwrap(message.attachments.first)
+        XCTAssertEqual(message.attachments.count, 1)
+        XCTAssertEqual(attached.name, "run-context.md")
+        XCTAssertTrue(attached.path.hasPrefix(try XCTUnwrap(discussion.logPath)))
+        let context = try String(contentsOf: attached.url, encoding: .utf8)
+        XCTAssertTrue(context.contains(#"Rota routine "Restart test" (id restart)"#))
+        XCTAssertTrue(context.contains("rota update restart --prompt"))
+        XCTAssertTrue(context.contains("Command:\n./backup.sh --verbose"))
+        XCTAssertTrue(context.contains("Result: Failed (exit 3)"))
+        XCTAssertTrue(context.contains("[output]\ncopied 12 files\n```\ndisk full"))
+        XCTAssertTrue(context.contains(log.path))
+        XCTAssertFalse(spec.prompt.contains("Continue this task"))
+        XCTAssertFalse(message.text.contains("copied 12 files"))
+        XCTAssertEqual(scheduler.current(shell.id, routineID: routine.id), shell)
+        launcher.events.last?.finished(.succeeded)
+        var running = shell
+        running.outcome = .running
+        scheduler.saveRecord(running)
+        XCTAssertFalse(scheduler.canDiscuss(running))
+    }
+
     func testRestartRejectsUnknownNativeStateAndStaleRunningRecord() async throws {
         scheduler.survivingSessions[source.id] = source
         let reserved = await scheduler.restart(source, with: .claude)

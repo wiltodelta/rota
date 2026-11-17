@@ -176,6 +176,18 @@ struct SessionView: View {
                   current.statusTitle].compactMap { $0 }.joined(separator: " \u{00B7} "))
                 .interfaceFont(.caption)
                 .foregroundStyle(record.outcome.isFailure ? Color.errorText : Color.secondaryText)
+            if let id = record.discussedSessionID,
+               let source = model.scheduler.records(for: routine.id).first(where: { $0.id == id }) {
+                // A discussion leads back to the Shell run it asks about.
+                Button { model.selection = .session(source.id) } label: {
+                    Label("About the Shell run at " + source.startedAt.formatted(date: .omitted, time: .shortened),
+                          systemImage: "arrow.turn.up.left")
+                        .interfaceFont(.caption)
+                }
+                .buttonStyle(.link)
+                .help("Open the Shell session this discussion is about")
+                .accessibilityIdentifier("discussedSession")
+            }
         }
     }
 
@@ -280,7 +292,8 @@ extension AppModel {
         record.logPath.map { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: $0)]) }
     }
 
-    /// Agents a session can restart on: every other one, with whether it is installed.
+    /// Agents a session can restart on, or a Shell session be discussed with: every other one,
+    /// with whether it is installed.
     func restartChoices(for record: RunRecord) -> [(harness: Harness, installed: Bool)] {
         Harness.agents.filter { $0 != record.harness }.map {
             ($0, FileManager.default.isExecutableFile(atPath: scheduler.executable($0)))

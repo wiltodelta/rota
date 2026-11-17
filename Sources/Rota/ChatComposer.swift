@@ -13,11 +13,7 @@ struct ChatComposer: View {
     let record: RunRecord
     /// Called with each message sent, so the chat can show it until the session does.
     let sent: (String) -> Void
-    private var input: Binding<String> {
-        Binding(get: { model.sessionDrafts[record.id] ?? "" }, set: { value in
-            model.sessionDrafts[record.id] = value.isEmpty ? nil : value
-        })
-    }
+    private var input: Binding<String> { model.draft(for: record) }
 
     private var text: String {
         get { input.wrappedValue }
@@ -57,6 +53,8 @@ struct ChatComposer: View {
                     }
                     box
                 }
+            } else if record.harness == .shell, !running {
+                ShellDiscussionComposer(record: record)
             } else if let note {
                 Text(note)
                     .interfaceFont(.callout)
@@ -187,20 +185,7 @@ struct ChatComposer: View {
                     .accessibilityIdentifier("attachmentError")
             }
         }
-        .padding(.horizontal, metrics.points(16))
-        .padding(.top, metrics.points(hasQuestion ? 10 : 14))
-        .padding(.bottom, metrics.points(hasQuestion ? 8 : 10))
-        .background {
-            ComposerSurface(shape: RoundedRectangle(cornerRadius: metrics.points(20)))
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: metrics.points(20))
-                .strokeBorder(focused || dropTargeted ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.08),
-                              lineWidth: focused || dropTargeted ? 1.5 : 1)
-        }
-        .contentShape(RoundedRectangle(cornerRadius: metrics.points(20)))
+        .modifier(ComposerBox(compact: hasQuestion, highlighted: focused || dropTargeted))
         .onTapGesture { focused = true }
         .dropDestination(for: URL.self) { urls, _ in
             guard !urls.isEmpty, !staging else { return false }
@@ -325,6 +310,31 @@ struct ChatComposer: View {
     }
 }
 
+/// The field's rounded glass box, outlined in the accent color while it has focus or a drop over it.
+struct ComposerBox: ViewModifier {
+    @Environment(\.interfaceScale) private var metrics
+    let compact: Bool
+    let highlighted: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, metrics.points(16))
+            .padding(.top, metrics.points(compact ? 10 : 14))
+            .padding(.bottom, metrics.points(compact ? 8 : 10))
+            .background {
+                ComposerSurface(shape: RoundedRectangle(cornerRadius: metrics.points(20)))
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: metrics.points(20))
+                    .strokeBorder(highlighted ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.08),
+                                  lineWidth: highlighted ? 1.5 : 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: metrics.points(20)))
+    }
+}
+
 /// Decoration stays separate from the editor so appearance changes preserve its draft and focus.
 private struct ComposerSurface: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -368,7 +378,7 @@ private struct StopRingButton: View {
 }
 
 /// A compact circular control, with an accent tint when a message is ready to send.
-private struct RoundButton: View {
+struct RoundButton: View {
     @Environment(\.interfaceScale) private var metrics
     let symbol: String
     let filled: Bool

@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.ui_preparation import DOMAIN, prepare, require_idle_development_app, validate
 
 log = logging.getLogger(__name__)
-MODES = ["filters", "calendar", "questions", "settings", "harnesses", "restart", "keyboard", "scroll",
+MODES = ["filters", "calendar", "questions", "settings", "harnesses", "restart", "discussion", "keyboard", "scroll",
          "parallel", "paint", "switch", "full", "live"]
 
 
