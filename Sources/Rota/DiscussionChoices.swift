@@ -6,6 +6,12 @@ extension AppSettings {
     func discussionSetup(for agent: Harness) -> ModelSetup {
         ModelSetup(harness: agent, settings: self, model: discussionModels[agent], effort: discussionEfforts[agent])
     }
+
+    /// Remembers the model and effort for discussions on `agent`; nil leaves either to the agent.
+    func setDiscussionChoice(_ agent: Harness, model: String?, effort: String?) {
+        discussionModels[agent] = model
+        discussionEfforts[agent] = effort
+    }
 }
 
 extension AppModel {
@@ -16,9 +22,9 @@ extension AppModel {
     }
 }
 
-/// The agent, model and effort choices for a Shell run's discussion, shared by the field's picker
-/// and Session > Ask Agent About Run. The model is passed in: the menu bar's commands have no
-/// `AppModel` in their environment, and reading it there traps.
+/// The agents a Shell run can be discussed with, the chosen one checked; shared by the field's
+/// agent picker and Session > Ask Agent About Run. The model is passed in: the menu bar's commands
+/// have no `AppModel` in their environment, and reading it there traps.
 struct DiscussionChoices: View {
     let model: AppModel
     let choices: [(harness: Harness, installed: Bool)]
@@ -33,14 +39,6 @@ struct DiscussionChoices: View {
             }))
             .disabled(!installed)
             .accessibilityIdentifier("discussWith-\(harness.rawValue)")
-        }
-        Divider()
-        if let agent {
-            ModelEffortChoices(setup: model.settings.discussionSetup(for: agent), identifier: "discussion") {
-                model.settings.discussionModels[agent] = $0
-                model.settings.discussionEfforts[agent] = $1
-                picked()
-            }
         }
     }
 }

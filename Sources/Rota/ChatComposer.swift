@@ -181,48 +181,37 @@ struct ChatComposer: View {
     }
 
     /// The model and effort: what the running session reported, else what the next message uses,
-    /// which a session between runs can change here.
+    /// which a session between runs picks here, each on its own.
     @ViewBuilder
     private var configuration: some View {
         let setup = ModelSetup(record: record, settings: model.settings)
         // The agent's default stands in only when no model was asked for.
         let fallback = resolvedConfiguration?.model ?? legacyModel ?? (record.model == nil ? setup.selected?.id : nil)
-        let label = HStack(spacing: metrics.points(6)) {
+        let modelLabel = ModelLabel.model(record: record, models: model.settings.models, fallback: fallback)
+        let effortLabel = resolvingConfiguration ? "Resolving…"
+            : ModelLabel.effort(record, fallback: resolvedConfiguration?.effort)
+        HStack(spacing: metrics.points(6)) {
             HarnessLogo(harness: record.harness)
-            Text(ModelLabel.model(record: record, models: model.settings.models, fallback: fallback))
-                .truncationMode(.middle)
-            if let effort = resolvingConfiguration ? "Resolving…"
-                : ModelLabel.effort(record, fallback: resolvedConfiguration?.effort) {
-                Text("·")
-                Text(effort).fixedSize()
-            }
-        }
-        .interfaceFont(.callout)
-        .foregroundStyle(Color.secondaryText)
-        .lineLimit(1)
-        if model.scheduler.canConfigure(record) {
-            Menu {
-                ModelEffortChoices(setup: setup, identifier: "session") {
+            if model.scheduler.canConfigure(record) {
+                ModelEffortPickers(setup: setup, modelLabel: modelLabel, effortLabel: effortLabel,
+                                   identifier: "composer") {
                     model.scheduler.configure(record, model: $0, effort: $1)
                 }
-            } label: {
+            } else {
                 HStack(spacing: metrics.points(6)) {
-                    label
-                    Image(systemName: "chevron.down").interfaceSystemFont(size: 9, weight: .semibold)
-                        .foregroundStyle(Color.secondaryText)
+                    Text(modelLabel).truncationMode(.middle)
+                    if let effortLabel {
+                        Text("·")
+                        Text(effortLabel).fixedSize()
+                    }
                 }
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .help("The model and reasoning effort for the next message.")
-            .accessibilityLabel("Model")
-            .accessibilityIdentifier("composerModel")
-        } else {
-            label
+                .interfaceFont(.callout)
+                .foregroundStyle(Color.secondaryText)
+                .lineLimit(1)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("composerModel")
                 .help("The model and reasoning effort for this session.")
+            }
         }
     }
 

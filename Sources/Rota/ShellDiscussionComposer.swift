@@ -62,34 +62,25 @@ struct ShellDiscussionComposer: View {
         .onTapGesture { focused = true }
     }
 
+    /// The agent, then its model and effort, each a picker of its own.
     private func agentPicker(agent: Harness?, choices: [(harness: Harness, installed: Bool)]) -> some View {
-        let setup = agent.map(model.settings.discussionSetup(for:))
-        return Menu {
-            DiscussionChoices(model: model, choices: choices, agent: agent)
-            Divider()
-            Button("Agent Settings\u{2026}") { model.showSettings(.agents) }
-                .accessibilityIdentifier("discussionAgentSettings")
-        } label: {
-            HStack(spacing: metrics.points(6)) {
+        HStack(spacing: metrics.points(10)) {
+            FooterMenu(title: agent?.title ?? "No agent installed", help: "The agent that answers",
+                       accessibilityLabel: "Agent", identifier: "discussionAgent") {
                 if let agent { HarnessLogo(harness: agent) }
-                Text(agent?.title ?? "No agent installed").fixedSize()
-                if let setup {
-                    Text("\u{00B7}")
-                    Text(setup.summary).truncationMode(.middle)
-                }
-                Image(systemName: "chevron.down").interfaceSystemFont(size: 9, weight: .semibold)
+            } items: {
+                DiscussionChoices(model: model, choices: choices, agent: agent)
+                Divider()
+                Button("Agent Settings\u{2026}") { model.showSettings(.agents) }
+                    .accessibilityIdentifier("discussionAgentSettings")
             }
-            .interfaceFont(.callout)
-            .foregroundStyle(Color.secondaryText)
-            .lineLimit(1)
+            .fixedSize()
+            if let agent {
+                ModelEffortPickers(setup: model.settings.discussionSetup(for: agent), identifier: "discussion") {
+                    model.settings.setDiscussionChoice(agent, model: $0, effort: $1)
+                }
+            }
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .help("The agent that answers, its model and reasoning effort.")
-        .accessibilityLabel("Agent")
-        .accessibilityValue([agent?.title ?? "None", setup?.summary].compactMap { $0 }.joined(separator: ", "))
-        .accessibilityIdentifier("discussionAgent")
     }
 
     private func send(to agent: Harness?) {

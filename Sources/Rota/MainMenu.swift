@@ -136,8 +136,17 @@ struct SessionCommands: Commands {
             Menu("Ask Agent About Run") {
                 if let record, model.scheduler.canDiscuss(record) {
                     let choices = model.restartChoices(for: record)
-                    DiscussionChoices(model: model, choices: choices, agent: model.discussionAgent(in: choices),
-                                           picked: model.keyboard.focusComposer)
+                    let agent = model.discussionAgent(in: choices)
+                    DiscussionChoices(model: model, choices: choices, agent: agent,
+                                      picked: model.keyboard.focusComposer)
+                    if let agent {
+                        Divider()
+                        ModelEffortChoices(setup: model.settings.discussionSetup(for: agent),
+                                           identifier: "discussion") {
+                            model.settings.setDiscussionChoice(agent, model: $0, effort: $1)
+                            model.keyboard.focusComposer()
+                        }
+                    }
                 }
             }
             .disabled(record.map { !model.scheduler.canDiscuss($0) } ?? true)

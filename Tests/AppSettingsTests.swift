@@ -63,6 +63,7 @@ final class AppSettingsTests: XCTestCase {
         settings.discussionEfforts[.codex] = "high"
         // Before the catalog loads, the stored choice stands.
         let unloaded = settings.discussionSetup(for: .codex)
+        XCTAssertFalse(unloaded.effortFixed, "Before the catalog loads, the effort picker still opens")
         XCTAssertEqual(unloaded.model, "model-b")
         XCTAssertEqual(unloaded.effort, "high")
         let reloaded = AppSettings(defaults: defaults, refreshOnInit: false)
@@ -74,14 +75,19 @@ final class AppSettingsTests: XCTestCase {
         let offered = settings.discussionSetup(for: .codex)
         XCTAssertEqual(offered.model, "model-b")
         XCTAssertEqual(offered.effort, "high")
-        XCTAssertEqual(offered.summary, "Model B \u{00B7} High")
+        XCTAssertEqual(offered.modelTitle, "Model B")
         // A model the agent no longer lists, and an effort its default lacks, fall back to defaults.
         await settings.refreshInstalled(discover: { [:] }, catalog: { _, _ in [fallback] }).value
         let dropped = settings.discussionSetup(for: .codex)
         XCTAssertNil(dropped.model)
         XCTAssertNil(dropped.effort)
         XCTAssertEqual(dropped.selected, fallback)
-        XCTAssertEqual(dropped.summary, "Model A")
+        XCTAssertEqual(dropped.modelTitle, "Model A")
+        XCTAssertFalse(dropped.effortFixed)
+        let fixed = ModelOption(id: "fixed", title: "Fixed", efforts: [], isDefault: true)
+        await settings.refreshInstalled(discover: { [:] }, catalog: { _, _ in [fixed] }).value
+        XCTAssertTrue(settings.discussionSetup(for: .codex).effortFixed,
+                      "A listed model without efforts has none to pick")
     }
 }
 

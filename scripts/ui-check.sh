@@ -1309,7 +1309,7 @@ PYTHON
 }
 
 check_discussion() {
-    local appearance="$1" discussion_id pid effort_enabled key
+    local appearance="$1" discussion_id pid key
     # Each appearance starts from the agents' defaults; the choices persist by design.
     for key in discussionAgent discussionModels discussionEfforts; do
         defaults delete "$DOMAIN" "$key" >/dev/null 2>&1 || true
@@ -1338,32 +1338,27 @@ AGENT
     check "$DRIVER" exists discussionAgentSettings
     capture "Nightly backup" "$appearance-discussion-agents"
     "$DRIVER" press discussWith-antigravity
-    # Model and effort: Fixed disables the effort, Model A offers Low and High. The catalog
-    # loads in the background after agent discovery, so allow it a minute.
-    check wait_value discussionAgent 'Antigravity, Model A' 300
-    open_menu discussionModel-fixed discussionAgent discussionModelMenu
+    # Model and effort are pickers of their own: Fixed has no effort to choose, Model A offers Low
+    # and High. The catalog loads in the background after agent discovery, so allow it a minute.
+    check wait_value discussionModel 'Model A' 300
+    open_menu discussionModel-fixed discussionModel
     capture "Nightly backup" "$appearance-discussion-models"
-    open_menu discussionModel-fixed discussionAgent discussionModelMenu
+    open_menu discussionModel-fixed discussionModel
     "$DRIVER" press discussionModel-fixed
-    check wait_value discussionAgent 'Antigravity, Fixed'
-    # The open menu can rebuild or close between two AX reads, so open it and read until one answers.
-    effort_enabled=""
-    for _ in {1..20}; do
-        open_menu discussionEffortMenu discussionAgent
-        effort_enabled="$("$DRIVER" enabled discussionEffortMenu 2>/dev/null || true)"
-        [[ -n "$effort_enabled" ]] && break
-        sleep 0.2
-    done
-    [[ "$effort_enabled" == false ]] || fail "a fixed-effort model offers efforts: ${effort_enabled:-no item}"
-    open_menu discussionModel-model-a discussionAgent discussionModelMenu
+    check wait_value discussionModel 'Fixed'
+    check wait_value discussionAgent 'Antigravity'
+    for _ in {1..20}; do "$DRIVER" exists discussionEffort || break; sleep 0.2; done
+    if "$DRIVER" exists discussionEffort; then fail "a fixed-effort model offers an effort picker"; fi
+    open_menu discussionModel-model-a discussionModel
     "$DRIVER" press discussionModel-model-a
-    check wait_value discussionAgent 'Antigravity, Model A'
-    # The Effort item turns from a dimmed button back into a submenu: open it once it has.
-    open_menu discussionEffortMenu discussionAgent
-    sleep 0.5
-    open_menu discussionEffort-low discussionAgent discussionEffortMenu
+    check wait_value discussionModel 'Model A'
+    # Choosing the effort leaves the model as it is.
+    open_menu discussionEffort-low discussionEffort
+    capture "Nightly backup" "$appearance-discussion-efforts"
+    open_menu discussionEffort-low discussionEffort
     "$DRIVER" press discussionEffort-low
-    check wait_value discussionAgent 'Antigravity, Model A · Low'
+    check wait_value discussionEffort 'Low'
+    check wait_value discussionModel 'Model A'
     # The Session menu's keyboard route to the picker.
     "$DRIVER" menu "Ask Agent About Run"
     "$DRIVER" key escape
@@ -1400,10 +1395,10 @@ AGENT
     capture "Nightly backup" "$appearance-discussion-session-zoom"
     "$DRIVER" key command-zero
     # Between runs the footer picks the next message's model; each answer keeps its own label.
-    open_menu sessionModel-fixed composerModel sessionModelMenu
+    open_menu composerModel-fixed composerModel
     capture "Nightly backup" "$appearance-session-models"
-    open_menu sessionModel-fixed composerModel sessionModelMenu
-    "$DRIVER" press sessionModel-fixed
+    open_menu composerModel-fixed composerModel
+    "$DRIVER" press composerModel-fixed
     "$DRIVER" set composer 'And on the fixed model?'
     "$DRIVER" focus composer
     "$DRIVER" key return
