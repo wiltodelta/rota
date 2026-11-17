@@ -63,6 +63,31 @@ extension Scheduler {
         canMessage(record) && !record.hasBlockingQuestion
     }
 
+    /// Whether the next message may run on another model or effort: an agent session between runs.
+    public func canConfigure(_ record: RunRecord) -> Bool {
+        record.harness.isAgent && !isActive(record) && canMessage(record)
+    }
+
+    /// The model and effort the session's next run uses; nil leaves the choice to the harness.
+    /// The reported values belong to the last run, so they go until the next run reports again;
+    /// earlier answers keep theirs in `configurations`.
+    @discardableResult
+    public func configure(_ record: RunRecord, model: String?, effort: String?) -> Bool {
+        guard var stored = current(record.id, routineID: record.routineID), canConfigure(stored) else { return false }
+        guard stored.model != model || stored.effort != effort else { return true }
+        // A session from before marks were kept: its answers so far ran on what it last reported.
+        if stored.configurations == nil, stored.reportedModel ?? stored.model != nil {
+            stored.configurations = [stored.reportedMark(from: 0)]
+        }
+        stored.model = model
+        stored.effort = effort
+        stored.reportedModel = nil
+        stored.reportedModelTitle = nil
+        stored.reportedEffort = nil
+        saveRecord(stored)
+        return true
+    }
+
     func updateConfiguration(_ configuration: SessionConfiguration, routineID: String, runID: UUID) {
         guard var record = active[runID], record.routineID == routineID else { return }
         let previous = record
@@ -72,6 +97,13 @@ extension Scheduler {
         }
         if let title = configuration.modelTitle { record.reportedModelTitle = title }
         if let effort = configuration.effort { record.reportedEffort = effort }
+        if let start = configuration.fromItem {
+            // Runs only move forward, so this run's mark is the last; one matching the run before adds nothing.
+            var marks = (record.configurations ?? []).filter { $0.fromItem != start }
+            let mark = record.reportedMark(from: start)
+            if marks.last.map({ !$0.labels(like: mark) }) ?? true { marks.append(mark) }
+            record.configurations = marks
+        }
         guard previous != record else { return }
         active[runID] = record
         saveRecord(record)

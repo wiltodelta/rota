@@ -25,18 +25,22 @@ extension Scheduler {
             lastError = "Could not read this session's history. Open its log before restarting."
             return nil
         }
+        // Model and effort names belong to the source provider; use the target's defaults.
         return launchFresh(routine, on: harness) { restarted in
             restarted.originalRequest = context.originalRequest
             return context.prompt
         }
     }
 
-    /// A new manual session of `routine` on `harness`. `prepare` fills in the record once its log
-    /// path exists (attachments live beside the log) and returns the prompt.
-    func launchFresh(_ routine: Routine, on harness: Harness,
+    /// A new manual session of `routine` on `harness`, on `model` and `effort` or the harness's
+    /// defaults. `prepare` fills in the record once its log path exists (attachments live beside
+    /// the log) and returns the prompt.
+    func launchFresh(_ routine: Routine, on harness: Harness, model: String? = nil, effort: String? = nil,
                      prepare: (inout RunRecord) throws -> String) -> RunRecord? {
         var record = RunRecord(routineID: routine.id, trigger: .manual, harness: harness,
                                startedAt: now(), outcome: .running)
+        record.model = model
+        record.effort = effort
         let log = history.logFile(for: record)
         record.logPath = log.path
         let prompt: String
@@ -44,7 +48,6 @@ extension Scheduler {
             lastError = "Could not prepare the new session: \(error.localizedDescription)"
             return nil
         }
-        // Model and effort names belong to the source provider; use the target's defaults.
         guard start(record, spec: spec(for: routine, record: record, harness: harness, prompt: prompt, log: log)) else {
             lastError = current(record.id, routineID: routine.id)?.outcome.title ?? "Could not start this session."
             return nil

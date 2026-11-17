@@ -11,9 +11,11 @@ extension Scheduler {
         records(for: record.routineID).filter { $0.discussedSessionID == record.id }
     }
 
-    /// Starts `harness` on the user's `message` about a Shell run. The chat shows the message;
-    /// the run's command, result and output travel as an attached file.
-    public func discuss(_ record: RunRecord, with harness: Harness, message: String) async -> RunRecord? {
+    /// Starts `harness` on the user's `message` about a Shell run, on `model` and `effort` or the
+    /// harness's defaults. The chat shows the message; the run's command, result and output travel
+    /// as an attached file.
+    public func discuss(_ record: RunRecord, with harness: Harness, model: String? = nil, effort: String? = nil,
+                        message: String) async -> RunRecord? {
         guard harness.isAgent, let stored = current(record.id, routineID: record.routineID), canDiscuss(stored),
               let named = routine(stored.routineID) else { return nil }
         let context = await Task.detached { ShellDiscussion.context(for: stored, routine: named) }.value
@@ -23,7 +25,7 @@ extension Scheduler {
             lastError = "Could not read this session's output. Open its log before asking an agent."
             return nil
         }
-        return launchFresh(routine, on: harness) { discussion in
+        return launchFresh(routine, on: harness, model: model, effort: effort) { discussion in
             discussion.discussedSessionID = source.id
             let file = try history.attachments(for: discussion).stage(Data(context.utf8), name: "run-context.md")
             let pointer = "About a run of the Rota routine \u{201C}\(routine.name)\u{201D} (\(source.outcome.title)). "

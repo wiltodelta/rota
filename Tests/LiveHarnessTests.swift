@@ -7,6 +7,8 @@ import XCTest
 /// reached the log. They spend a little of each vendor's quota.
 final class LiveHarnessTests: XCTestCase {
     private var folder: URL!
+    /// The configuration the latest `run` reported.
+    private var reported = SessionConfiguration()
 
     override func setUpWithError() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["ROTA_LIVE"] == "1", "set ROTA_LIVE=1 to run")
@@ -51,6 +53,7 @@ final class LiveHarnessTests: XCTestCase {
         })
         control = try ProcessLauncher().launch(spec, events: events)
         wait(for: [ended], timeout: timeout + 30)
+        reported = configuration
         let text = try String(contentsOf: log, encoding: .utf8)
         var reader = TranscriptReader()
         let snapshot = reader.read(log: log, shell: harness == .shell, finished: true)
@@ -163,6 +166,29 @@ final class LiveHarnessTests: XCTestCase {
     }
 
     func testCodexContinuesAFinishedSession() throws { try checkContinuation(.codex) }
+
+    /// A finished session continues on another model and effort, as the chat's model menu asks.
+    func testEachAgentContinuesASessionOnAnotherModel() throws {
+        let picks: [(Harness, String, String)] = [
+            (.claude, "claude-haiku-5-5", "claude-sonnet-5-5"), (.codex, "gpt-6-luna", "gpt-5.6-luna"),
+            (.grok, "grok-4.6", "grok-4.5"), (.antigravity, "gemini-3.8-flash", "gemini-4-carbon")
+        ]
+        for (harness, first, second) in picks {
+            let (opened, _, session) = try run(harness, prompt: "Reply with exactly: red fox", message: nil,
+                                               model: first, effort: "low")
+            XCTAssertEqual(opened, .succeeded, harness.rawValue)
+            let before = reported.model
+            let id = try XCTUnwrap(session, harness.rawValue)
+            let (continued, log, again) = try run(harness, prompt: "Now reply with exactly: blue whale",
+                                                  message: nil, resume: id, model: second, effort: "low")
+            XCTAssertEqual(continued, .succeeded, log)
+            XCTAssertEqual(again, id, "\(harness.rawValue) continues the same session")
+            XCTAssertTrue(log.lowercased().contains("blue whale"), "\(harness.rawValue) answered: \(log)")
+            XCTAssertTrue(reported.model?.contains(second) == true,
+                          "\(harness.rawValue) ran on \(reported.model ?? "nothing") after \(before ?? "nothing")")
+            XCTAssertEqual(reported.effort, "low", harness.rawValue)
+        }
+    }
 
     func testGrokContinuesAFinishedSession() throws { try checkContinuation(.grok) }
 

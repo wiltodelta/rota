@@ -243,7 +243,7 @@ private struct TranscriptRow: View {
             case .user: UserBubble(text: item.text)
             case .agent:
                 // The message as the agent wrote it, Markdown included.
-                AgentHeader(record: record, copy: item.text, hovering: hovering)
+                AgentHeader(record: record, item: item.id, copy: item.text, hovering: hovering)
                 AnswerView(item: item)
             case .tool:
                 HStack(alignment: .firstTextBaseline, spacing: metrics.points(6)) {
@@ -302,7 +302,10 @@ private struct TurnView: View {
             // The agent's part alone shows its Copy button; the prompt has its own.
             VStack(alignment: .leading, spacing: metrics.points(12)) {
                 if !turn.work.isEmpty || !turn.answer.isEmpty || live {
-                    AgentHeader(record: record, copy: turn.answerMessages.map(\.text).joined(separator: "\n\n"),
+                    // A turn opens with its prompt, the first item of the run that answers it.
+                    AgentHeader(record: record,
+                                item: (turn.prompt ?? turn.work.first ?? turn.answer.first)?.id ?? .max,
+                                copy: turn.answerMessages.map(\.text).joined(separator: "\n\n"),
                                 hovering: hovering)
                         .padding(.top, metrics.points(4))
                 }
@@ -379,36 +382,6 @@ private struct UserBubble: View {
                 }
         }
         .onHover { hovering = $0 }
-    }
-}
-
-/// The session's harness, resolved model and applied effort.
-/// With a Copy button at the row's end for the message under it, shown while `hovering`.
-private struct AgentHeader: View {
-    @Environment(\.interfaceScale) private var metrics
-    @Environment(AppModel.self) private var model
-    let record: RunRecord
-    let copy: String
-    let hovering: Bool
-
-    var body: some View {
-        HStack(spacing: metrics.points(6)) {
-            HStack(spacing: metrics.points(6)) {
-                HarnessLogo(harness: record.harness)
-                Text(ModelLabel.name(record: record, models: model.settings.models))
-                if let effort = ModelLabel.effort(record) {
-                    Text(effort).foregroundStyle(Color.secondaryText)
-                }
-            }
-            .accessibilityElement(children: .combine)
-            if !copy.isEmpty {
-                Spacer(minLength: 0)
-                CopyButton(text: copy, help: "Copy Message")
-                    .foregroundStyle(Color.secondaryText)
-                    .opacity(hovering ? 1 : 0)
-            }
-        }
-        .font(model.chatText.small)
     }
 }
 

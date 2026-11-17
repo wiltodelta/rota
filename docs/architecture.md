@@ -1312,6 +1312,16 @@ clears reported values before querying the harness again. The composer prefers
 the reported model and applied effort. Codex sends its explicit turn effort on
 `turn/start`, so its adapter combines that override with the thread configuration
 before reporting it. These are configuration values, not per-turn execution telemetry.
+`Scheduler.configure` changes `model` and `effort` of an agent session between runs
+(`canConfigure`); the next continuation's `spec(for:)` carries them to every runner:
+Claude's `--model`/`--effort` beside `--resume`, Codex's `turn/start` fields, Antigravity's
+flags on resume, and for Grok, whose loaded session keeps its last model, a
+`session/set_config_option` with `configId: model` before the effort and the prompt
+(`~/.grok/docs/user-guide/15-agent-mode.md`, "Session config options"). Each report also
+carries `fromItem`, the run's first transcript item id, and becomes a
+`RunRecord.configurations` mark, so an answer's header shows its own run's model
+(`configuration(at:)`) and paged history needs no earlier items. A session from before
+marks were kept gets one at item 0 from its reported values when it is first reconfigured.
 Older records may recover a model from a bounded tail of Rota's readable headers;
 Claude sessions missing an effort snapshot can resolve the continuation configuration
 through a read-only control query. Unknown effort is left out of the label, never
@@ -1674,6 +1684,7 @@ service that may host somebody else's work.
 | Model and effort | native configuration | native configuration | native configuration | native model/options verified | native family/options verified | n/a |
 | Message while running | joins turn | terminal input | steer | queued prompt | queued prompt | Terminal |
 | Continue finished session | yes | yes | yes | yes | yes | n/a |
+| Next run on another model and effort | `--model`/`--effort` on resume | `--model`/`--effort` on resume | `turn/start` fields | `session/set_config_option` after load | flags on resume | n/a |
 | Restart with another agent | new session | new session | new session | new session | new session | discuss with an agent instead |
 | Stop and routine time limit | owned process tree | owned screen/tree | native turn confirmation | native prompt confirmation | owned process tree | owned screen/tree |
 | Native images | image blocks | file references | localImage | ACP image blocks | file references | n/a |
@@ -1724,7 +1735,11 @@ shell flag) go into the new session's `run-context.md` attachment, which also na
 `rota update` for changing the command once the user agrees, so the chat's first message
 is the user's own words with a one-line pointer on every harness, including those whose
 transcript comes from native history. `RunRecord.discussedSessionID` links the discussion
-back for `Scheduler.discussions(of:)` and the header's link to the Shell run. `SessionRestart.hitUsageLimit` recognizes common textual quota/rate-limit
+back for `Scheduler.discussions(of:)` and the header's link to the Shell run. Unlike a
+restart, a discussion runs on the model and effort chosen in the field
+(`AppSettings.discussionSetup`, kept per agent and validated against its current catalog),
+which reach the runner through `RunRecord.model`/`effort` like a routine's options.
+`SessionRestart.hitUsageLimit` recognizes common textual quota/rate-limit
 errors only in the latest turn's agent answer or error notes; it is a UI suggestion,
 not an automatic retry or a structured provider limit signal.
 `scripts/ui-check.sh --restart-only` exercises the choice, context transfer and
@@ -1732,7 +1747,12 @@ unchanged routine settings with a synthetic Antigravity process in both appearan
 
 Recovery submits no prompt. Codex loads all turn pages before following the
 active turn; Grok replays `session/load`, including its native running-prompt
-metadata and archived background activity. New Claude stream and Antigravity
+metadata and archived background activity. Only recovery takes a run's outcome from
+that replay: a continuation's replayed `turn_completed` belongs to an earlier prompt,
+and settling on it let a notification during model or effort configuration end the
+run unanswered (live, grok 2026-11-16). Grok answers `session/set_config_option` on a
+loaded session with a flat `config` map, and `config_option_update` may arrive first,
+so the runner checks its accumulated configuration, not the reply alone. New Claude stream and Antigravity
 runs persist a private stdout spool and process lease; the wrapper saves the
 actual exit code. Shell and terminal runs follow the existing screen and
 native archive. Process ownership includes kernel birth time, so stale leases

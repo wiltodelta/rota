@@ -73,7 +73,8 @@ struct ChatComposer: View {
         .onChange(of: model.keyboard.quickReply) { _, request in
             if let request { sendReply(request.reply) }
         }
-        .task(id: record.id) {
+        // A new model or effort for the next message resolves again.
+        .task(id: [record.id.uuidString, record.model ?? "", record.effort ?? ""]) {
             // Selecting another session keeps keyboard focus in the sidebar.
             resolvedConfiguration = nil
             legacyModel = nil
@@ -90,8 +91,9 @@ struct ChatComposer: View {
                 resolvedConfiguration = resolved?.session
                 resolvingConfiguration = false
             }
+            // Only a session from before configurations were kept needs its log's header.
             if record.reportedModel == nil, record.model == nil, resolvedConfiguration?.model == nil,
-               let path = record.logPath {
+               record.configurations == nil, let path = record.logPath {
                 legacyModel = await Task.detached {
                     SessionConfiguration.recordedModel(log: URL(fileURLWithPath: path))
                 }.value
@@ -119,23 +121,7 @@ struct ChatComposer: View {
                 .accessibilityIdentifier("composer")
             GlassControls(spacing: metrics.points(8)) {
                 HStack(spacing: metrics.points(8)) {
-                    HStack(spacing: metrics.points(6)) {
-                        HarnessLogo(harness: record.harness)
-                        Text(ModelLabel.model(record: record, models: model.settings.models,
-                                              fallback: resolvedConfiguration?.model ?? legacyModel))
-                            .truncationMode(.middle)
-                        if let effort = resolvingConfiguration ? "Resolving…"
-                            : ModelLabel.effort(record, fallback: resolvedConfiguration?.effort) {
-                            Text("·")
-                            Text(effort).fixedSize()
-                        }
-                    }
-                    .interfaceFont(.callout)
-                    .foregroundStyle(Color.secondaryText)
-                    .lineLimit(1)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("composerModel")
-                    .help("The model and reasoning effort for this session.")
+                    configuration
                     Spacer(minLength: 8)
                     if staging {
                         ProgressView().controlSize(.small).frame(width: metrics.points(28), height: metrics.points(28))
@@ -192,6 +178,52 @@ struct ChatComposer: View {
             addAttachments(urls)
             return true
         } isTargeted: { dropTargeted = $0 }
+    }
+
+    /// The model and effort: what the running session reported, else what the next message uses,
+    /// which a session between runs can change here.
+    @ViewBuilder
+    private var configuration: some View {
+        let setup = ModelSetup(record: record, settings: model.settings)
+        // The agent's default stands in only when no model was asked for.
+        let fallback = resolvedConfiguration?.model ?? legacyModel ?? (record.model == nil ? setup.selected?.id : nil)
+        let label = HStack(spacing: metrics.points(6)) {
+            HarnessLogo(harness: record.harness)
+            Text(ModelLabel.model(record: record, models: model.settings.models, fallback: fallback))
+                .truncationMode(.middle)
+            if let effort = resolvingConfiguration ? "Resolving…"
+                : ModelLabel.effort(record, fallback: resolvedConfiguration?.effort) {
+                Text("·")
+                Text(effort).fixedSize()
+            }
+        }
+        .interfaceFont(.callout)
+        .foregroundStyle(Color.secondaryText)
+        .lineLimit(1)
+        if model.scheduler.canConfigure(record) {
+            Menu {
+                ModelEffortChoices(setup: setup, identifier: "session") {
+                    model.scheduler.configure(record, model: $0, effort: $1)
+                }
+            } label: {
+                HStack(spacing: metrics.points(6)) {
+                    label
+                    Image(systemName: "chevron.down").interfaceSystemFont(size: 9, weight: .semibold)
+                        .foregroundStyle(Color.secondaryText)
+                }
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .help("The model and reasoning effort for the next message.")
+            .accessibilityLabel("Model")
+            .accessibilityIdentifier("composerModel")
+        } else {
+            label
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("composerModel")
+                .help("The model and reasoning effort for this session.")
+        }
     }
 
     private func chooseAttachments() {

@@ -63,27 +63,32 @@ struct ShellDiscussionComposer: View {
     }
 
     private func agentPicker(agent: Harness?, choices: [(harness: Harness, installed: Bool)]) -> some View {
-        Menu {
-            DiscussionAgentChoices(model: model, choices: choices, agent: agent)
+        let setup = agent.map(model.settings.discussionSetup(for:))
+        return Menu {
+            DiscussionChoices(model: model, choices: choices, agent: agent)
             Divider()
             Button("Agent Settings\u{2026}") { model.showSettings(.agents) }
                 .accessibilityIdentifier("discussionAgentSettings")
         } label: {
             HStack(spacing: metrics.points(6)) {
                 if let agent { HarnessLogo(harness: agent) }
-                Text(agent?.title ?? "No agent installed")
+                Text(agent?.title ?? "No agent installed").fixedSize()
+                if let setup {
+                    Text("\u{00B7}")
+                    Text(setup.summary).truncationMode(.middle)
+                }
                 Image(systemName: "chevron.down").interfaceSystemFont(size: 9, weight: .semibold)
             }
             .interfaceFont(.callout)
             .foregroundStyle(Color.secondaryText)
+            .lineLimit(1)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .fixedSize()
-        .help("The agent that answers. It uses its default model.")
+        .help("The agent that answers, its model and reasoning effort.")
         .accessibilityLabel("Agent")
-        .accessibilityValue(agent?.title ?? "None")
+        .accessibilityValue([agent?.title ?? "None", setup?.summary].compactMap { $0 }.joined(separator: ", "))
         .accessibilityIdentifier("discussionAgent")
     }
 
@@ -93,30 +98,11 @@ struct ShellDiscussionComposer: View {
         starting = true
         Task {
             defer { starting = false }
-            guard let next = await model.scheduler.discuss(record, with: agent, message: text) else { return }
+            let setup = model.settings.discussionSetup(for: agent)
+            guard let next = await model.scheduler.discuss(record, with: agent, model: setup.model,
+                                                           effort: setup.effort, message: text) else { return }
             model.sessionDrafts[record.id] = nil
             model.selection = .session(next.id)
-        }
-    }
-}
-
-/// The agents a Shell run can be discussed with, the chosen one checked; shared by the field's
-/// picker and Session > Ask Agent About Run. The model is passed in: the menu bar's commands
-/// have no `AppModel` in their environment, and reading it there traps.
-struct DiscussionAgentChoices: View {
-    let model: AppModel
-    let choices: [(harness: Harness, installed: Bool)]
-    let agent: Harness?
-    var picked: () -> Void = {}
-
-    var body: some View {
-        ForEach(choices, id: \.harness) { harness, installed in
-            Toggle(harness.title, isOn: Binding(get: { harness == agent }, set: { _ in
-                model.settings.discussionAgent = harness
-                picked()
-            }))
-            .disabled(!installed)
-            .accessibilityIdentifier("discussWith-\(harness.rawValue)")
         }
     }
 }
@@ -162,11 +148,5 @@ extension AppModel {
         Binding(get: { self.sessionDrafts[record.id] ?? "" }, set: { value in
             self.sessionDrafts[record.id] = value.isEmpty ? nil : value
         })
-    }
-
-    /// The remembered discussion agent while it is installed, else the first installed one.
-    func discussionAgent(in choices: [(harness: Harness, installed: Bool)]) -> Harness? {
-        choices.first { $0.harness == settings.discussionAgent && $0.installed }?.harness
-            ?? choices.first(where: \.installed)?.harness
     }
 }

@@ -24,7 +24,11 @@
   While resolution is pending it says "Resolving model…"; older sessions with no
   recoverable model say "Model unavailable". Model names match the routine pickers,
   routine details and session history; effort is shown separately. Model choices include their versions, and
-  unsupported or unavailable effort is labeled explicitly. Attach
+  unsupported or unavailable effort is labeled explicitly. Between runs the
+  footer is a menu (also Session > Model and Effort): pick another model and
+  effort from the lists the agent's CLI reports, and the next message continues
+  the same session on them, on every agent. Each answer keeps the label of the
+  model that wrote it. Attach
   files with the paperclip or by dropping them into the composer. Rota keeps
   copies with the session and sends their local paths for the agent to read;
   originals stay untouched. Quick replies above the field send a ready message in
@@ -71,8 +75,10 @@
     keeps a button for each discussion above its field. The agent checks before
     it changes anything, never reruns the command unless you ask, and changes the
     routine's command (with `rota update`) or the script it calls only once you
-    agree. It uses its default model. With no agent installed, the picker offers
-    Agent Settings.
+    agree. The same picker sets the agent's model and reasoning effort from the
+    lists its CLI reports, as in a routine; Rota remembers them per agent and
+    falls back to the agent's default when it stops offering a choice. With no
+    agent installed, the picker offers Agent Settings.
   A continued session runs again and appends to the same chat. Older conversations
   can continue while another session of the same routine runs. **Stop** in a
   session stops that session; the routine-level Stop action stops all its sessions.

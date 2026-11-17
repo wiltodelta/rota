@@ -121,11 +121,22 @@ struct SessionCommands: Commands {
                 }
             }
             .disabled(record.map { !$0.harness.isAgent || !model.scheduler.canRestart($0) } ?? true)
+            // The keyboard route to the field's model menu: the next message's model and effort.
+            Menu("Model and Effort") {
+                if let record, model.scheduler.canConfigure(record) {
+                    ModelEffortChoices(setup: ModelSetup(record: record, settings: model.settings),
+                                       identifier: "sessionMenu") {
+                        model.scheduler.configure(record, model: $0, effort: $1)
+                        model.keyboard.focusComposer()
+                    }
+                }
+            }
+            .disabled(record.map { !model.scheduler.canConfigure($0) } ?? true)
             // The keyboard route to a Shell session's agent picker: choose, then write in the field.
             Menu("Ask Agent About Run") {
                 if let record, model.scheduler.canDiscuss(record) {
                     let choices = model.restartChoices(for: record)
-                    DiscussionAgentChoices(model: model, choices: choices, agent: model.discussionAgent(in: choices),
+                    DiscussionChoices(model: model, choices: choices, agent: model.discussionAgent(in: choices),
                                            picked: model.keyboard.focusComposer)
                 }
             }

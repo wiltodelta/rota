@@ -97,9 +97,10 @@ fail() {
 }
 check() { if "$@" >/dev/null 2>&1; then pass "${*: -1}"; else fail "${*: -1}"; fi; }
 
+# `wait_value <id> <value> [attempts]`, 0.2 s apart.
 wait_value() {
     local actual attempt
-    for ((attempt = 0; attempt < 30; attempt++)); do
+    for ((attempt = 0; attempt < ${3:-30}; attempt++)); do
         if actual="$("$DRIVER" value "$1" 2>/dev/null)" && [[ "$actual" == "$2" ]]; then return 0; fi
         sleep 0.2
     done
@@ -1268,9 +1269,63 @@ only_antigravity() {
 
 # A finished Shell session's field asks an agent about the run: the picker, the message,
 # keyboard entry, the opened discussion, the link back and the state without any agent.
+# Opens the menus on the path to `item`, pressing each button in turn. A press can be lost (a system
+# banner over a fresh guest takes it, a capture that fits the window closes the menu), and pressing
+# the button of an open menu closes it: until `item` shows, close every menu and walk the path
+# again, at most three times.
+open_menu() {
+    local item="$1" attempt poll index
+    shift
+    local path=("$@" "$item")
+    for attempt in 1 2 3; do
+        "$DRIVER" exists "$item" && return 0
+        if (( attempt > 1 )); then "$DRIVER" key escape; "$DRIVER" key escape; sleep 0.3; fi
+        # A button whose next step already shows is open: pressing it again would close it.
+        for ((index = 0; index < $#; index++)); do
+            "$DRIVER" exists "${path[index + 1]}" && continue
+            for poll in {1..15}; do "$DRIVER" exists "${path[index]}" && break; sleep 0.2; done
+            "$DRIVER" press "${path[index]}" || true
+        done
+        for poll in {1..15}; do "$DRIVER" exists "$item" && return 0; sleep 0.2; done
+    done
+    fail "menu item did not appear: $item"
+}
+
+# Polls the synthetic discussion's record until `condition`, a Python expression over `new` (the
+# record) and `marks` (its configurations), holds; fails with `message` after `tries` reads.
+discussion_holds() {
+    local tries="$1" condition="$2" message="$3" attempt
+    for ((attempt = 0; attempt < tries; attempt++)); do
+        python3 - "$SUPPORT/runs/discuss-check.json" "$condition" <<'PYTHON' >/dev/null 2>&1 && return 0
+import json
+import sys
+new = next(row for row in json.load(open(sys.argv[1])) if row["harness"] == "antigravity")
+marks = new.get("configurations") or []
+assert eval("(" + sys.argv[2] + ")")
+PYTHON
+        sleep 0.3
+    done
+    fail "$message"
+}
+
 check_discussion() {
-    local appearance="$1" discussion_id pid
+    local appearance="$1" discussion_id pid effort_enabled key
+    # Each appearance starts from the agents' defaults; the choices persist by design.
+    for key in discussionAgent discussionModels discussionEfforts; do
+        defaults delete "$DOMAIN" "$key" >/dev/null 2>&1 || true
+    done
     write_synthetic_agent
+    # The synthetic agent lists the shared catalog fixture's models: Model A (Low, High; the
+    # default) and Fixed, whose effort cannot be set.
+    cp scripts/fixtures/antigravity-catalog.sh "$WORK/agy-catalog"
+    chmod +x "$WORK/agy-catalog"
+    cat > "$WORK/agy-discuss" <<AGENT
+#!/bin/bash
+[[ "\${1:-}" == models || ( "\${1:-}" == -p && "\${2:-}" == /* ) ]] && exec "$WORK/agy-catalog" "\$@"
+exec "$WORK/agy-restart" "\$@"
+AGENT
+    chmod +x "$WORK/agy-discuss"
+    only_antigravity "$WORK/agy-discuss"
     seed_restart_source discuss-check "Nightly backup" shell 3 \
         $'[you] ./synthetic-backup.sh\ncopied 12 files\ndisk full\n[result: failed with exit code 3 after 4 s]\n' \
         '{"prompt": "./synthetic-backup.sh"}'
@@ -1279,11 +1334,36 @@ check_discussion() {
     check wait_exists discussionAgent
     if "$DRIVER" exists restartSession; then fail "a Shell session offered Restart with"; fi
     capture "Nightly backup" "$appearance-discussion-empty"
-    "$DRIVER" press discussionAgent
-    check wait_exists discussWith-antigravity
+    open_menu discussWith-antigravity discussionAgent
     check "$DRIVER" exists discussionAgentSettings
     capture "Nightly backup" "$appearance-discussion-agents"
     "$DRIVER" press discussWith-antigravity
+    # Model and effort: Fixed disables the effort, Model A offers Low and High. The catalog
+    # loads in the background after agent discovery, so allow it a minute.
+    check wait_value discussionAgent 'Antigravity, Model A' 300
+    open_menu discussionModel-fixed discussionAgent discussionModelMenu
+    capture "Nightly backup" "$appearance-discussion-models"
+    open_menu discussionModel-fixed discussionAgent discussionModelMenu
+    "$DRIVER" press discussionModel-fixed
+    check wait_value discussionAgent 'Antigravity, Fixed'
+    # The open menu can rebuild or close between two AX reads, so open it and read until one answers.
+    effort_enabled=""
+    for _ in {1..20}; do
+        open_menu discussionEffortMenu discussionAgent
+        effort_enabled="$("$DRIVER" enabled discussionEffortMenu 2>/dev/null || true)"
+        [[ -n "$effort_enabled" ]] && break
+        sleep 0.2
+    done
+    [[ "$effort_enabled" == false ]] || fail "a fixed-effort model offers efforts: ${effort_enabled:-no item}"
+    open_menu discussionModel-model-a discussionAgent discussionModelMenu
+    "$DRIVER" press discussionModel-model-a
+    check wait_value discussionAgent 'Antigravity, Model A'
+    # The Effort item turns from a dimmed button back into a submenu: open it once it has.
+    open_menu discussionEffortMenu discussionAgent
+    sleep 0.5
+    open_menu discussionEffort-low discussionAgent discussionEffortMenu
+    "$DRIVER" press discussionEffort-low
+    check wait_value discussionAgent 'Antigravity, Model A · Low'
     # The Session menu's keyboard route to the picker.
     "$DRIVER" menu "Ask Agent About Run"
     "$DRIVER" key escape
@@ -1311,12 +1391,26 @@ check_discussion() {
     done
     [[ -n "$discussion_id" ]] || fail "Return started a discussion"
     check wait_value "sidebarPreview-$discussion_id" 'Continued the synthetic task.'
+    discussion_holds 1 'new.get("model") == "model-a" and new.get("effort") == "low"' \
+        "the discussion runs on the chosen model and effort"
     check wait_exists discussedSession
     check wait_exists attachment-run-context.md
     capture "Nightly backup" "$appearance-discussion-session"
     for _ in 1 2 3; do "$DRIVER" key command-plus; sleep 0.2; done
     capture "Nightly backup" "$appearance-discussion-session-zoom"
     "$DRIVER" key command-zero
+    # Between runs the footer picks the next message's model; each answer keeps its own label.
+    open_menu sessionModel-fixed composerModel sessionModelMenu
+    capture "Nightly backup" "$appearance-session-models"
+    open_menu sessionModel-fixed composerModel sessionModelMenu
+    "$DRIVER" press sessionModel-fixed
+    "$DRIVER" set composer 'And on the fixed model?'
+    "$DRIVER" focus composer
+    "$DRIVER" key return
+    discussion_holds 100 '"succeeded" in new["outcome"] and new.get("model") == "fixed" and len(marks) == 2
+        and marks[1]["model"].startswith("fixed") and not marks[0]["model"].startswith("fixed")' \
+        "the continued run's model is kept beside the first one's"
+    capture "Nightly backup" "$appearance-session-switched"
     # The discussion leads back to its Shell run.
     "$DRIVER" press discussedSession
     check wait_exists "shellDiscussion-$discussion_id"

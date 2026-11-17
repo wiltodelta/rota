@@ -64,6 +64,9 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
     public var reportedModel: String?
     public var reportedModelTitle: String?
     public var reportedEffort: String?
+    /// The configuration each run reported, keyed by its first transcript item, so earlier answers
+    /// keep their model after the session continues on another one.
+    public var configurations: [ConfigurationMark]?
     public var startedAt: Date
     public var endedAt: Date?
     /// Most recent conversation activity, independent of opening or reading the session.
@@ -151,5 +154,34 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
         self.endedAt = endedAt
         self.outcome = outcome
         self.logPath = logPath
+    }
+}
+
+/// A run's reported model and effort, from the transcript item `fromItem` on.
+public struct ConfigurationMark: Codable, Equatable, Sendable {
+    public var fromItem: Int
+    public var model: String?
+    public var modelTitle: String?
+    public var effort: String?
+}
+
+extension ConfigurationMark {
+    /// Whether answers under either mark carry the same label.
+    func labels(like other: ConfigurationMark) -> Bool {
+        model == other.model && modelTitle == other.modelTitle && effort == other.effort
+    }
+}
+
+extension RunRecord {
+    /// What the current run reported, as a mark from transcript item `start` on; a session from before
+    /// reports falls back to the model and effort it asked for.
+    func reportedMark(from start: Int) -> ConfigurationMark {
+        ConfigurationMark(fromItem: start, model: reportedModel ?? model, modelTitle: reportedModelTitle,
+                          effort: reportedEffort ?? effort)
+    }
+
+    /// The configuration the answer with transcript id `item` ran on; nil before any mark.
+    public func configuration(at item: Int) -> ConfigurationMark? {
+        configurations?.last { $0.fromItem <= item }
     }
 }

@@ -142,6 +142,61 @@ final class HarnessContractTests: XCTestCase {
         withExtendedLifetime(runner) {}
     }
 
+    /// Shapes from grok's live ACP stream (2026-11-16): `session/load` replays the earlier turn's end
+    /// and keeps the session's last model, `set_config_option` answers with `config`, and the applied
+    /// values arrive as `config_option_update`, with other notifications in between.
+    func testGrokContinuationSwitchesTheLoadedSessionToTheRequestedModelBeforePrompting() throws {
+        let log = try folder().appendingPathComponent("session.log")
+        let ended = expectation(description: "prompt on the switched model")
+        var steps: [String] = []
+        let journal = try journal(log, finished: {
+            XCTAssertEqual($0, .succeeded)
+            steps.append("finished")
+            ended.fulfill()
+        })
+        var spec = LaunchSpec(executable: "/bin/false", prompt: "Next", arguments: [],
+                              workingDirectory: log.deletingLastPathComponent().path, environment: [:],
+                              mode: .grokACP, timeout: nil, log: log, resume: "owned-session")
+        spec.model = "new-model"
+        spec.effort = "high"
+        let transport = HarnessPeer()
+        func update(_ value: [String: Any], xai: Bool = false) {
+            transport.deliver(["method": xai ? "_x.ai/session_notification" : "session/update",
+                               "params": ["sessionId": "owned-session", "update": value]])
+        }
+        func applied(_ model: String, _ effort: String) {
+            update(["sessionUpdate": "config_option_update", "configOptions": [
+                ["id": "model", "currentValue": model],
+                ["id": "reasoning_effort", "currentValue": effort, "options": [["value": "low"], ["value": "high"]]]]])
+        }
+        transport.receive = { request in
+            let params = request["params"] as? [String: Any]
+            switch request["method"] as? String {
+            case "initialize": transport.reply(request)
+            case "session/load":
+                transport.deliver(["method": "_x.ai/session/update", "params": ["sessionId": "owned-session",
+                    "update": ["sessionUpdate": "turn_completed", "prompt_id": "earlier", "stop_reason": "end_turn"]]])
+                transport.reply(request, result: ["sessionId": NSNull()])
+                applied("old-model", "low")
+            case "session/set_config_option":
+                let id = params?["configId"] as? String ?? ""
+                let value = params?["value"] as? String ?? ""
+                steps.append("\(id)=\(value)")
+                update(["sessionUpdate": "background_tasks", "tasks": [Any]()], xai: true)
+                applied("new-model", id == "model" ? "low" : value)
+                transport.reply(request, result: ["sessionId": NSNull(), "config": [id: value]])
+            case "session/prompt":
+                steps.append("prompt")
+                transport.reply(request, result: ["stopReason": "end_turn"])
+            default: break
+            }
+        }
+        let runner = GrokACPRun.start(spec, journal: journal, transport: transport)
+        wait(for: [ended], timeout: 2)
+        XCTAssertEqual(steps, ["model=new-model", "reasoning_effort=high", "prompt", "finished"])
+        withExtendedLifetime(runner) {}
+    }
+
     func testNativeImageInputsPreserveTheTextAndUseOnlyVerifiedImageFiles() throws {
         let directory = try folder()
         let png = directory.appendingPathComponent("pixel.png")

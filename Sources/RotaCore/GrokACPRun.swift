@@ -216,26 +216,47 @@ final class GrokACPRun: RunControl, @unchecked Sendable {
     private func sessionReady(_ id: String) {
         sessionID = id
         journal.session(id)
-        if let requested = spec.model, applied.model != requested {
+        applyModel(in: id)
+    }
+
+    /// A loaded session keeps the model it last ran on; a continuation asked to run on another
+    /// switches it with the standard ACP model option before the prompt.
+    private func applyModel(in id: String, switched: Bool = false) {
+        guard !journal.isFinished, stopReason == nil else { return }
+        guard let requested = spec.model, applied.model != requested else { return applyEffort(in: id) }
+        guard spec.resume != nil, !switched else {
             journal.finish(.launchFailed("Grok did not apply the requested model."))
             return disconnect()
         }
+        setOption("model", to: requested, in: id) { $0.applyModel(in: id, switched: true) }
+    }
+
+    private func applyEffort(in id: String) {
         guard let effort = spec.effort else { return beginPrompt(id) }
         guard effortOptions.contains(effort) else {
             journal.finish(.launchFailed("Grok does not advertise the requested effort for this model."))
             return disconnect()
         }
         // The shared leader can ignore the proxy's effort flag. Apply it to this session only.
-        peer?.request("session/set_config_option", ["sessionId": id, "configId": "reasoning_effort",
-                                                    "value": effort]) { [weak self] result in
-            guard let self else { return }
-            guard case .success(let value) = result else { return self.fail(result, "session/set_config_option") }
-            let applied = self.configure(value)
-            guard applied.effort == effort else {
-                self.journal.finish(.launchFailed("Grok did not apply the requested effort level."))
-                return self.disconnect()
+        setOption("reasoning_effort", to: effort, in: id) { run in
+            guard run.applied.effort == effort else {
+                run.journal.finish(.launchFailed("Grok did not apply the requested effort level."))
+                return run.disconnect()
             }
-            self.beginPrompt(id)
+            run.beginPrompt(id)
+        }
+    }
+
+    /// Sets one ACP session option. Updates may apply it before the reply, so `then` reads what
+    /// the session has now from `applied`, not from the reply alone.
+    private func setOption(_ option: String, to value: String, in id: String,
+                           then: @escaping (GrokACPRun) -> Void) {
+        peer?.request("session/set_config_option", ["sessionId": id, "configId": option,
+                                                    "value": value]) { [weak self] result in
+            guard let self else { return }
+            guard case .success(let reply) = result else { return self.fail(result, "session/set_config_option") }
+            self.configure(reply)
+            then(self)
         }
     }
 
@@ -394,7 +415,10 @@ private extension GrokACPRun {
             journal.endText()
             let update = params["update"] as? [String: Any]
             let outcome = GrokRecovery.outcome(update?["stop_reason"] as? String)
-            if routineOutcome == nil || outcome != .succeeded { routineOutcome = outcome }
+            // `session/load` replays earlier turns. Recovery reads its outcome from them, but a
+            // continuation's prompt has not gone out yet: settling it would let a notification
+            // during model or effort configuration end the run unanswered.
+            if !loading || spec.adopt, routineOutcome == nil || outcome != .succeeded { routineOutcome = outcome }
         }
         guard !loading else { return }
         finishIfIdle()

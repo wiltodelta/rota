@@ -36,6 +36,14 @@ final class AppSettings {
         didSet { defaults.set(discussionAgent.rawValue, forKey: "discussionAgent") }
     }
 
+    /// The model and reasoning effort chosen per agent for those discussions; none means its default.
+    var discussionModels: [Harness: String] {
+        didSet { defaults.set(Self.byName(discussionModels), forKey: "discussionModels") }
+    }
+    var discussionEfforts: [Harness: String] {
+        didSet { defaults.set(Self.byName(discussionEfforts), forKey: "discussionEfforts") }
+    }
+
     init(defaults: UserDefaults = .standard, refreshOnInit: Bool = true) {
         self.defaults = defaults
         notifyOnSuccess = defaults.bool(forKey: "notifyOnSuccess")
@@ -45,6 +53,8 @@ final class AppSettings {
         quickReplies = Self.storedReplies(defaults)
         discussionAgent = defaults.string(forKey: "discussionAgent").flatMap(Harness.init(rawValue:))
             .flatMap { $0.isAgent ? $0 : nil } ?? .claude
+        discussionModels = Self.byHarness(defaults.dictionary(forKey: "discussionModels"))
+        discussionEfforts = Self.byHarness(defaults.dictionary(forKey: "discussionEfforts"))
         if refreshOnInit { refreshInstalled() }
     }
 
@@ -117,5 +127,19 @@ final class AppSettings {
         }
         refreshing = refresh
         return refresh
+    }
+
+    private static func byName(_ values: [Harness: String]) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: values.map { ($0.key.rawValue, $0.value) })
+    }
+
+    private static func byHarness(_ stored: [String: Any]?) -> [Harness: String] {
+        var values: [Harness: String] = [:]
+        for (name, value) in stored ?? [:] {
+            if let harness = Harness(rawValue: name), harness.isAgent, let value = value as? String {
+                values[harness] = value
+            }
+        }
+        return values
     }
 }

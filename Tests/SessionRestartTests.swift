@@ -123,7 +123,8 @@ final class SessionRestartTests: XCTestCase {
         scheduler.saveRecord(shell)
         XCTAssertTrue(scheduler.canDiscuss(shell))
         XCTAssertFalse(scheduler.canDiscuss(try XCTUnwrap(source)))
-        let started = await scheduler.discuss(shell, with: .codex, message: "Why is the disk full?")
+        let started = await scheduler.discuss(shell, with: .codex, model: "codex-model", effort: "high",
+                                              message: "Why is the disk full?")
         let discussion = try XCTUnwrap(started)
         let spec = try XCTUnwrap(launcher.specs.last)
         XCTAssertEqual(launcher.specs.count, 1)
@@ -131,7 +132,10 @@ final class SessionRestartTests: XCTestCase {
         XCTAssertEqual(discussion.discussedSessionID, shell.id)
         XCTAssertEqual(scheduler.discussions(of: shell).map(\.id), [discussion.id])
         XCTAssertNil(discussion.originalRequest)
-        XCTAssertNil(spec.model)
+        XCTAssertEqual(spec.model, "codex-model")
+        XCTAssertEqual(spec.effort, "high")
+        XCTAssertEqual(discussion.model, "codex-model")
+        XCTAssertEqual(discussion.effort, "high")
         XCTAssertEqual(spec.workingDirectory, directory.path)
         // The chat shows the user's words; the run's context travels as an attached file.
         let message = ChatMessage.decode(spec.prompt)

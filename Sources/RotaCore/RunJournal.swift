@@ -17,6 +17,8 @@ final class RunJournal: @unchecked Sendable {
     private var transcript: TranscriptJournal?
     private let images: SessionImageStore?
     private var reportedConfiguration = SessionConfiguration()
+    /// The id this run's first transcript item takes; nil without a normalized journal.
+    private let runStartID: Int?
     private var sourceIDs: Set<String>
     private let sourceKey = "rota-journal-" + UUID().uuidString
 
@@ -34,6 +36,8 @@ final class RunJournal: @unchecked Sendable {
         self.images = images
         sourceIDs = transcript?.sourceIDs ?? []
         nativeItems = transcript?.nativeItems ?? [:]
+        runStartID = transcript?.nextID
+        reportedConfiguration.fromItem = runStartID
         if let item = transcript?.unfinished {
             pendingID = item.id
             pendingText = item.text

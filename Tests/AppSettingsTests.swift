@@ -53,6 +53,36 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(settings.models.values.allSatisfy { $0 == [current] })
         XCTAssertTrue(settings.loadingModels.isEmpty)
     }
+
+    func testDiscussionChoicesPersistPerAgentAndFallBackWhenTheCatalogDropsThem() async throws {
+        let suite = "rota-settings-test-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults, refreshOnInit: false)
+        settings.discussionModels[.codex] = "model-b"
+        settings.discussionEfforts[.codex] = "high"
+        // Before the catalog loads, the stored choice stands.
+        let unloaded = settings.discussionSetup(for: .codex)
+        XCTAssertEqual(unloaded.model, "model-b")
+        XCTAssertEqual(unloaded.effort, "high")
+        let reloaded = AppSettings(defaults: defaults, refreshOnInit: false)
+        XCTAssertEqual(reloaded.discussionModels, [.codex: "model-b"])
+        XCTAssertEqual(reloaded.discussionEfforts, [.codex: "high"])
+        let fallback = ModelOption(id: "model-a", title: "Model A", efforts: ["low"], isDefault: true)
+        let chosen = ModelOption(id: "model-b", title: "Model B", efforts: ["low", "high"])
+        await settings.refreshInstalled(discover: { [:] }, catalog: { _, _ in [fallback, chosen] }).value
+        let offered = settings.discussionSetup(for: .codex)
+        XCTAssertEqual(offered.model, "model-b")
+        XCTAssertEqual(offered.effort, "high")
+        XCTAssertEqual(offered.summary, "Model B \u{00B7} High")
+        // A model the agent no longer lists, and an effort its default lacks, fall back to defaults.
+        await settings.refreshInstalled(discover: { [:] }, catalog: { _, _ in [fallback] }).value
+        let dropped = settings.discussionSetup(for: .codex)
+        XCTAssertNil(dropped.model)
+        XCTAssertNil(dropped.effort)
+        XCTAssertEqual(dropped.selected, fallback)
+        XCTAssertEqual(dropped.summary, "Model A")
+    }
 }
 
 private actor CatalogGate {
