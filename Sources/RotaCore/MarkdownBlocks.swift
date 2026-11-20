@@ -27,24 +27,67 @@ public enum MarkdownBlock: Equatable, Sendable {
     case code(String, language: String? = nil)
     case paragraph(String)
     case table(MarkdownTable)
+    case blockquote(String)
+    case thematicBreak
 
     public static func parse(_ text: String) -> [MarkdownBlock] {
-        var blocks: [MarkdownBlock] = []
-        var paragraph: [String] = []
-        var code: [String]?
-        var language: String?
-
-        func flush() {
-            if !paragraph.isEmpty { blocks.append(.paragraph(paragraph.joined(separator: "\n"))) }
-            paragraph = []
-        }
-
+        var state = ParserState()
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var index = 0
         while index < lines.count {
+            state.consume(lines: lines, index: &index)
+            index += 1
+        }
+        state.finish()
+        return state.blocks
+    }
+
+    private struct ParserState {
+        var blocks: [MarkdownBlock] = []
+        var paragraph: [String] = []
+        var quote: [String] = []
+        var code: [String]?
+        var language: String?
+
+        mutating func flush() {
+            if !paragraph.isEmpty { blocks.append(.paragraph(paragraph.joined(separator: "\n"))) }
+            paragraph = []
+            if !quote.isEmpty { blocks.append(.blockquote(quote.joined(separator: "\n"))) }
+            quote = []
+        }
+
+        mutating func finish() {
+            // An unclosed fence still shows its code.
+            if let open = code { blocks.append(.code(open.joined(separator: "\n"), language: language)) }
+            flush()
+        }
+
+        mutating func consume(lines: [String], index: inout Int) {
             let line = lines[index]
-            defer { index += 1 }
             let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if consumeFence(line: line, trimmed: trimmed) { return }
+            if let quoted = MarkdownBlock.blockquoteLine(line) {
+                if !paragraph.isEmpty { flush() }
+                quote.append(quoted)
+                return
+            }
+            if !quote.isEmpty { flush() }
+            if let table = MarkdownTable.parse(lines, index: &index) {
+                flush()
+                blocks.append(.table(table))
+            } else if trimmed.isEmpty {
+                flush()
+            } else if paragraph.isEmpty, MarkdownBlock.isThematicBreak(line) {
+                blocks.append(.thematicBreak)
+            } else if let block = MarkdownBlock.heading(trimmed) ?? MarkdownBlock.listItem(line) {
+                flush()
+                blocks.append(block)
+            } else {
+                paragraph.append(line)
+            }
+        }
+
+        private mutating func consumeFence(line: String, trimmed: String) -> Bool {
             if trimmed.hasPrefix("```") {
                 if let open = code {
                     blocks.append(.code(open.joined(separator: "\n"), language: language))
@@ -55,33 +98,66 @@ public enum MarkdownBlock: Equatable, Sendable {
                     let info = trimmed.dropFirst(3).split(separator: " ").first.map(String.init) ?? ""
                     language = info.isEmpty ? nil : info
                 }
-                continue
+                return true
             }
             if code != nil {
                 code?.append(line)
-                continue
+                return true
             }
-            if let table = MarkdownTable.parse(lines, index: &index) {
-                flush()
-                blocks.append(.table(table))
-                continue
-            }
-            if trimmed.isEmpty {
-                flush()
-            } else if let heading = Self.heading(trimmed) {
-                flush()
-                blocks.append(heading)
-            } else if let item = Self.listItem(line) {
-                flush()
-                blocks.append(item)
-            } else {
-                paragraph.append(line)
+            return false
+        }
+    }
+
+    static func blockquoteLine(_ line: String) -> String? {
+        let spaces = line.prefix { $0 == " " }.count
+        guard spaces <= 3 else { return nil }
+        let rest = line.dropFirst(spaces)
+        guard rest.first == ">" else { return nil }
+        let after = rest.dropFirst()
+        if after.isEmpty { return "" }
+        guard after.first == " " else { return nil }
+        return String(after.dropFirst())
+    }
+
+    static func isThematicBreak(_ line: String) -> Bool {
+        let spaces = line.prefix { $0 == " " }.count
+        guard spaces <= 3 else { return false }
+        let rest = line.dropFirst(spaces)
+        guard let marker = rest.first, marker == "-" || marker == "*" || marker == "_" else { return false }
+        var count = 0
+        for char in rest {
+            if char == marker {
+                count += 1
+            } else if char != " " && char != "\t" {
+                return false
             }
         }
-        // An unclosed fence still shows its code.
-        if let open = code { blocks.append(.code(open.joined(separator: "\n"), language: language)) }
-        flush()
-        return blocks
+        return count >= 3
+    }
+
+    /// GitHub-flavored alert marker on the opening line of a blockquote.
+    public enum Alert: String, Equatable, Sendable {
+        case note, tip, important, warning, caution
+
+        public var title: String { rawValue.capitalized }
+
+        public static func extract(_ raw: String) -> (Alert?, String) {
+            let firstEnd = raw.firstIndex(of: "\n") ?? raw.endIndex
+            let first = raw[..<firstEnd].trimmingCharacters(in: .whitespaces)
+            let kind: Alert?
+            switch first.uppercased() {
+            case "[!NOTE]": kind = .note
+            case "[!TIP]": kind = .tip
+            case "[!IMPORTANT]": kind = .important
+            case "[!WARNING]": kind = .warning
+            case "[!CAUTION]": kind = .caution
+            default: kind = nil
+            }
+            guard let kind else { return (nil, raw) }
+            guard firstEnd < raw.endIndex else { return (kind, "") }
+            let rest = raw[raw.index(after: firstEnd)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            return (kind, rest)
+        }
     }
 
     static func heading(_ line: String) -> MarkdownBlock? {

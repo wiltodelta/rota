@@ -110,9 +110,15 @@ entry matching the run outcome into one footer with the completion time, result,
 repeat the status as a transcript row or offer a bulk Copy action. Earlier status
 entries from continued runs remain in order, and a missing final status uses the
 run record outcome. Legacy sessions share the footer without Copy. Normalized entries render
-in their recorded order with stable IDs and SwiftUI scroll targets. Adjacent tool
-calls and their intervening output form a collapsed group labeled with the number
-of loaded calls, including a single call. Expanding reveals complete, selectable
+in their recorded order with stable IDs and SwiftUI scroll targets, except that
+Antigravity's same-step archived reasoning (`antigravity/<session>/<step>/thinking`),
+which arrives after its completed streamed response (`.../text`), aligns immediately
+before that response in the view projection. Adjacent tool
+calls and their intervening output form a collapsed group labeled with a `ToolStep`
+summary (or the single call's concise title), and saved `<tool> { ... }` JSON titles
+present a one-line summary with an optional `Parameters` disclosure. Runs of three
+or more consecutive reasoning and tool-group rows fold into a single `WorkChainView`
+summary row while leaving one or two step rows directly accessible. Expanding reveals complete, selectable
 titles and output in order, with wrapping. Standalone output stays visible.
 Agent text, errors and other kinds end the group and stay visible. This is a view projection over the existing items, not a journal change.
 Expansion belongs to the session view and survives live appends. Paging preserves

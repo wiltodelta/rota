@@ -112,6 +112,150 @@ enum WorkRow: Identifiable {
         if !calls.isEmpty { rows.append(.tools(calls)) }
         return rows
     }
+
+    var isStepWork: Bool {
+        switch self {
+        case .tools: return true
+        case .note(let item): return item.kind == .reasoning
+        }
+    }
+}
+
+/// Collapses multi-cycle runs of reasoning and tool groups (`>= 3` work rows) into
+/// one quiet disclosure row, while leaving 1-2 step rows directly accessible.
+enum ChatRow: Identifiable {
+    case single(WorkRow)
+    case workChain([WorkRow])
+
+    var id: Int {
+        switch self {
+        case .single(let row): return row.id
+        case .workChain(let rows): return rows.first?.id ?? -1
+        }
+    }
+
+    var items: [TranscriptItem] {
+        switch self {
+        case .single(let row): return row.items
+        case .workChain(let rows): return rows.flatMap(\.items)
+        }
+    }
+
+    var isStepWork: Bool {
+        switch self {
+        case .single(let row): return row.isStepWork
+        case .workChain: return true
+        }
+    }
+
+    static func visibleID(for id: Int, in rows: [ChatRow]) -> Int {
+        rows.first { $0.containsItem(id: id) }?.id ?? id
+    }
+
+    private func containsItem(id: Int) -> Bool {
+        switch self {
+        case .single(let row): return row.items.contains { $0.id == id }
+        case .workChain(let rows): return rows.contains { $0.items.contains { $0.id == id } }
+        }
+    }
+
+    static func group(_ items: [TranscriptItem]) -> [ChatRow] {
+        let base = WorkRow.group(TranscriptOrder.alignSameStepReasoning(items))
+        var result: [ChatRow] = []
+        var run: [WorkRow] = []
+        func flush() {
+            if run.count >= 3 {
+                result.append(.workChain(run))
+            } else {
+                result.append(contentsOf: run.map(ChatRow.single))
+            }
+            run = []
+        }
+        for row in base {
+            if row.isStepWork {
+                run.append(row)
+            } else {
+                flush()
+                result.append(.single(row))
+            }
+        }
+        flush()
+        return result
+    }
+
+    static func chainSummary(_ rows: [WorkRow]) -> (symbol: String, title: String) {
+        var toolLines: [String] = []
+        var thoughts = 0
+        for row in rows {
+            for item in row.items {
+                if item.kind == .tool { toolLines.append(item.text) }
+                if item.kind == .reasoning { thoughts += 1 }
+            }
+        }
+        let symbol = toolLines.isEmpty ? "ellipsis.bubble" : ToolStep.dominant(toolLines).symbol
+        var parts: [String] = []
+        if !toolLines.isEmpty { parts.append(ToolStep.summary(toolLines).capitalizedFirst) }
+        if thoughts > 0 { parts.append(thoughts == 1 ? "1 reasoning step" : "\(thoughts) reasoning steps") }
+        return (symbol, parts.joined(separator: " \u{00B7} "))
+    }
+}
+
+extension Binding where Value == Set<Int> {
+    @MainActor
+    func groupExpansion(id: Int, memberIDs: [Int], willToggle: @escaping () -> Void) -> Binding<Bool> {
+        Binding<Bool>(
+            get: { memberIDs.contains { wrappedValue.contains($0) } },
+            set: { open in
+                willToggle()
+                if open { wrappedValue.insert(id) } else { wrappedValue.subtract(memberIDs) }
+            })
+    }
+}
+
+struct WorkChainView: View {
+    @Environment(\.interfaceScale) private var metrics
+    @Environment(AppModel.self) private var model
+    let id: Int
+    let rows: [WorkRow]
+    @Binding var expanded: Bool
+    @Binding var expandedTools: Set<Int>
+    let viewport: TranscriptViewport
+    var willToggle: (Int) -> Void = { _ in }
+
+    var body: some View {
+        let summary = ChatRow.chainSummary(rows)
+        VStack(alignment: .leading, spacing: metrics.points(8)) {
+            StepDisclosureButton(symbol: summary.symbol, title: summary.title, expanded: $expanded)
+                .font(model.chatText.small)
+                .foregroundStyle(Color.secondaryText)
+                .accessibilityIdentifier("workChain-\(id)")
+                .help(expanded ? "Hide the steps" : "Show the steps")
+            if expanded {
+                VStack(alignment: .leading, spacing: metrics.points(8)) {
+                    ForEach(rows) { subRow in
+                        Group {
+                            switch subRow {
+                            case .note(let item):
+                                ReasoningView(text: item.text, willToggle: { willToggle(subRow.id) })
+                            case .tools(let calls):
+                                ToolCallsView(calls: calls, expanded: $expandedTools.groupExpansion(
+                                    id: subRow.id, memberIDs: calls.map(\.id),
+                                    willToggle: { willToggle(subRow.id) }))
+                            }
+                        }
+                        .background {
+                            if subRow.id != id { TranscriptMarker(id: subRow.id, viewport: viewport) }
+                        }
+                    }
+                }
+                .padding(.leading, metrics.points(14))
+                .overlay(alignment: .leading) {
+                    Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1)
+                        .padding(.leading, metrics.points(5))
+                }
+            }
+        }
+    }
 }
 
 /// Calls in a row: one call as itself, several as what they did, unfolding into each call.
@@ -159,13 +303,12 @@ private struct ToolRunRow: View {
     }
 
     private func header(_ lines: [String]) -> some View {
-        HStack(spacing: metrics.points(6)) {
-            let kind = lines.count == 1 ? ToolStep.kind(of: lines[0]) : ToolStep.dominant(lines)
-            Image(systemName: kind.symbol)
+        let desc = ToolCallsView.descriptor(lines, live: live)
+        return HStack(spacing: metrics.points(6)) {
+            Image(systemName: desc.symbol)
                 .frame(width: metrics.points(14))
-            let change = lines.count == 1 ? FileChangeTitle.title(lines[0], live: live) : nil
-            Text(change ?? (lines.count == 1 ? lines[0] : ToolStep.summary(lines).capitalizedFirst))
-                .font(lines.count == 1 && change == nil ? model.chatText.smallCode : model.chatText.small)
+            Text(desc.title)
+                .font(desc.isCode ? model.chatText.smallCode : model.chatText.small)
                 .shimmering(live)
                 .lineLimit(1)
                 .truncationMode(.tail)

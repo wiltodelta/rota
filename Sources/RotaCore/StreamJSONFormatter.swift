@@ -65,22 +65,12 @@ public enum StreamJSONFormatter {
                     return TranscriptItem(id: index, kind: .plan, text: PlanStep.body(steps))
                 }
                 return TranscriptItem(id: index, kind: .tool,
-                                      text: (item["name"] as? String ?? "tool") + toolDetail(item["input"]))
+                                      text: ToolStep.formatCall(item["name"] as? String ?? "tool",
+                                                                parameters: item["input"]))
             default:
                 return nil
             }
         }
-    }
-
-    private static func toolDetail(_ input: Any?) -> String {
-        guard let input = input as? [String: Any] else { return "" }
-        for key in ["command", "file_path", "url", "pattern", "skill", "description"] {
-            if let value = input[key] as? String {
-                let flat = value.replacingOccurrences(of: "\n", with: " ")
-                return " " + (flat.count > 160 ? String(flat.prefix(160)) + "..." : flat)
-            }
-        }
-        return ""
     }
 
     private static func resultText(_ event: [String: Any]) -> String {

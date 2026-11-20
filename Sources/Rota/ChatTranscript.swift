@@ -19,6 +19,7 @@ struct ChatTranscript: View {
     var questionRevealRequest = 0
     var submitAnswer: ((QuestionAnswer) throws -> Void)?
     @State private var expandedTools: Set<Int> = []
+    @State private var expandedChains: Set<Int> = []
     @State private var scroll = TranscriptScrollState()
     @State private var viewport = TranscriptViewport()
     @State private var pageAnchor: TranscriptViewport.Anchor?
@@ -33,7 +34,9 @@ struct ChatTranscript: View {
 
     var body: some View {
         let turns = structured ? [] : TranscriptTurn.group(items)
-        let rows = structured ? WorkRow.group(items) : []
+        // The last status belongs to the footer, not a second transcript row.
+        let visibleItems = structured && closingNote != nil ? Array(items.dropLast()) : items
+        let rows = structured ? ChatRow.group(visibleItems) : []
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 0) {
@@ -52,29 +55,14 @@ struct ChatTranscript: View {
                             .accessibilityIdentifier("loadEarlierMessages")
                         }
                         if structured {
-                            // The last status belongs to the footer, not a second transcript row.
-                            ForEach(rows.dropLast(closingNote == nil ? 0 : 1)) { row in
-                                VStack(alignment: .leading, spacing: 0) {
-                                    switch row {
-                                    case .note(let item):
-                                        // A container, so a table or link inside keeps its own identifier.
-                                        TranscriptRow(item: item, record: record,
-                                                      willToggle: { prepareDisclosure(id: row.id) })
-                                            .accessibilityElement(children: .contain)
-                                            .accessibilityIdentifier("transcriptItem-\(item.id)")
-                                    case .tools(let calls):
-                                        ToolCallsView(calls: calls, expanded: Binding(
-                                            get: { calls.contains { expandedTools.contains($0.id) } },
-                                            set: { expanded in
-                                                prepareDisclosure(id: row.id)
-                                                if expanded { expandedTools.insert(row.id) } else {
-                                                    expandedTools.subtract(calls.map(\.id))
-                                                }
-                                            }))
-                                    }
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                                    let tight = index > 0 && rows[index - 1].isStepWork && row.isStepWork
+                                    structuredRow(row)
+                                        .id(row.id)
+                                        .background(TranscriptMarker(id: row.id, viewport: viewport))
+                                        .padding(.top, index == 0 ? 0 : metrics.points(tight ? 8 : 22))
                                 }
-                                .id(row.id)
-                                .background(TranscriptMarker(id: row.id, viewport: viewport))
                             }
                             if working {
                                 WorkingLabel(since: model.scheduler.runStartedAt(record))
@@ -167,7 +155,7 @@ struct ChatTranscript: View {
                 guard !scroll.following, !viewport.isFollowingEnd else { return }
                 if let anchor = pageAnchor {
                     // Find the old row after a prepend, then restore its pixel offset.
-                    let mapped = TranscriptViewport.Anchor(id: WorkRow.visibleID(for: anchor.id, in: rows),
+                    let mapped = TranscriptViewport.Anchor(id: ChatRow.visibleID(for: anchor.id, in: rows),
                                                            offset: anchor.offset, point: anchor.point)
                     proxy.scrollTo(mapped.id, anchor: mapped.point)
                     viewport.restoreAfterLayout(mapped)
@@ -213,6 +201,33 @@ struct ChatTranscript: View {
         }
         .environment(\.sessionLogURL, record.logPath.map { URL(fileURLWithPath: $0) })
         .background(Color(nsColor: .textBackgroundColor))
+    }
+
+    @ViewBuilder
+    private func structuredRow(_ row: ChatRow) -> some View {
+        switch row {
+        case .single(.note(let item)):
+            // A container, so a table or link inside keeps its own identifier.
+            TranscriptRow(item: item, record: record, willToggle: { prepareDisclosure(id: row.id) })
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("transcriptItem-\(item.id)")
+        case .single(.tools(let calls)):
+            ToolCallsView(calls: calls, expanded: $expandedTools.groupExpansion(
+                id: row.id, memberIDs: calls.map(\.id), willToggle: { prepareDisclosure(id: row.id) }))
+        case .workChain(let chain):
+            let memberIDs = chain.flatMap { $0.items.map(\.id) }
+            WorkChainView(id: row.id, rows: chain, expanded: Binding(
+                get: { memberIDs.contains { expandedChains.contains($0) || expandedTools.contains($0) } },
+                set: { expanded in
+                    prepareDisclosure(id: row.id)
+                    if expanded {
+                        expandedChains.insert(row.id)
+                    } else {
+                        expandedChains.subtract(memberIDs)
+                        expandedTools.subtract(memberIDs)
+                    }
+                }), expandedTools: $expandedTools, viewport: viewport, willToggle: { prepareDisclosure(id: $0) })
+        }
     }
 
     private func prepareDisclosure(id: Int) {

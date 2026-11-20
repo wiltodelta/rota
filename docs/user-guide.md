@@ -38,8 +38,9 @@
   Settings > Chat > Quick Replies edits, removes and adds them, and
   Restore Default Replies brings back a removed default. Session > Quick Replies
   sends the first nine with Option-Command-1 to Option-Command-9. The chat follows the session unless you
-  scroll up. Adjacent tool calls stay collapsed behind a count; expand them
-  to read the full commands. Code blocks name their language and copy in one click.
+  scroll up. Adjacent tool calls stay collapsed behind a summary, and longer multi-step
+  runs of reasoning and tool activity fold into one work disclosure; expand them
+  to read the full steps and commands. Code blocks name their language and copy in one click.
   Select any part of a message by dragging across its paragraphs and lists;
   hover a message for a Copy button that copies the whole of it.
 - **Keep talking to a session, on every agent, while it works or after.** The

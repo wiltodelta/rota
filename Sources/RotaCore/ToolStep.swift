@@ -12,15 +12,17 @@ public enum ToolStep: String, CaseIterable, Sendable {
         if line.hasPrefix("$ ") { return .execute }
         let name = (line.split(separator: " ").first.map(String.init) ?? line).lowercased()
         switch name {
-        case "bash", "run_terminal_command", "shell", "exec_command", "bashoutput", "killshell":
+        case "bash", "run_command", "run_terminal_command", "shell", "exec_command", "bashoutput", "killshell":
             return .execute
-        case "read", "read_file", "view", "notebookread":
+        case "read", "read_file", "read_resource", "view", "notebookread":
             return .read
-        case "edit", "multiedit", "write", "notebookedit", "search_replace", "write_file", "create_file":
+        case "edit", "edit_file", "multiedit", "write", "notebookedit",
+             "search_replace", "write_file", "create_file":
             return .edit
-        case "grep", "glob", "ls", "list_dir", "toolsearch", "search", "grep_search", "file_search":
+        case "grep", "glob", "ls", "list_dir", "list_resources", "find_by_name",
+             "toolsearch", "search", "grep_search", "file_search":
             return .search
-        case "webfetch", "web_fetch", "websearch", "web_search":
+        case "webfetch", "web_fetch", "websearch", "web_search", "search_web", "read_url_content":
             return .fetch
         default:
             return line.lowercased().hasPrefix("edit files") ? .edit : .other
@@ -56,5 +58,49 @@ public enum ToolStep: String, CaseIterable, Sendable {
         case .fetch: return "fetched \(count) \(many ? "pages" : "page")"
         case .other: return "used \(count) \(many ? "tools" : "tool")"
         }
+    }
+
+    /// A one-line summary for known scalar inputs; unfamiliar tools keep their bare name.
+    public static func formatCall(_ name: String, parameters: Any?) -> String {
+        guard let input = parameters as? [String: Any] else { return name }
+        if let server = input["ServerName"] as? String, !server.isEmpty,
+           let tool = input["ToolName"] as? String, !tool.isEmpty {
+            return "\(name) \(server)/\(tool)"
+        }
+        let keys = ["CommandLine", "command", "Path", "file_path", "url",
+                    "query", "pattern", "skill", "description", "Action", "Role", "TypeName", "Recipient"]
+        for key in keys {
+            guard let raw = input[key] as? String else { continue }
+            let flat = raw.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !flat.isEmpty else { continue }
+            let clipped = flat.count > 160 ? String(flat.prefix(160)) + "..." : flat
+            return "\(name) \(clipped)"
+        }
+        return name
+    }
+
+    /// Extracts a one-line title from `<tool> {...}` entries without serializing pretty JSON.
+    public static func callTitle(_ raw: String) -> String {
+        guard let (name, object) = splitJSONCall(raw) else { return raw }
+        return formatCall(name, parameters: object)
+    }
+
+    /// Formats `<tool> {...}` entries as a one-line title while keeping full unescaped
+    /// JSON parameters available for optional inspection.
+    public static func presentCall(_ raw: String) -> (title: String, parameters: String?) {
+        guard let (name, object) = splitJSONCall(raw) else { return (raw, nil) }
+        let formatted = QuestionRequest.json(object)
+        return (formatCall(name, parameters: object), formatted.isEmpty ? nil : formatted)
+    }
+
+    private static func splitJSONCall(_ raw: String) -> (String, [String: Any])? {
+        guard !raw.hasPrefix("$ "), let split = raw.range(of: " {") else { return nil }
+        let name = String(raw[..<split.lowerBound])
+        guard !name.isEmpty, !name.contains(where: \.isWhitespace) else { return nil }
+        let jsonPart = String(raw[raw.index(after: split.lowerBound)...])
+        guard let object = (try? JSONSerialization.jsonObject(with: Data(jsonPart.utf8))) as? [String: Any] else {
+            return nil
+        }
+        return (name, object)
     }
 }

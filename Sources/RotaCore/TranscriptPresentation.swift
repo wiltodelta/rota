@@ -41,3 +41,43 @@ extension TranscriptItem {
         return item
     }
 }
+
+/// Pure display ordering that never rewrites journal entries or alters their IDs.
+public enum TranscriptOrder {
+    /// Antigravity flushes a step's archived thinking when the response completes,
+    /// after its streamed text. Pair Rota's own step IDs so thinking precedes its reply.
+    public static func alignSameStepReasoning(_ items: [TranscriptItem]) -> [TranscriptItem] {
+        var result = items
+        var index = 0
+        while index < result.count {
+            guard let stem = antigravityTextStem(result[index]),
+                  let match = matchingThinkingIndex(stem: stem, after: index, in: result) else {
+                index += 1
+                continue
+            }
+            let thinking = result[match]
+            for pos in stride(from: match, to: index, by: -1) {
+                result[pos] = result[pos - 1]
+            }
+            result[index] = thinking
+            index += 2
+        }
+        return result
+    }
+
+    private static func antigravityTextStem(_ item: TranscriptItem) -> String? {
+        guard item.kind == .agent, item.isComplete, let id = item.nativeID,
+              id.hasPrefix("antigravity/"), id.hasSuffix("/text") else { return nil }
+        return String(id.dropLast("/text".count))
+    }
+
+    private static func matchingThinkingIndex(stem: String, after start: Int, in items: [TranscriptItem]) -> Int? {
+        let target = stem + "/thinking"
+        for candidate in (start + 1)..<items.count {
+            let kind = items[candidate].kind
+            if kind == .user || kind == .agent { return nil }
+            if kind == .reasoning, items[candidate].nativeID == target { return candidate }
+        }
+        return nil
+    }
+}

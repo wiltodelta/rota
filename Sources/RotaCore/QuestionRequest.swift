@@ -227,7 +227,8 @@ struct QuestionRequest {
     static func json(_ value: Any) -> String {
         guard
             let data = try? JSONSerialization.data(
-                withJSONObject: value, options: [.prettyPrinted, .sortedKeys, .fragmentsAllowed])
+                withJSONObject: value,
+                options: [.prettyPrinted, .sortedKeys, .fragmentsAllowed, .withoutEscapingSlashes])
         else { return "" }
         return lossyUTF8(data)
     }

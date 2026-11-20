@@ -40,7 +40,8 @@ public struct MarkdownImageReference: Equatable, Sendable {
             switch block {
             case .paragraph(let text), .heading(_, let text), .listItem(_, let text, _): source = text
             case .table(let table): source = (table.headers + table.rows.flatMap { $0 }).joined(separator: "\n")
-            case .code: return []
+            case .blockquote(let text): return references(in: MarkdownBlock.parse(text))
+            case .code, .thematicBreak: return []
             }
             return content(source).compactMap { if case .image(let ref) = $0 { ref } else { nil } }
         }

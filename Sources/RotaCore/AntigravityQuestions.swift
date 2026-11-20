@@ -59,24 +59,27 @@ struct AntigravityQuestionArchive {
     private var offset: UInt64 = 0
     private var pending = Data()
     private var seen = Set<String>()
-    private var reasoningSteps = Set<Int>()
-    private struct Reasoning {
+    private struct IndexedEntry {
         let step: Int
         let id: String
         let text: String
     }
-    private var reasoning: [Reasoning] = []
-    private var errors: [(String, String)] = []
+    private var reasoning: [IndexedEntry] = []
+    private var errors: [IndexedEntry] = []
     private(set) var lastErrorStep: Int?
 
-    mutating func takeErrors() -> [(String, String)] {
-        defer { errors = [] }
-        return errors
+    mutating func takeErrors(through step: Int? = nil) -> [(String, String)] {
+        Self.take(&errors, through: step)
     }
 
     mutating func takeReasoning(through step: Int? = nil) -> [(String, String)] {
-        let ready = reasoning.filter { $0.step <= (step ?? Int.max) }
-        reasoning.removeAll { $0.step <= (step ?? Int.max) }
+        Self.take(&reasoning, through: step)
+    }
+
+    private static func take(_ entries: inout [IndexedEntry], through step: Int?) -> [(String, String)] {
+        let limit = step ?? Int.max
+        let ready = entries.filter { $0.step <= limit }
+        entries.removeAll { $0.step <= limit }
         return ready.map { ($0.id, $0.text) }
     }
 
@@ -140,11 +143,14 @@ struct AntigravityQuestionArchive {
             lastErrorStep = max(lastErrorStep ?? step, step)
             let id = "antigravity/\(session)/\(step)/error"
             if let text = AntigravityTranscript.errorText(row),
-               !text.isEmpty, seen.insert(id).inserted { errors.append((id, text)) }
+               !text.isEmpty, seen.insert(id).inserted {
+                errors.append(IndexedEntry(step: step, id: id, text: text))
+            }
         }
         guard row["type"] as? String == "PLANNER_RESPONSE" else { return [] }
-        if let text = row["thinking"] as? String, !text.isEmpty, reasoningSteps.insert(step).inserted {
-            reasoning.append(Reasoning(step: step, id: "antigravity/\(session)/\(step)/thinking", text: text))
+        let thinkingID = "antigravity/\(session)/\(step)/thinking"
+        if let text = row["thinking"] as? String, !text.isEmpty, seen.insert(thinkingID).inserted {
+            reasoning.append(IndexedEntry(step: step, id: thinkingID, text: text))
         }
         let calls = row["tool_calls"] as? [[String: Any]] ?? []
         return calls.enumerated().compactMap { index, call in

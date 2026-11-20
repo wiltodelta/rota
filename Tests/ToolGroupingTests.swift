@@ -122,4 +122,47 @@ final class ToolGroupingTests: XCTestCase {
             try TranscriptJournalTests.exportFixture(log: log, to: URL(fileURLWithPath: destination))
         }
     }
+
+    func testMultiCycleWorkChainsFoldWhileShortPairsAndNoticesStayDirect() {
+        let short = [
+            TranscriptItem(id: 0, kind: .reasoning, text: "First thought"),
+            TranscriptItem(id: 1, kind: .tool, text: "read_file /tmp/a.txt"),
+            TranscriptItem(id: 2, kind: .status, text: "Verification notice"),
+            TranscriptItem(id: 3, kind: .agent, text: "Done.")
+        ]
+        let shortRows = ChatRow.group(short)
+        XCTAssertEqual(shortRows.map(\.id), [0, 1, 2, 3], "Two step rows stay directly visible")
+
+        let chain = [
+            TranscriptItem(id: 10, kind: .user, text: "Run review"),
+            TranscriptItem(id: 11, kind: .reasoning, text: "Step 1"),
+            TranscriptItem(id: 12, kind: .tool, text: "read_file /tmp/one.md"),
+            TranscriptItem(id: 13, kind: .output, text: "10 lines"),
+            TranscriptItem(id: 14, kind: .reasoning, text: "Step 2"),
+            TranscriptItem(id: 15, kind: .tool, text: "run_command ls"),
+            TranscriptItem(id: 16, kind: .agent, text: "Final answer", nativeID: "antigravity/s1/9/text"),
+            TranscriptItem(id: 17, kind: .reasoning, text: "Answer thought", nativeID: "antigravity/s1/9/thinking")
+        ]
+        let grouped = ChatRow.group(chain)
+        XCTAssertEqual(grouped.map(\.id), [10, 11, 16],
+                       "Same-step Antigravity thinking precedes its answer and joins the work chain")
+        if case .workChain(let work) = grouped[1] {
+            XCTAssertEqual(work.flatMap(\.items).map(\.id), [11, 12, 13, 14, 15, 17])
+            let summary = ChatRow.chainSummary(work)
+            XCTAssertEqual(summary.title, "Read 1 file, ran 1 command \u{00B7} 3 reasoning steps")
+            XCTAssertEqual(ChatRow.visibleID(for: 14, in: grouped), 11)
+        } else {
+            XCTFail("Expected a folded work chain")
+        }
+    }
+
+    func testIncompleteOrForeignMessagesKeepTheirRecordedReasoningOrder() {
+        let items = [
+            TranscriptItem(id: 0, kind: .agent, text: "Streaming", isComplete: false, nativeID: "antigravity/s/1/text"),
+            TranscriptItem(id: 1, kind: .reasoning, text: "Thought", nativeID: "antigravity/s/1/thinking"),
+            TranscriptItem(id: 2, kind: .agent, text: "Other", isComplete: true, nativeID: "codex/1/text"),
+            TranscriptItem(id: 3, kind: .reasoning, text: "After", nativeID: "codex/1/thinking")
+        ]
+        XCTAssertEqual(TranscriptOrder.alignSameStepReasoning(items).map(\.id), [0, 1, 2, 3])
+    }
 }

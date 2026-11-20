@@ -58,18 +58,27 @@ struct AntigravityStream {
         var events: [Event] = []
         if tools.insert(index).inserted {
             let name = step["tool_name"] as? String ?? info["name"] as? String ?? "tool"
-            let parameters = info["parameters"].map(QuestionRequest.json) ?? ""
-            events.append(.item(.tool, name + (parameters.isEmpty ? "" : " " + parameters), step: index))
+            let params = Self.compactJSON(info["parameters"])
+            events.append(.item(.tool, name + (params.isEmpty ? "" : " " + params), step: index))
         }
         if ["DONE", "ERROR"].contains(step["state"] as? String ?? "") {
-            if let output = info["output"] as? String, !output.isEmpty {
+            let message = (info["error"] as? [String: Any])?["message"] as? String
+            if let output = info["output"] as? String, !output.isEmpty, output != message {
                 events.append(.item(.output, output, step: index))
             }
-            if let error = info["error"] as? [String: Any], let message = error["message"] as? String {
+            if let message, !message.isEmpty {
                 events.append(.item(.error, message, step: index))
             }
         }
         return events
+    }
+
+    private static func compactJSON(_ value: Any?) -> String {
+        guard let dict = value as? [String: Any], !dict.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: dict,
+                                                     options: [.sortedKeys, .withoutEscapingSlashes])
+        else { return "" }
+        return lossyUTF8(data)
     }
 
     private mutating func response(_ step: [String: Any]) -> [Event] {

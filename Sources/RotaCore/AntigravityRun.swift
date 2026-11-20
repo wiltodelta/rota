@@ -151,11 +151,32 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
         case .item(let kind, let text, let step):
             journal.endText()
             writingText = false
-            readQuestions(reasoningThrough: step)
-            if kind != .error || reportedErrors.insert(text).inserted { journal.record(kind, text) }
+            recordItem(kind, text: text, step: step)
         case .result(let result):
             finishTurn(result)
         }
+    }
+
+    private func recordItem(_ kind: TranscriptItem.Kind, text: String, step: Int?) {
+        // Drain earlier archived steps before a tool starts, keep output attached to its call,
+        // and claim a step error's native ID before draining the archive's copy of that step.
+        let priorStep = step.map { $0 - 1 }
+        if kind != .output && kind != .error { readQuestions(reasoningThrough: priorStep) }
+        let nativeID = kind == .error ? step.flatMap { index in
+            questions.map { "antigravity/\($0.session)/\(index)/error" }
+        } : nil
+        let shouldRecord: Bool
+        if kind != .error {
+            shouldRecord = true
+        } else if nativeID != nil {
+            reportedErrors.insert(text)
+            shouldRecord = true
+        } else {
+            shouldRecord = reportedErrors.insert(text).inserted
+        }
+        if shouldRecord { journal.record(kind, text, nativeID: nativeID) }
+        if kind == .output { readQuestions(reasoningThrough: priorStep) }
+        if kind == .error { readQuestions(reasoningThrough: step) }
     }
 
     private func finishTurn(_ result: RunOutcome) {
@@ -189,10 +210,12 @@ final class AntigravityRun: RunControl, @unchecked Sendable {
                 journal.ask(question, recordText: false) { _ in }
             }
             if !writingText {
-                for (id, text) in questions?.takeErrors() ?? [] where reportedErrors.insert(text).inserted {
+                let bound = step ?? completedTextStep
+                for (id, text) in questions?.takeErrors(through: bound) ?? []
+                    where reportedErrors.insert(text).inserted {
                     journal.record(.error, text, nativeID: id)
                 }
-                for (id, text) in questions?.takeReasoning(through: step ?? completedTextStep) ?? [] {
+                for (id, text) in questions?.takeReasoning(through: bound) ?? [] {
                     journal.record(.reasoning, text, nativeID: id)
                 }
             }

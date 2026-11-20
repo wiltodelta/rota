@@ -484,12 +484,25 @@ final class ToolStepTests: XCTestCase {
         XCTAssertEqual(ToolStep.kind(of: "Bash ls -la"), .execute)
         XCTAssertEqual(ToolStep.kind(of: "$ /bin/zsh -lc 'echo hi'"), .execute, "Codex")
         XCTAssertEqual(ToolStep.kind(of: "run_terminal_command"), .execute, "Grok")
+        XCTAssertEqual(ToolStep.kind(of: "run_command git status"), .execute, "Antigravity")
         XCTAssertEqual(ToolStep.kind(of: "Read /p/a.swift"), .read)
         XCTAssertEqual(ToolStep.kind(of: "Edit /p/a.swift"), .edit)
+        XCTAssertEqual(ToolStep.kind(of: "edit_file /p/a.swift"), .edit, "Antigravity")
         XCTAssertEqual(ToolStep.kind(of: "edit files"), .edit, "Codex file change")
         XCTAssertEqual(ToolStep.kind(of: "Grep pattern"), .search)
         XCTAssertEqual(ToolStep.kind(of: "WebFetch https://example.com"), .fetch)
+        XCTAssertEqual(ToolStep.kind(of: "search_web swift"), .fetch, "Antigravity")
         XCTAssertEqual(ToolStep.kind(of: "mcp__computer-use__screenshot"), .other)
+
+        let legacy = "read_file {\n  \"EndLine\" : 20,\n  \"Path\" : \"\\/tmp\\/example.md\"\n}"
+        let presented = ToolStep.presentCall(legacy)
+        XCTAssertEqual(presented.title, "read_file /tmp/example.md")
+        XCTAssertEqual(presented.parameters, "{\n  \"EndLine\" : 20,\n  \"Path\" : \"/tmp/example.md\"\n}")
+        XCTAssertEqual(ToolStep.formatCall("call_mcp_tool",
+                                           parameters: ["ServerName": "rota", "ToolName": "list_routines"]),
+                       "call_mcp_tool rota/list_routines")
+        XCTAssertEqual(ToolStep.formatCall("future_tool", parameters: ["nested": ["a": 1]]), "future_tool")
+        XCTAssertNil(ToolStep.presentCall("$ /bin/zsh -lc 'echo {\n}'").parameters)
     }
 
     func testARunIsSummedUpByWhatItDid() {

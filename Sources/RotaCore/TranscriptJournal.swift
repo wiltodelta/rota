@@ -71,7 +71,8 @@ public struct TranscriptReader: Sendable {
             }
             try replay(url)
             let size = try FileManager.default.attributesOfItem(atPath: log.path)[.size] as? UInt64
-            let candidate = TranscriptSnapshot(items: items.map(\.presented), structured: true,
+            let ordered = TranscriptOrder.alignSameStepReasoning(items.map(\.presented))
+            let candidate = TranscriptSnapshot(items: ordered, structured: true,
                                                hasEarlier: earlierOffset > 0)
             guard failure == nil, headerSeen, size == logSize, !finished || pending.isEmpty else {
                 // A poll can fall between the readable and normalized writes. Keep a coherent

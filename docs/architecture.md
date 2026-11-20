@@ -495,7 +495,8 @@ flowchart LR
   Foundation on macOS 26 double-encodes existing percent escapes when a destination
   also contains raw non-ASCII characters; fully encoded destinations avoid this.
 - Agent text renders through `MarkdownBlock` (headings, list items, fenced
-  code, pipe tables, paragraphs; inline Markdown inside each), because SwiftUI `Text` draws
+  code, pipe tables, blockquotes with standard GitHub alert headers, thematic
+  breaks and paragraphs; inline Markdown inside each), because SwiftUI `Text` draws
   inline Markdown only. Typed messages preserve their complete text, including
   service-looking prefixes and code fences; the legacy parser keeps a fenced
   block with blank lines in one message. Pipe tables require a header and matching
@@ -1489,7 +1490,9 @@ local peer pins message queuing without timing assumptions.
 the existing transcript journal. Text deltas retain each response's `step_index`;
 `DONE`, including an event without a text delta, closes that response. The
 result's full response is a fallback, never a second copy. Tool steps retain
-their name, parameters, output and error when supplied. A result's
+their name, compact single-line JSON parameters, output and error when supplied,
+suppressing an output string identical to the step's error message while views
+format a concise one-line summary. A result's
 `finished_reason`, present only when a turn ended early, outranks its status:
 agy 1.4.12 reports `print_timeout` with `SUCCESS` and exit 0, `interrupted`
 with `ERROR` and exit 1, and `error` with `ERROR` and exit 1 (probed
@@ -1576,9 +1579,12 @@ and fail the Rota run even when the model process exits successfully.
 No model reasoning or prose is converted to a form. Exposed reasoning is stored separately from the answer.
 Reasoning already available at a response's start precedes its text. Reasoning
 that arrives from the archive during streaming is deferred until that response
-ends, with its native step identity retained, so it cannot split a word or sentence.
-Tool-only steps drain reasoning through their own wire step index before the
-tool is recorded, rather than waiting behind an earlier text response.
+ends, with its native step identity retained, so it cannot split a word or sentence;
+in display projection, `TranscriptOrder` aligns same-step archived reasoning
+immediately before its completed response.
+Tool-only steps drain reasoning and errors from earlier steps (`step - 1`) before the
+tool is recorded, rather than waiting behind an earlier text response or detaching
+the tool's own output.
 
 Antigravity's execution permissions retain the unattended policy. Archived
 `ask_permission` and `ask_custom_permission` calls, as well as unsupported
@@ -1726,9 +1732,10 @@ launch event. Claude retains its native task notifications. These display notes
 do not change any harness's background-wait behavior.
 
 Antigravity tool steps preserve output and errors in both `DONE` and `ERROR`
-states. Its archive reader also preserves `ERROR_MESSAGE` and failed `GENERIC`
-steps, including diagnostic content. Archive-only errors reach the stream host;
-identical error text from a result summary and its native archive appears once.
+states, claiming `antigravity/<session>/<step>/error` on the wire before draining
+the archive so the timestamped `GENERIC` copy neither duplicates the error nor
+splits adjacent tool output. Its archive reader still preserves archive-only `ERROR_MESSAGE` and failed `GENERIC`
+steps, including diagnostic content; identical error text from a result summary and its native archive appears once.
 
 Cross-harness restart is an explicit user action on a finished session. It uses
 `TranscriptReader` off the main actor to carry the first user request and a

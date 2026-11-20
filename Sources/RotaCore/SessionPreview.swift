@@ -44,15 +44,21 @@ public enum SessionPreview {
     }
 
     private static func plain(_ text: String) -> String {
-        let source = String(text.prefix(2000))
-        let blocks = MarkdownBlock.parse(source).map { block in
+        let extracted = extractBlocks(MarkdownBlock.parse(String(text.prefix(2000))))
+        let parsed = String(inlineMarkdown(extracted).characters)
+        return String(parsed.split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(320))
+    }
+
+    private static func extractBlocks(_ blocks: [MarkdownBlock]) -> String {
+        blocks.map { block in
             switch block {
             case .heading(_, let text), .listItem(_, let text, _), .paragraph(let text), .code(let text, _):
                 return text
+            case .blockquote(let text):
+                return extractBlocks(MarkdownBlock.parse(MarkdownBlock.Alert.extract(text).1))
+            case .thematicBreak: return ""
             case .table(let table): return (table.headers + table.rows.flatMap { $0 }).joined(separator: " ")
             }
         }.joined(separator: " ")
-        let parsed = String(inlineMarkdown(blocks).characters)
-        return String(parsed.split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(320))
     }
 }

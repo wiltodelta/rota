@@ -56,7 +56,42 @@ final class MarkdownTests: XCTestCase {
     func testNotHeadingsOrLists() {
         XCTAssertEqual(MarkdownBlock.parse("#hashtag and -dash and 2026. year"),
                        [.paragraph("#hashtag and -dash and 2026. year")])
+        XCTAssertEqual(MarkdownBlock.parse(">5 is not a quote"),
+                       [.paragraph(">5 is not a quote")])
         XCTAssertEqual(MarkdownBlock.parse("```\nunclosed"), [.code("unclosed")])
+    }
+
+    func testBlockquotesAndThematicBreaks() {
+        let source = """
+            Intro.
+
+            ---
+
+            > [!IMPORTANT]
+            > First quoted line.
+            >
+            > Second quoted line.
+
+            ***
+
+            After.
+            """
+        XCTAssertEqual(MarkdownBlock.parse(source), [
+            .paragraph("Intro."),
+            .thematicBreak,
+            .blockquote("[!IMPORTANT]\nFirst quoted line.\n\nSecond quoted line."),
+            .thematicBreak,
+            .paragraph("After.")
+        ])
+        let alert = MarkdownBlock.Alert.extract("[!IMPORTANT]\nCheck the log.")
+        XCTAssertEqual(alert.0, .important)
+        XCTAssertEqual(alert.1, "Check the log.")
+        let preview = SessionPreview.text(
+            for: RunRecord(routineID: "r", trigger: .manual, harness: .antigravity,
+                           startedAt: .now, endedAt: .now, outcome: .succeeded),
+            snapshot: TranscriptSnapshot(items: [TranscriptItem(id: 0, kind: .agent,
+                text: "> [!IMPORTANT]\n> Check `ModelCatalog.swift`.\n\n---\n\nDone.")], structured: true))
+        XCTAssertEqual(preview, "Check ModelCatalog.swift. Done.")
     }
 
     func testTranscriptKeepsFencedCodeWithBlankLinesInOneMessage() {

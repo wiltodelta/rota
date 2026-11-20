@@ -44,8 +44,53 @@ struct MarkdownText: View {
             CodeBlockView(code: content, language: language)
         case .table(let table):
             MarkdownTableView(table: table, text: text)
+        case .blockquote(let content):
+            AnyView(MarkdownBlockquoteView(source: content, text: text))
+        case .thematicBreak:
+            Hairline().padding(.vertical, text.effectiveSize(4))
         case .paragraph(let content):
             MarkdownInlineView(source: content).font(text.body).lineSpacing(text.bodyLineSpacing)
+        }
+    }
+}
+
+private struct MarkdownBlockquoteView: View {
+    @Environment(\.interfaceScale) private var metrics
+    let source: String
+    let text: ChatTextSettings
+
+    var body: some View {
+        let (alert, bodyText) = MarkdownBlock.Alert.extract(source)
+        let style = alert.map(Self.alertStyle)
+        let barColor = style?.color ?? Color.secondaryText.opacity(0.45)
+        VStack(alignment: .leading, spacing: text.effectiveSize(6)) {
+            if let alert, let style {
+                HStack(spacing: metrics.points(6)) {
+                    Image(systemName: style.symbol)
+                    Text(alert.title).fontWeight(.semibold)
+                }
+                .font(text.body)
+                .foregroundStyle(style.color)
+            }
+            if !bodyText.isEmpty {
+                MarkdownText(source: bodyText)
+            }
+        }
+        .padding(.leading, metrics.points(12))
+        .padding(.vertical, metrics.points(2))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1.5).fill(barColor).frame(width: metrics.points(3))
+        }
+    }
+
+    private static func alertStyle(_ alert: MarkdownBlock.Alert) -> (symbol: String, color: Color) {
+        switch alert {
+        case .note: return ("info.circle", .accentColor)
+        case .tip: return ("lightbulb", .green)
+        case .important: return ("exclamationmark.circle", .purple)
+        case .warning: return ("exclamationmark.triangle", .orange)
+        case .caution: return ("xmark.octagon", .errorText)
         }
     }
 }

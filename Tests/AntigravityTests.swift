@@ -77,6 +77,61 @@ final class AntigravityTests: XCTestCase {
         XCTAssertEqual(events(#"""
         {"event":"step_update","step_update":{"step_index":4,"step_type":"tool","state":"DONE","tool_info":{"output":"hello","error":{"message":"failed"}}}}
         """#, stream: &stream), [.item(.output, "hello", step: 4), .item(.error, "failed", step: 4)])
+
+        let duplicate = """
+        {"event":"step_update","step_update":{"step_index":5,"step_type":"tool","state":"ERROR","tool_name":"read_file",
+        "tool_info":{"parameters":{"Path":"/tmp/a/b.txt"},"output":"missing","error":{"message":"missing"}}}}
+        """.replacingOccurrences(of: "\n", with: "")
+        XCTAssertEqual(events(duplicate, stream: &stream),
+                       [.item(.tool, #"read_file {"Path":"/tmp/a/b.txt"}"#, step: 5),
+                        .item(.error, "missing", step: 5)])
+        XCTAssertEqual(ToolStep.presentCall(#"read_file {"Path":"/tmp/a/b.txt"}"#).title,
+                       "read_file /tmp/a/b.txt")
+    }
+
+    func testStreamStepErrorDeduplicatesArchiveCopyWithoutSplittingToolOutput() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("rota-dedup-\(UUID())")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = UUID().uuidString.lowercased()
+        let archive = try XCTUnwrap(AntigravityQuestionArchive(session: session, home: folder))
+        try FileManager.default.createDirectory(at: archive.file.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        let archived = """
+        {"step_index":2,"type":"GENERIC","status":"ERROR","error":"file does not exist",\
+        "content":"Created At: 2026-11-19T09:00:01Z\\nEncountered error in step execution: file does not exist"}
+        {"step_index":3,"type":"GENERIC","status":"ERROR","error":"file does not exist",\
+        "content":"Created At: 2026-11-19T09:00:02Z\\nEncountered error in step execution: file does not exist"}
+
+        """
+        try Data(archived.utf8).write(to: archive.file)
+        func stepLines(_ step: Int) -> [String] {
+            [
+                """
+                {"event":"step_update","step_update":{"step_index":\(step),"step_type":"tool","state":"ACTIVE",
+                "tool_name":"read_file","tool_info":{"parameters":{"Path":"/tmp/missing-\(step).md"}}}}
+                """.replacingOccurrences(of: "\n", with: ""),
+                """
+                {"event":"step_update","step_update":{"step_index":\(step),"step_type":"tool","state":"ERROR",
+                "tool_name":"read_file","tool_info":{"output":"partial","error":{"message":"file does not exist"}}}}
+                """.replacingOccurrences(of: "\n", with: "")
+            ]
+        }
+        let resultLine = """
+        {"event":"result","result":{"conversation_id":"\(session)","status":"SUCCESS",
+        "response":"Recovered and finished"}}
+        """.replacingOccurrences(of: "\n", with: "")
+        let (outcome, items) = try runPeer(lines: [
+            #"{"event":"init","conversation_id":"\#(session)","init":{}}"#
+        ] + stepLines(2) + stepLines(3) + [
+            responseLine(step: 4, text: "Recovered and finished"),
+            resultLine
+        ], folder: folder, exitCode: 0)
+        XCTAssertEqual(outcome, .succeeded)
+        let body = items.filter { $0.kind != .status }
+        XCTAssertEqual(body.map(\.kind), [.user, .tool, .output, .error, .tool, .output, .error, .agent],
+                       "Both step errors claim their native IDs without archive duplicates or split outputs")
+        XCTAssertEqual(body.filter { $0.kind == .error }.map(\.text), ["file does not exist", "file does not exist"])
     }
 
     func testDiscoveryAndAccessUseTheAgyContracts() throws {
@@ -313,10 +368,11 @@ final class AntigravityTests: XCTestCase {
         try handle.write(contentsOf: Data((row + "\n").utf8))
     }
 
-    private func runPeer(lines: [String], folder: URL, resume: String? = nil) throws -> (RunOutcome, [TranscriptItem]) {
+    private func runPeer(lines: [String], folder: URL, resume: String? = nil,
+                         exitCode: Int = 1) throws -> (RunOutcome, [TranscriptItem]) {
         let peer = folder.appendingPathComponent("peer-\(UUID())")
         let body = lines.map { "printf '%s\\n' '\($0)'" }.joined(separator: "\n")
-        let script = "#!/bin/zsh\n[[ \"$1\" == -p ]] && exit 1\nIFS= read -r _\n\(body)\nexit 1\n"
+        let script = "#!/bin/zsh\n[[ \"$1\" == -p ]] && exit 1\nIFS= read -r _\n\(body)\nexit \(exitCode)\n"
         try script.write(to: peer, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: peer.path)
         let log = folder.appendingPathComponent("log-\(UUID()).log")

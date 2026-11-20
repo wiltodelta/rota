@@ -128,7 +128,7 @@ enum MarkdownProse {
     private static func isProse(_ block: MarkdownBlock) -> Bool {
         switch block {
         case .heading, .listItem, .paragraph: return MarkdownImageReference.references(in: [block]).isEmpty
-        case .code, .table: return false
+        case .code, .table, .blockquote, .thematicBreak: return false
         }
     }
 
@@ -161,8 +161,8 @@ enum MarkdownProse {
             case .paragraph(let content):
                 paragraph = inline(content, text: text, font: text.appKitBody)
                 style.paragraphSpacingBefore = spacing
-            case .code, .table:
-                preconditionFailure("parts(_:) keeps code and tables out of a prose run")
+            case .code, .table, .blockquote, .thematicBreak:
+                preconditionFailure("parts(_:) keeps code, tables, quotes, and rules out of a prose run")
             }
             if index == 0 {
                 style.paragraphSpacingBefore = 0
