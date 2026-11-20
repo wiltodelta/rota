@@ -1689,7 +1689,8 @@ for factor, (bar, circle, actions, title, sidebar) in zip((1, 1.5), (rects[:5], 
     assert abs(bar[3] - 52 * factor) <= 0.5, ("bar height", bar)
     assert abs(circle[2] - 36 * factor) <= 0.5, ("circle width", circle)
     assert abs(circle[3] - circle[2]) <= 0.5, ("circle aspect", circle)
-    assert abs(actions[2] - 64 * factor) <= 0.5, ("capsule width", actions)
+    # Schedule, Import and New Routine at 28 pt each, plus 4 pt padding on each side.
+    assert abs(actions[2] - 92 * factor) <= 0.5, ("capsule width", actions)
     assert abs(actions[3] - 36 * factor) <= 0.5, ("capsule height", actions)
     for item in (circle, actions, title):
         assert abs(item[1] + item[3] / 2 - bar[1] - bar[3] / 2) <= 0.75, ("vertical center", item)
