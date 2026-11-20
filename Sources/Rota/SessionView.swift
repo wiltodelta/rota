@@ -30,7 +30,7 @@ struct SessionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            SessionHeader(record: record, current: current, routine: routine, running: running)
                 .padding(.horizontal, metrics.points(20))
                 .padding(.vertical, metrics.points(12))
             Divider()
@@ -153,102 +153,6 @@ struct SessionView: View {
         let record: UUID
         let running: Bool
         let version: Int
-    }
-
-    private var header: some View {
-        GlassControls(spacing: metrics.points(12)) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: metrics.points(12)) {
-                    sessionSummary
-                    Spacer(minLength: 12)
-                    showRoutine
-                    sessionActions
-                }
-                VStack(alignment: .leading, spacing: metrics.points(8)) {
-                    HStack(spacing: metrics.points(12)) {
-                        sessionSummary
-                        Spacer(minLength: 12)
-                        showRoutine
-                    }
-                    HStack(spacing: metrics.points(12)) {
-                        Spacer(minLength: 0)
-                        sessionActions
-                    }
-                }
-            }
-        }
-        .modifier(GlassActionStyle())
-    }
-
-    private var sessionSummary: some View {
-        VStack(alignment: .leading, spacing: metrics.points(2)) {
-            Text(record.startedAt.formatted(date: .abbreviated, time: .shortened))
-                .interfaceFont(.callout)
-            Text([record.harness.title, record.trigger == .catchUp ? "missed slot, run late" : nil,
-                  current.statusTitle].compactMap { $0 }.joined(separator: " \u{00B7} "))
-                .interfaceFont(.caption)
-                .foregroundStyle(record.outcome.isFailure ? Color.errorText : Color.secondaryText)
-            if let id = record.discussedSessionID,
-               let source = model.scheduler.records(for: routine.id).first(where: { $0.id == id }) {
-                // A discussion leads back to the Shell run it asks about.
-                Button { model.selection = .session(source.id) } label: {
-                    Label("About the Shell run at " + source.startedAt.formatted(date: .omitted, time: .shortened),
-                          systemImage: "arrow.turn.up.left")
-                        .interfaceFont(.caption)
-                }
-                .buttonStyle(.link)
-                .help("Open the Shell session this discussion is about")
-                .accessibilityIdentifier("discussedSession")
-            }
-        }
-    }
-
-    private var showRoutine: some View {
-        Button(interfaceTitle: "Show Routine", systemImage: "calendar") { model.selection = .routine(routine.id) }
-            .fixedSize()
-            .help("Show \(routine.name)'s schedule, settings, and sessions")
-            .accessibilityIdentifier("showSessionRoutine")
-    }
-
-    private var sessionActions: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: metrics.points(12)) { actionButtons }.fixedSize()
-            HStack(spacing: metrics.points(12)) { actionButtons.labelStyle(.iconOnly) }.fixedSize()
-        }
-    }
-
-    /// Labeled actions first, then the icon-only utilities, with Delete last and apart from Stop.
-    @ViewBuilder
-    private var actionButtons: some View {
-        if current.harness.isAgent {
-            SessionRestartMenu(record: current)
-        }
-        // A session that takes messages has Stop beside its field.
-        if running && !model.scheduler.canMessage(record) {
-            Button(interfaceTitle: "Stop", systemImage: "stop.fill") { model.scheduler.stop(record.id) }
-                .accessibilityIdentifier("stopSession")
-        }
-        if model.scheduler.terminalCommand(for: record) != nil {
-            Button(interfaceTitle: model.terminalTitle(record), systemImage: "terminal") {
-                model.openInTerminal(record)
-            }
-            .help(running ? "Open this session in Terminal" : "Continue this session in Terminal")
-            .accessibilityIdentifier("openTerminal")
-        }
-        if let path = record.logPath {
-            Button(interfaceTitle: "Show Log in Finder", systemImage: "folder") {
-                model.revealLog(record)
-            }
-            .labelStyle(.iconOnly)
-            .help("Show log in Finder")
-        }
-        Button(interfaceTitle: "Delete Session…", systemImage: "trash", role: .destructive) {
-            model.sessionToDelete = record
-        }
-        .labelStyle(.iconOnly)
-        .help("Delete this session and its logs")
-        .disabled(!model.scheduler.canDelete(current))
-        .accessibilityIdentifier("deleteSession")
     }
 
 }

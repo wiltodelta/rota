@@ -9,6 +9,7 @@ struct QuestionCard: View {
     private var question: AgentQuestion { draft.question }
     let submit: (QuestionAnswer) throws -> Void
     @FocusState private var focusedField: String?
+    @State private var buttonsFit = FirstFit()
 
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.points(10)) {
@@ -44,21 +45,29 @@ struct QuestionCard: View {
                 Text(failure).interfaceFont(.callout).foregroundStyle(Color.errorText)
                     .accessibilityIdentifier("questionError")
             }
-            ViewThatFits(in: .horizontal) {
-                HStack {
-                    dismissButtons
-                    Spacer(minLength: metrics.points(12))
-                    forwardButtons
+            // As `ViewThatFits` chose, without rebuilding each candidate on every keystroke's layout pass.
+            Group {
+                switch buttonsFit.choice {
+                case 0: buttonRow(compact: false)
+                case 1: buttonRow(compact: true)
+                default:
+                    VStack(alignment: .leading, spacing: metrics.points(8)) {
+                        HStack { dismissButtons; Spacer(minLength: 0) }
+                        HStack { Spacer(minLength: 0); compactForwardButtons }
+                    }
                 }
-                HStack {
-                    dismissButtons
-                    Spacer(minLength: metrics.points(12))
-                    compactForwardButtons
+            }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { buttonsFit.available = $0 }
+            .background {
+                ZStack {
+                    buttonRow(compact: false).fixedSize()
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { buttonsFit.set(0, $0) }
+                    buttonRow(compact: true).fixedSize()
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { buttonsFit.set(1, $0) }
                 }
-                VStack(alignment: .leading, spacing: metrics.points(8)) {
-                    HStack { dismissButtons; Spacer(minLength: 0) }
-                    HStack { Spacer(minLength: 0); compactForwardButtons }
-                }
+                .hidden()
+                .accessibilityHidden(true)
             }
         }
         .padding(metrics.points(16))
@@ -71,6 +80,14 @@ struct QuestionCard: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("questionCard")
         .onChange(of: draft.focusRequest) { focusedField = draft.currentField?.id }
+    }
+
+    private func buttonRow(compact: Bool) -> some View {
+        HStack {
+            dismissButtons
+            Spacer(minLength: metrics.points(12))
+            if compact { compactForwardButtons } else { forwardButtons }
+        }
     }
 
     @ViewBuilder private var forwardButtons: some View {

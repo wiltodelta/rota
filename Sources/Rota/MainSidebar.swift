@@ -175,8 +175,6 @@ private struct SessionRow: View {
     let record: RunRecord
     /// Selected in the focused list, as for `RoutineRow`.
     let onAccent: Bool
-    @State private var snapshot: TranscriptSnapshot?
-    @State private var reader = TranscriptSessionReader()
 
     var body: some View {
         HStack(spacing: metrics.points(SidebarIconColumn.gap)) {
@@ -194,7 +192,7 @@ private struct SessionRow: View {
                 .accessibilityLabel(record.statusTitle)
             }
             VStack(alignment: .leading, spacing: metrics.points(1)) {
-                Text(verbatim: SessionPreview.text(for: record, snapshot: snapshot))
+                SessionPreviewText(record: record)
                     .interfaceFont(.body)
                     .fontWeight(record.isUnread ? .semibold : .regular)
                     // Explicit, so an inactive window does not dim the preview below its captions.
@@ -222,17 +220,6 @@ private struct SessionRow: View {
                 dot(.accentColor, size: 7)
                     .accessibilityLabel("Unread")
             }
-        }
-        .task(id: record) {
-            guard let path = record.logPath else { return }
-            repeat {
-                let next = await reader.read(log: URL(fileURLWithPath: path), shell: record.harness == .shell,
-                                             finished: record.outcome != .running)
-                guard !Task.isCancelled else { return }
-                if snapshot != next { snapshot = next }
-                if record.outcome != .running { return }
-                do { try await Task.sleep(for: .seconds(3)) } catch { return }
-            } while !Task.isCancelled
         }
         .contextMenu {
             ReadMarkButton(model: model, record: record)

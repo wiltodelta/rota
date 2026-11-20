@@ -278,4 +278,21 @@ public actor TranscriptSessionReader {
                                                        items: snapshot.items.count, earlier: earlier, shell: shell)
         return snapshot
     }
+
+    /// Keeps `update` current with `record`'s list excerpt, read and rendered here rather than in a
+    /// view body: once for a finished session, every three seconds while it runs.
+    public func followPreview(of record: RunRecord, update: @MainActor @Sendable (String) -> Void) async {
+        while true {
+            var snapshot: TranscriptSnapshot?
+            if !record.isSkip, let path = record.logPath {
+                snapshot = read(log: URL(fileURLWithPath: path), shell: record.harness == .shell,
+                                finished: record.outcome != .running)
+            }
+            let preview = SessionPreview.text(for: record, snapshot: snapshot)
+            guard !Task.isCancelled else { return }
+            await update(preview)
+            guard record.outcome == .running else { return }
+            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+        }
+    }
 }

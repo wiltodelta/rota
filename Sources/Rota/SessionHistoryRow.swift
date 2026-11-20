@@ -6,8 +6,6 @@ struct SessionHistoryRow: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
     let record: RunRecord
-    @State private var snapshot: TranscriptSnapshot?
-    @State private var reader = TranscriptSessionReader()
 
     var body: some View {
         Group {
@@ -19,17 +17,6 @@ struct SessionHistoryRow: View {
             }
         }
         .accessibilityIdentifier("sessionHistory-" + record.id.uuidString)
-        .task(id: record) {
-            guard !record.isSkip, let path = record.logPath else { return }
-            repeat {
-                let next = await reader.read(log: URL(fileURLWithPath: path), shell: record.harness == .shell,
-                                             finished: record.outcome != .running)
-                guard !Task.isCancelled else { return }
-                if snapshot != next { snapshot = next }
-                if record.outcome != .running { return }
-                do { try await Task.sleep(for: .seconds(3)) } catch { return }
-            } while !Task.isCancelled
-        }
     }
 
     private var content: some View {
@@ -42,7 +29,7 @@ struct SessionHistoryRow: View {
                 }
                 VStack(alignment: .leading, spacing: metrics.points(4)) { date; status }
             }
-            Text(verbatim: SessionPreview.text(for: record, snapshot: snapshot))
+            SessionPreviewText(record: record)
                 .interfaceFont(.body)
                 .fontWeight(record.isUnread ? .medium : .regular)
                 .lineLimit(2)

@@ -839,6 +839,15 @@ Animation on their own layers. A SwiftUI-driven animation, whether a per-frame `
 or a repeating animation, made SwiftUI re-rasterize every text in the same hosting view on each
 frame, so an open running session cost most of a core, more the longer its transcript.
 A `CAGradientLayer` `locations` animation stayed still on screen, so the shimmer moves its band.
+Each keystroke in the message field runs a layout pass over the detail column, and the
+column's hosting view, which `NavigationSplitView` creates, recomputes its minimum size on
+each pass. A `ViewThatFits` there rebuilds every candidate on each pass: the session header's
+nested one built four copies of its action row per pass and took about 60% of the main thread
+while typing. `SessionHeader` (`SessionHeaderFit`) and the question card's buttons (`FirstFit`)
+choose their arrangement from widths measured by hidden copies, which keep their identity, so a
+pass only reads them. Keep `ViewThatFits`, Markdown parsing and file checks out of views the
+session column re-renders while the user types or the sidebar refreshes; `SessionPreviewText`
+renders row excerpts off the main actor (see `SessionHistoryRow` below).
 Local performance diagnostics (`AppPerformance`, `PerformanceDiagnostics`)
 record process resources, main-queue probe delays and common transcript-reader
 timings on a utility queue. The bounded journal contains numeric UI context,
@@ -1214,9 +1223,10 @@ Layout rules learned while measuring the narrowest window (820 pt):
   agent message contains a following content paragraph. No task outcome is inferred
   from prose. User prompts and routine instructions never become previews. Markdown is
   reduced to plain text through the block parser and the shared `inlineMarkdown`
-  policy used by chat messages. Each visible row
-  reuses `TranscriptSessionReader` off the UI actor, polling active sessions
-  every three seconds and reading finished sessions once. Previews are derived
+  policy used by chat messages. Each visible row's `SessionPreviewText`
+  reads and renders its excerpt with `TranscriptSessionReader.followPreview` off the UI actor,
+  polling active sessions every three seconds and reading finished sessions once; the row body
+  only shows the result. Previews are derived
   from logs rather than persisted as another copy of session content.
 - Routines appear first in a collapsible sidebar section. Its expanded state
   is stored in the `routinesExpanded` preference, which defaults to true.
