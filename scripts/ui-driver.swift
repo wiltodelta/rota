@@ -558,6 +558,7 @@ case "key":
         "page-up": (116, []), "page-down": (121, []),
         "shift-command-r": (15, [.maskCommand, .maskShift]), "shift-command-a": (0, [.maskCommand, .maskShift]),
         "shift-command-d": (2, [.maskCommand, .maskShift]), "shift-command-e": (14, [.maskCommand, .maskShift]),
+        "shift-command-u": (32, [.maskCommand, .maskShift]),
         "command-r": (15, .maskCommand), "command-period": (47, .maskCommand), "command-1": (18, .maskCommand)
     ]
     guard arguments.count == 2, let (code, flags) = keys[arguments[1]] else { fail("unknown key") }

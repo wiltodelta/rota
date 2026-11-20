@@ -138,11 +138,19 @@ public struct RunRecord: Codable, Identifiable, Equatable, Sendable {
         return false
     }
 
+    /// A session that ran and ended, which the read mark applies to.
+    public var isFinishedSession: Bool {
+        outcome != .running && !isSkip && endedAt != nil
+    }
+
     /// Finished since the user last opened it, so the sidebar marks it.
     public var isUnread: Bool {
-        guard outcome != .running, !isSkip, let endedAt else { return false }
+        guard isFinishedSession, let endedAt else { return false }
         return readAt.map { $0 < endedAt } ?? true
     }
+
+    /// Finished and read, so the user can set it aside as unread until they handle it.
+    public var canMarkUnread: Bool { isFinishedSession && !isUnread }
 
     public init(id: UUID = UUID(), routineID: String, trigger: RunTrigger, harness: Harness,
                 startedAt: Date, endedAt: Date? = nil, outcome: RunOutcome, logPath: String? = nil) {

@@ -749,8 +749,30 @@ check_keyboard_session_keys() {
     "$DRIVER" key shift-command-d
     for _ in {1..30}; do "$DRIVER" exists dismissAttention || break; sleep 0.2; done
     if "$DRIVER" exists dismissAttention; then fail 'Shift-Command-D dismisses the attention mark'; fi
+    # Mark as Unread holds while the session stays open; the same key marks it read again.
+    "$DRIVER" key shift-command-u
+    wait_unread "$keyboard_beta" True
+    sleep 2
+    [[ "$(session_unread "$keyboard_beta")" == True ]] || fail 'an open session marked unread stays unread'
+    pass 'Shift-Command-U marks the open session unread'
+    "$DRIVER" key shift-command-u
+    wait_unread "$keyboard_beta" False
     "$DRIVER" key shift-command-r
     check wait_selected 'routineHarness-keyboard-conversations'
+}
+
+session_unread() {
+    "$APP/Contents/Helpers/rota" session keyboard-conversations --session "$1" --json \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["unread"])'
+}
+
+wait_unread() {
+    local attempt
+    for ((attempt = 0; attempt < 30; attempt++)); do
+        [[ "$(session_unread "$1")" == "$2" ]] && return 0
+        sleep 0.2
+    done
+    fail "session $1 unread is $2"
 }
 
 wait_selected() {

@@ -255,6 +255,17 @@ final class ControlCommandTests: XCTestCase {
         let read = try XCTUnwrap(try call("sessions.markRead", ["id": "digest"]).get() as? [String: Any])
         XCTAssertEqual(read["unread"] as? Bool, false)
         XCTAssertEqual(scheduler.unreadCount, 0)
+        let unread = try XCTUnwrap(try call("sessions.markUnread", ["id": "digest"]).get() as? [String: Any])
+        XCTAssertEqual(unread["unread"] as? Bool, true)
+        XCTAssertEqual(scheduler.unreadCount, 1)
+    }
+
+    func testOnlyAFinishedSessionCanBeMarkedUnread() throws {
+        _ = try create().get()
+        _ = try call("routines.run", ["id": "digest"]).get()
+        XCTAssertEqual(call("sessions.markUnread", ["id": "digest"]).failure?.message,
+                       "Only a finished session can be marked unread.")
+        XCTAssertEqual(scheduler.unreadCount, 0)
     }
 
     func testDeletionRequiresAnExplicitFinishedSessionAndRemovesItsFiles() throws {

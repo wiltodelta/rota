@@ -178,6 +178,10 @@
   bold in the list with a blue dot and counted in the menu bar panel. The Dock
   badge counts sessions that are unread or need your reply or attention, counting
   each session once. It clears when all sessions are read and all requests are resolved.
+  To come back to a session you read but have not dealt with, choose
+  Session > Mark as Unread (Shift-Command-U) or Mark as Unread in the session's
+  context menu. It stays unread, even while open, until you open it again;
+  the same command reads Mark as Read on an unread session.
 - **Interface scale.** Settings > General scales app content from 80% to 150%.
   Rota uses bundled IBM Plex Sans for interface text.
   View > Zoom In, Zoom Out and Reset (Command-Plus, Command-Minus,

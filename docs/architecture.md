@@ -94,7 +94,7 @@ flowchart LR
   at `Application Support/Rota/rota.sock` (0600, one JSON request and reply
   per line), whose methods are `Scheduler.control` in `ControlCommands.swift`:
   routines list/calendar/get/create/update/setEnabled/run/stop/delete and sessions
-  list/get/read/message/delete/dismiss/markRead/questions/answer, all through
+  list/get/read/message/delete/dismiss/markRead/markUnread/questions/answer, all through
   the scheduler, the routines file's only writer. `ControlMethod` declares the
   socket operations; `ControlInterface` supplies the public CLI command and MCP
   schema for each. Tests require every public method and editable routine field
@@ -129,7 +129,7 @@ flowchart LR
   ids. `answer` requires an explicit question and action, validates the same
   `QuestionAnswer` as the app, and must only carry the user's actual decision.
   A plain `send` or `dismiss` cannot resolve a pending question. `mark-read`
-  changes only the read mark. `delete-session` requires an explicit session id
+  and `mark-unread` change only the read mark; a running session cannot be marked unread. `delete-session` requires an explicit session id
   and uses `Scheduler.deleteSession`, keeping running sessions and the provider's
   native history intact. Reads never mark a session read implicitly.
   `send --attach FILE` (repeat the option for multiple files) and MCP
@@ -583,7 +583,11 @@ flowchart LR
   transport error; cancellation and routine time limits are also left alone.
 - A finished session is unread until `markRead`, which `SessionView` calls
   when it shows a finished session (`RunRecord.readAt`, `isUnread`); the
-  sidebar and the panel show unread counts. The Dock badge counts records with
+  sidebar and the panel show unread counts. `markUnread` clears `readAt` on a
+  read finished session (`canMarkUnread`); `ReadMarkButton` offers it in the
+  Session menu (Shift-Command-U) and the row's context menu. `SessionView`
+  marks read once per record and run state (`ReadKey`), not on every history
+  change, so a session marked unread while open stays unread until reopened. The Dock badge counts records with
   `isUnread || attention != nil`, including pending agent questions, counting each
   record once, and clears at zero.
   `AppDelegate.observeStatus` tracks the history snapshot to keep it current.

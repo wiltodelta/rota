@@ -330,9 +330,17 @@ public final class Scheduler {
 
     /// Marks `record`'s session read, now that the user has it open.
     public func markRead(_ record: RunRecord) {
-        guard record.isUnread, var stored = history.records(for: record.routineID).first(where: { $0.id == record.id })
-        else { return }
-        stored.readAt = now()
+        if record.isUnread { setReadAt(now(), on: record) }
+    }
+
+    /// Marks a read session unread again, for the user to come back to; it stays unread until opened anew.
+    public func markUnread(_ record: RunRecord) {
+        if record.canMarkUnread { setReadAt(nil, on: record) }
+    }
+
+    private func setReadAt(_ date: Date?, on record: RunRecord) {
+        guard var stored = history.records(for: record.routineID).first(where: { $0.id == record.id }) else { return }
+        stored.readAt = date
         saveRecord(stored)
     }
 

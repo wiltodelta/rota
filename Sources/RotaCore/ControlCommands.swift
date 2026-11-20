@@ -65,6 +65,14 @@ extension Scheduler {
         }
     }
 
+    private func setReadMark(read: Bool, on record: RunRecord) throws {
+        if read { return markRead(record) }
+        guard record.isFinishedSession else {
+            throw ControlError("Only a finished session can be marked unread.")
+        }
+        markUnread(record)
+    }
+
     private func sessionStateCommand(_ method: ControlMethod, _ params: [String: Any]) throws -> Any? {
         switch method {
         case .sessionsGet: return describe(try session(params))
@@ -73,9 +81,9 @@ extension Scheduler {
             let record = try session(params)
             guard deleteSession(record) else { throw ControlError(lastError ?? "Could not delete the session.") }
             return ["deleted": record.id.uuidString]
-        case .sessionsMarkRead:
+        case .sessionsMarkRead, .sessionsMarkUnread:
             let record = try session(params)
-            markRead(record)
+            try setReadMark(read: method == .sessionsMarkRead, on: record)
             return describe(current(record.id, routineID: record.routineID) ?? record)
         case .sessionsQuestions:
             return try questionList(session(params))

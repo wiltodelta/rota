@@ -18,6 +18,8 @@ struct SessionView: View {
     @State private var questionRevealRequest = 0
     @State private var questionDraft: QuestionDraft?
     @State private var questionDrafts: [String: QuestionDraft] = [:]
+    /// The record and run state last marked read here, so marking it unread while it is open holds.
+    @State private var readKey: ReadKey?
 
     private var running: Bool { model.scheduler.isActive(record) }
 
@@ -114,8 +116,13 @@ struct SessionView: View {
                 }
                 try? await Task.sleep(for: .seconds(1))
             } while running && !Task.isCancelled
-            // Open and finished: read. A session finishing while open is read too.
-            model.scheduler.markRead(record)
+            // Open and finished: read. A session finishing while open is read too,
+            // but a history change alone does not undo Mark as Unread.
+            let key = ReadKey(record: record.id, running: running)
+            if readKey != key {
+                readKey = key
+                model.scheduler.markRead(record)
+            }
         }
     }
 
@@ -135,6 +142,11 @@ struct SessionView: View {
             transcript = next
             loadingEarlier = false
         }
+    }
+
+    private struct ReadKey: Equatable {
+        let record: UUID
+        let running: Bool
     }
 
     private struct RefreshKey: Equatable {

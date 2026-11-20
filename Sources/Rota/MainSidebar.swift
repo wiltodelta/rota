@@ -235,6 +235,8 @@ private struct SessionRow: View {
             } while !Task.isCancelled
         }
         .contextMenu {
+            ReadMarkButton(model: model, record: record)
+            Divider()
             Button("Delete Session…", role: .destructive) { model.sessionToDelete = record }
                 .disabled(!model.scheduler.canDelete(record))
         }

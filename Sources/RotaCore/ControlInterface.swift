@@ -19,6 +19,7 @@ public enum ControlMethod: String, CaseIterable, Sendable {
     case sessionsDelete = "sessions.delete"
     case sessionsDismiss = "sessions.dismiss"
     case sessionsMarkRead = "sessions.markRead"
+    case sessionsMarkUnread = "sessions.markUnread"
     case sessionsQuestions = "sessions.questions"
     case sessionsAnswer = "sessions.answer"
     case questionsCreate = "questions.create"
@@ -215,6 +216,10 @@ public enum ControlInterface {
             Tool(
                 name: "mark_session_read", method: .sessionsMarkRead, command: "mark-read",
                 description: "Mark a session as read without changing its attention or pending questions.",
+                properties: ["id": id, "session": session], required: ["id"]),
+            Tool(
+                name: "mark_session_unread", method: .sessionsMarkUnread, command: "mark-unread",
+                description: "Mark a finished, read session as unread so it stays in the user's inbox.",
                 properties: ["id": id, "session": session], required: ["id"]),
             Tool(
                 name: "list_session_questions", method: .sessionsQuestions, command: "questions",

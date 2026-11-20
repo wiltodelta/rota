@@ -29,6 +29,7 @@ let usage = """
                                    submit the user's explicit answer; values maps field ids to string arrays
       dismiss <id> [--session ID]  dismiss attention without answering questions
       mark-read <id> [--session ID]   mark a session as read
+      mark-unread <id> [--session ID]   mark a finished session as unread
       delete-session <id> --session ID   delete a finished session and its local files; ask the user first
       tools                        discover commands and MCP schemas as JSON
       notify TEXT [--title T] [--needs-reply]

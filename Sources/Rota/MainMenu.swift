@@ -166,6 +166,8 @@ struct SessionCommands: Commands {
             Button("Dismiss Attention") { record.map { model.scheduler.dismissAttention($0) } }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
                 .disabled(record?.showsAttentionBanner != true)
+            ReadMarkButton(model: model, record: record)
+                .keyboardShortcut("u", modifiers: [.command, .shift])
             Menu("Quick Replies") {
                 let replies = model.settings.sendableReplies
                 let canSend = record.map(model.scheduler.acceptsMessage) ?? false
@@ -184,6 +186,21 @@ struct SessionCommands: Commands {
             // Delete in the focused session list asks too; Command-Delete stays text editing.
             Button("Delete Session\u{2026}") { model.sessionToDelete = record }
                 .disabled(record.map { !model.scheduler.canDelete($0) } ?? true)
+        }
+    }
+}
+
+/// Mark as Unread for a read session, Mark as Read for an unread one, as in Mail.
+struct ReadMarkButton: View {
+    let model: AppModel
+    let record: RunRecord?
+
+    var body: some View {
+        if let record, record.isUnread {
+            Button("Mark as Read") { model.scheduler.markRead(record) }
+        } else {
+            Button("Mark as Unread") { record.map(model.scheduler.markUnread) }
+                .disabled(record?.canMarkUnread != true)
         }
     }
 }
