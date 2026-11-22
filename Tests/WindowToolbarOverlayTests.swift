@@ -61,7 +61,7 @@ final class WindowToolbarOverlayTests: XCTestCase {
         let anchor = ToolbarOverlayAnchor(frame: .zero)
         anchor.height = 78
         anchor.title = "Example"
-        anchor.host.rootView = AnyView(MainWindowToolbar(title: "Example", sidebarWidth: 280,
+        anchor.host.rootView = AnyView(MainWindowToolbar(title: "Example", sidebarTrailingEdge: 280,
                                                        toggleSidebar: {}, importRoutines: {}, newRoutine: {},
                                                        schedule: .init(shown: false, available: true, toggle: {}),
                                                        showsActions: true)
@@ -96,7 +96,7 @@ final class WindowToolbarOverlayTests: XCTestCase {
         .background {
             if showToolbar {
                 WindowToolbarOverlay(content: AnyView(MainWindowToolbar(
-                    title: title, sidebarWidth: 280,
+                    title: title, sidebarTrailingEdge: 280,
                     toggleSidebar: {}, importRoutines: {}, newRoutine: {},
                     schedule: .init(shown: false, available: true, toggle: {}), showsActions: true
                 ).environment(\.interfaceScale, InterfaceScale(factor: height / 52))), height: height, title: title)

@@ -5,7 +5,7 @@ import SwiftUI
 struct MainWindowToolbar: View {
     @Environment(\.interfaceScale) private var metrics
     let title: String
-    let sidebarWidth: CGFloat
+    let sidebarTrailingEdge: CGFloat?
     let toggleSidebar: () -> Void
     let importRoutines: () -> Void
     let newRoutine: () -> Void
@@ -13,14 +13,16 @@ struct MainWindowToolbar: View {
     /// Settings keeps its sections in the sidebar: it dims the toggle and hides the routine actions.
     let showsActions: Bool
 
+    private var sidebarShown: Bool { sidebarTrailingEdge != nil }
+
     var body: some View {
         HStack(spacing: metrics.points(12)) {
             Button(action: toggleSidebar) {
-                symbol("sidebar.left", title: sidebarWidth > 0 ? "Hide Sidebar" : "Show Sidebar")
+                symbol("sidebar.left", title: sidebarShown ? "Hide Sidebar" : "Show Sidebar")
                     .frame(width: metrics.points(36), height: metrics.points(36))
                     .background { glass(in: Circle()) }
             }
-            .help("\(sidebarWidth > 0 ? "Hide" : "Show") the sidebar (Control-Command-S)")
+            .help("\(sidebarShown ? "Hide" : "Show") the sidebar (Control-Command-S)")
             // Dimmed rather than removed, so the title keeps its place.
             .disabled(!showsActions)
             .accessibilityIdentifier("toggleSidebar")
@@ -38,7 +40,7 @@ struct MainWindowToolbar: View {
         .buttonStyle(.plain)
         // SwiftUI would otherwise pick these as Tab targets; see ToolbarHostingView.
         .focusable(false)
-        .padding(.leading, sidebarWidth > 0 ? sidebarWidth + metrics.points(8) : 96)
+        .padding(.leading, sidebarTrailingEdge.map { $0 + metrics.points(16) } ?? 96)
         .padding(.trailing, metrics.points(12))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

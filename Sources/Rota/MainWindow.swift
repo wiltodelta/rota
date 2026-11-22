@@ -20,7 +20,7 @@ struct MainWindow: View {
     @Environment(\.interfaceScale) private var metrics
     @Environment(AppModel.self) private var model
 
-    @State private var sidebarWidth: CGFloat = 280
+    @State private var sidebarTrailingEdge: CGFloat = 280
     // Seed the ideal once; later measurements save the next launch's preference.
     @State private var restoredSidebarWidth = UserDefaults.standard.object(forKey: "sidebarWidth") as? Double ?? 280
 
@@ -59,8 +59,12 @@ struct MainWindow: View {
                     }
                 }
             }
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
-                sidebarWidth = width
+            .onGeometryChange(for: ClosedRange<CGFloat>.self) { geometry in
+                let frame = geometry.frame(in: .global)
+                return frame.minX...frame.maxX
+            } action: { horizontalExtent in
+                sidebarTrailingEdge = horizontalExtent.upperBound
+                let width = horizontalExtent.upperBound - horizontalExtent.lowerBound
                 if model.sidebarShown, width >= min(metrics.points(240), 280) {
                     UserDefaults.standard.set(Double(width), forKey: "sidebarWidth")
                 }
@@ -81,7 +85,8 @@ struct MainWindow: View {
             detail(records)
         }
         .background(WindowToolbarOverlay(
-            content: AnyView(MainWindowToolbar(title: title, sidebarWidth: model.sidebarShown ? sidebarWidth : 0,
+            content: AnyView(MainWindowToolbar(title: title,
+                                              sidebarTrailingEdge: model.sidebarShown ? sidebarTrailingEdge : nil,
                                               toggleSidebar: { model.sidebarVisible.toggle() },
                                               importRoutines: { model.presentingImport = true },
                                               newRoutine: { model.presentingNew = true },

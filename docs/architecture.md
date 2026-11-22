@@ -960,7 +960,7 @@ and the panel retains its 340 pt width while content reflows. Its footer moves
 whole actions to two rows when they no longer fit. Import caps its height at
 500 pt so its action row remains inside the minimum-height window. System-owned menus,
 window chrome and file dialogs retain their native size. Preserve the original
-main-toolbar presentation: navigation and title start beside the actual sidebar,
+main-toolbar presentation: navigation and title start after the sidebar's measured trailing edge,
 with the import/new action pair at the trailing edge; Settings hides that pair.
 `MainWindowToolbar` scales symbols, type, glass shapes and spacing in logical
 points. Its circular surface is 36 pt, the two-action capsule 64 x 36 pt, and the

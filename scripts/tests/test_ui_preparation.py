@@ -126,23 +126,29 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual([item["--phase"] for item in question_phases], ["actions", "renders"])
         self.assertEqual({item["--appearance"] for item in question_phases}, {"light", "dark"})
 
-    def test_toolbar_placement_uses_column_width_without_outline_inset(self):
+    def test_toolbar_leaves_a_scaled_gap_after_the_sidebar_outline(self):
         source = (Path(__file__).resolve().parents[1] / "ui-check.sh").read_text()
         body = source.split('if python3 - "$normal_bar"', 1)[1].split("<<'PYTHON'\n", 1)[1].split("\nPYTHON", 1)[0]
         rectangles = [
-            [100, 100, 1000, 52], [388, 108, 36, 36], [996, 108, 92, 36],
-            [436, 117, 40, 18], [108, 152, 280, 500],
-            [100, 100, 1000, 78], [392, 112, 54, 54], [944, 112, 138, 54],
-            [464, 125.5, 60, 27], [108, 178, 280, 450],
+            [100, 100, 1000, 52], [404, 108, 36, 36], [996, 108, 92, 36],
+            [452, 117, 40, 18], [108, 152, 280, 500],
+            [100, 100, 1000, 78], [412, 112, 54, 54], [944, 112, 138, 54],
+            [484, 125.5, 60, 27], [108, 178, 280, 450],
         ]
 
-        def verify():
-            arguments = [" ".join(map(str, rect)) for rect in rectangles]
+        def verify(bounds):
+            arguments = [" ".join(map(str, rect)) for rect in bounds]
             return subprocess.run([sys.executable, "-c", body, *arguments], capture_output=True, text=True)
 
-        self.assertEqual(verify().returncode, 0)
-        rectangles[1][0] += 8
-        self.assertNotEqual(verify().returncode, 0)
+        result = verify(rectangles)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for toggle, old_x in [(1, 388), (6, 392)]:
+            with self.subTest(toggle=toggle):
+                old_bounds = rectangles.copy()
+                old_bounds[toggle] = [old_x, *rectangles[toggle][1:]]
+                result = verify(old_bounds)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("sidebar to toolbar gap", result.stderr)
 
     def test_wait_value_retries_an_element_replaced_during_transition(self):
         root = Path(self.temporary.name)

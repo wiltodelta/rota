@@ -81,8 +81,9 @@ only a successful value read can satisfy the wait, including an expected empty v
 `focused` checks the focused element and its ancestors. Keyboard focus moved into the
 multi-line message field reports an editor without the field's identifier, so prove
 that move by typing (`key z`, then the field's value) rather than with `focused composer`.
-Toolbar placement uses the measured sidebar width from the toolbar's origin;
-the floating sidebar's AX outline can have an independent inset origin.
+The toolbar check measures the gap from the sidebar outline's trailing edge to
+the toggle. Both frames use screen coordinates, so the floating sidebar's inset
+origin is included in the check.
 An `AXSheet` is a separate window boundary: it may extend past its presenter.
 The layout gate checks its frame against the screen and its controls against
 the sheet and their own containers.
