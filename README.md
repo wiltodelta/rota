@@ -109,11 +109,16 @@ You need **macOS 15 Sequoia or later, on Apple silicon**, and the agent CLIs
 you want to use, installed and signed in: `claude`, `codex`, `grok`, or `agy`.
 Shell routines need no agent CLI.
 
-1. Download `Rota-vX.Y.Z-macOS.zip` from the
-   [latest release](https://github.com/wiltodelta/rota/releases/latest).
-2. Unzip it, move **Rota.app** to `/Applications`, and open it.
-3. Check **Settings > Agents**. Rota finds CLIs on your login shell's PATH
-   and in common install locations; you can also choose an executable.
+```bash
+brew install --cask wiltodelta/tap/rota
+```
+
+Or download `Rota-vX.Y.Z-macOS.zip` from the
+[latest release](https://github.com/wiltodelta/rota/releases/latest), unzip it,
+and move **Rota.app** to `/Applications`.
+
+Open **Rota**, then check **Settings > Agents**. Rota finds CLIs on your login
+shell's PATH and in common install locations; you can also choose an executable.
 
 To create a routine:
 

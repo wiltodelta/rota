@@ -34,16 +34,23 @@ A pushed annotated `vX.Y.Z` tag runs `.github/workflows/build.yml`: lint and
 tests, a temporary keychain with the Developer ID identity and the notarytool
 profile, `RELEASE=1 ./create-app.sh`, `./notarize.sh`, then the Sparkle
 `appcast.xml` (this release only, EdDSA-signed, with the tag body embedded as
-Markdown release notes), and the GitHub Release with the zip, the appcast, the
-tag's first line as its title and its body as the notes. CI refuses a
+Markdown release notes), the GitHub Release with the zip, the appcast, the
+tag's first line as its title and its body as the notes, and a `homebrew` job
+that bumps `Casks/rota.rb` in
+[wiltodelta/homebrew-tap](https://github.com/wiltodelta/homebrew-tap) with the
+new `version` and `sha256`. The cask sets `auto_updates true`, so Homebrew
+leaves installed copies to Sparkle and only keeps fresh installs current. CI refuses a
 lightweight tag, one without a body, and one that is not `vX.Y.Z` or not above
 every earlier tag: Sparkle offers only a higher version. Branch and pull request builds are
 signed ad hoc and uploaded as a workflow artifact.
 
 The repository secrets it reads are `DEVELOPER_ID_P12_BASE64`,
 `DEVELOPER_ID_P12_PASSWORD`, `NOTARY_KEY_P8_BASE64`, `NOTARY_KEY_ID`,
-`NOTARY_ISSUER_ID`, and `SPARKLE_PRIVATE_KEY`, the same set every app of the
-team uses. Only tag builds read them; GitHub never passes them to pull requests
+`NOTARY_ISSUER_ID`, `SPARKLE_PRIVATE_KEY` (the same set every app of the
+team uses), and `HOMEBREW_TAP_DEPLOY_KEY` (the private half of the write deploy
+key "rota release" on `wiltodelta/homebrew-tap`, created 2026-11-21 with no
+expiry and no other copy: to rotate, generate a new pair and replace the deploy
+key and the secret). Only tag builds read them; GitHub never passes them to pull requests
 from forks. Their source is the 1Password item "Apple Developer ID: Victor
 Kuznetsov (K2GT9Q4S6U)" (Private vault), which also holds the restore commands
 and the Sparkle key.
