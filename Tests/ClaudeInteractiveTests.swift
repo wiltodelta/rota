@@ -16,6 +16,11 @@ final class ClaudeInteractiveTests: XCTestCase {
             ["type": "tool_result", "tool_use_id": "t1", "content": "ok"]]]]), .other, "a tool result is not typed")
         XCTAssertEqual(entry(["type": "user", "isMeta": true, "message": ["content": "caveat"]]), .other)
         XCTAssertEqual(entry(["type": "user", "message": ["content": "<command-name>/exit</command-name>"]]), .other)
+        // Claude Code 2.1.330 filed the command's output as a third user entry (2026-11-21).
+        let output = "<local-command-stdout>Bye!</local-command-stdout>"
+        XCTAssertEqual(entry(["type": "user", "message": ["content": output]]), .other)
+        XCTAssertEqual(entry(["type": "user", "message": ["content": output + " why?"]]), .user(output + " why?"),
+                       "a typed message stays")
         XCTAssertEqual(entry(["type": "attachment", "attachment": ["type": "queued_command",
                                                                    "prompt": "Also say EXTRA"]]),
                        .queued("Also say EXTRA"))

@@ -376,6 +376,8 @@ flowchart LR
   2026-10-26). The notification starts a turn, so it clears the ended turn. Messages are typed in as a bracketed paste
   (`screen -X stuff` passes `^`, `\`, `$` through as typed); once the last turn
   ended with nothing typed since and no background task running, the run types `/exit`.
+  Claude files that `/exit` as a command echo and its farewell ("Bye!") as a
+  `<local-command-stdout>` user entry; the chat hides both (2.1.330, 2026-11-21).
   Dialogs Claude draws in the terminal reach the chat (`ClaudeDialog`). Claude
   draws its permission dialog while the `PermissionRequest` hook waits, and
   sends `permission_prompt` about six seconds later; a dialog no hook answers,

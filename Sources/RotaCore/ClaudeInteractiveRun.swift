@@ -440,8 +440,14 @@ enum ClaudeTranscript: Equatable {
     private static func userEntry(_ entry: [String: Any]) -> ClaudeTranscript {
         guard entry["isMeta"] as? Bool != true, let text = userText(entry) else { return .other }
         if TranscriptService.title(text) != nil { return .service(text) }
-        if text.hasPrefix("<command-name>") { return .other }
+        if text.hasPrefix("<command-name>") || isLocalCommandOutput(text) { return .other }
         return .user(text)
+    }
+
+    /// Output of a local command such as `/exit` ("Bye!") or `/model`, which Claude files after the hidden
+    /// command echo. A typed message that merely starts with the tag is the user's and stays.
+    private static func isLocalCommandOutput(_ text: String) -> Bool {
+        text.hasPrefix("<local-command-stdout>") && text.hasSuffix("</local-command-stdout>")
     }
 
     /// What the user typed, without the tool results and command echoes Claude files under the user role.
