@@ -13,6 +13,7 @@ change them when another agent fits the job better.
 by [Victor Kuznetsov](https://wiltodelta.com/)
 
 [![Build Rota App](https://github.com/wiltodelta/rota/actions/workflows/build.yml/badge.svg)](https://github.com/wiltodelta/rota/actions/workflows/build.yml)
+[![Glama MCP server](https://glama.ai/mcp/servers/wiltodelta/rota/badges/score.svg)](https://glama.ai/mcp/servers/wiltodelta/rota)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/sessions-dark.png">
