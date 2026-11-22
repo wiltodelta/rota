@@ -11,6 +11,7 @@ on:
       - '**.md'
       - 'docs/**'
       - '.claude/**'
+      - 'glama.json'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -59,7 +60,7 @@ jobs:
         while IFS= read -r file; do
           [[ -z "$file" ]] && continue
           case "$file" in
-            *.md|docs/*|.claude/*) ;;
+            *.md|docs/*|.claude/*|glama.json) ;;
             *) build=true; break ;;
           esac
         done <<< "$files"
