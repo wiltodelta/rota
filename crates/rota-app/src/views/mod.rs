@@ -261,7 +261,7 @@ fn build_detail_toolbar(
     );
 
     let lead_pad = if sidebar_shown {
-        theme.ui_px(8.0)
+        theme.ui_px(10.0)
     } else {
         theme.ui_px(80.0)
     };

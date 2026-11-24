@@ -376,6 +376,8 @@ flowchart LR
   2026-10-26). The notification starts a turn, so it clears the ended turn. Messages are typed in as a bracketed paste
   (`screen -X stuff` passes `^`, `\`, `$` through as typed); once the last turn
   ended with nothing typed since and no background task running, the run types `/exit`.
+  Claude files that `/exit` as a command echo and its farewell ("Bye!") as a
+  `<local-command-stdout>` user entry; the chat hides both (2.1.330, 2026-11-21).
   Dialogs Claude draws in the terminal reach the chat (`ClaudeDialog`). Claude
   draws its permission dialog while the `PermissionRequest` hook waits, and
   sends `permission_prompt` about six seconds later; a dialog no hook answers,
@@ -805,7 +807,7 @@ the implemented subset and journal schema are in [Transcript format](transcript-
 ## Desktop Shell & 120 Hz Metal UI Engine (`rota-ui`, `rota-app`)
 
 AppKit menu-bar shell (`crates/rota-app`) over a custom 120 Hz Metal / `wgpu 30` + `taffy` + `CoreText` + `NSAccessibility` UI engine (`crates/rota-ui`):
-- `rota-app` owns the `NSStatusItem` (`MenuIcon` / `MenuIconActive`), the borderless `340x420` `NSPanel` dropdown (`MenuBarPanel`, backed by `NSVisualEffectView` Popover vibrancy and direct in-memory `NSBitmapImageRep` rendering with `MouseUp` activation), native `NSMenu` menus (`File`, `Routine`, `Session`, `View`, `Help`, plus all popup menus when clicked by mouse), and the main `winit` / Metal window (`minimum 820x520`, default `1040x680`). The app switches activation policy to `.regular` while the main window is open and back to `.accessory` when it closes. Window tabbing is off.
+- `rota-app` owns the `NSStatusItem` (`MenuIcon` / `MenuIconActive`), the borderless `340x420` `NSPanel` dropdown (`MenuBarPanel`, backed by `NSVisualEffectView` Popover vibrancy and direct in-memory `NSBitmapImageRep` rendering with `MouseUp` activation), native `NSMenu` menus (`File`, `Routine`, `Session`, `View`, `Help`, plus all popup menus when clicked by mouse), and the main `winit` / Metal window (`minimum 820x520`, default `1040x680`). `MacShell::ensure_main_menu` installs the native `NSMenu` bar and the `'aevt'/'rapp'` AppleEvent reopen handler from `ApplicationHandler::resumed` (`applicationDidFinishLaunching:`, after `[NSApp finishLaunching]` registers AppKit's default reopen handler) so `open Rota.app` and Finder double-clicks reopen the main window while running in the menu bar. The app switches activation policy to `.regular` while the main window is open and back to `.accessory` when it closes. Window tabbing is off.
 - `rota-ui` batches all surfaces, rounded rectangles, hairline borders, soft drop shadows, SF Symbols / 4x4 supersampled SDF icons, `CoreText` `@2x` glyph runs, and color emoji/PNG bitmaps into a single-pass instanced WGSL shader (`shader.wgsl`) backed by a shelf-packed `TextureAtlas`. Clipped containers intersect rectangular and 4-corner SDF `border-box` clips (`Scene::push_rounded_clip`, inset inside the container's stroke) so child fills and scroll regions never bleed past rounded corners or overpaint parent borders.
 - Frame scheduling is strictly demand-driven (`ControlFlow::Wait`, 0% idle CPU); `ActivityClock` requests continuous 120 Hz redraws only while an active run spinner/pulse, a critically-damped `SpringSet` transition (`spring.rs`), a trackpad rubber-band overscroll rebound, or a scrollbar fade (`scroll_physics.rs`) is in flight, and uses `ControlFlow::WaitUntil` (`530 ms`) for focused caret blinking. Buttons follow standard macOS `MouseUp` activation with `pressed` highlight and drag-out cancellation; text editors support `Ime::Preedit` marked text, `set_ime_cursor_area` candidate positioning, Cocoa shortcuts (`Ctrl+A/E/K/D/H/B/F/P/N`), auto-growing multi-line composer height, and native file `Drag & Drop`. Shaped `CoreText` paragraphs and parsed `MarkdownBlock` trees are cached so typing in the composer never re-parses Markdown or hits the filesystem.
 - `RotaAxElement` subclasses `NSAccessibilityElement` (`crates/rota-ui/src/a11y_macos.rs`), pooling Objective-C instances by `(NSView, identifier)` across 120 Hz redraws while populating role, identifier, title, value, Cocoa-flipped screen frame, parent/children hierarchy, and `accessibilityPerformPress` on every frame and marking `winit`'s content `NSView` non-element (`setAccessibilityElement(false)`), so VoiceOver and `scripts/ui-driver.swift` inspect and drive the exact rendered controls without element invalidation.
@@ -880,7 +882,7 @@ and the panel retains its 340 pt width while content reflows. Its footer moves
 whole actions to two rows when they no longer fit. Import caps its height at
 500 pt so its action row remains inside the minimum-height window. System-owned menus,
 window chrome and file dialogs retain their native size. Preserve the original
-main-toolbar presentation: navigation and title start beside the actual sidebar,
+main-toolbar presentation: navigation and title start after the sidebar's measured trailing edge,
 with the import/new action pair at the trailing edge; Settings hides that pair.
 `MainWindowToolbar` scales symbols, type, glass shapes and spacing in logical
 points. Its circular surface is 36 pt, the two-action capsule 64 x 36 pt, and the

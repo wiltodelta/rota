@@ -1,3 +1,12 @@
+## 2026-11-22T19:10:00Z - авторизованное чтение GitHub API в harness_review.py
+
+id: github-releases-auth-resolved
+cue: `harness_review.py collect` запрашивает `codex-release` (`api.github.com/repos/openai/codex/releases/latest`).
+lesson: Не требуется ручной обход через `gh api` при штатном сборе: `scripts/harness_review.py` сам передаёт токен GitHub и получает ответ 200; возвращаться к ручной проверке только если авторизованный запрос вернёт ошибку.
+evidence: При сборе `2026-11-22T19:07Z` запрос `GET https://api.github.com/repos/openai/codex/releases/latest` прошёл с `authenticated=True` и `status=200`, а тест `test_github_api_source_is_read_with_the_token_and_never_logs_it` в `scripts/tests/test_harness_review.py` подтверждён.
+confidence: high, подтверждено тестом и успешным живым сбором.
+supersedes: github-releases-unauth-403
+
 ## 2026-11-15T19:18:00Z - лимит GitHub API у codex-release
 
 id: github-releases-unauth-403

@@ -180,10 +180,14 @@ impl ClaudeTranscript {
         if TranscriptService::title(&text).is_some() {
             return Self::Service(text);
         }
-        if text.starts_with("<command-name>") {
+        if text.starts_with("<command-name>") || Self::is_local_command_output(&text) {
             return Self::Other;
         }
         Self::User(text)
+    }
+
+    fn is_local_command_output(text: &str) -> bool {
+        text.starts_with("<local-command-stdout>") && text.ends_with("</local-command-stdout>")
     }
 
     pub fn user_text(entry: &Value) -> Option<String> {
@@ -198,5 +202,29 @@ impl ClaudeTranscript {
             .filter_map(|b| b.get("text").and_then(Value::as_str))
             .collect();
         (!parts.is_empty()).then(|| parts.join("\n"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::ClaudeTranscript;
+
+    #[test]
+    fn hides_command_echo_and_local_command_stdout_farewell_but_keeps_typed_text() {
+        let echo = json!({"type": "user", "message": {"content": "<command-name>/exit</command-name>"}});
+        assert_eq!(ClaudeTranscript::read_entry(&echo), ClaudeTranscript::Other);
+
+        let bye = "<local-command-stdout>Bye!</local-command-stdout>";
+        let farewell = json!({"type": "user", "message": {"content": bye}});
+        assert_eq!(ClaudeTranscript::read_entry(&farewell), ClaudeTranscript::Other);
+
+        let typed = format!("{bye} why?");
+        let user_msg = json!({"type": "user", "message": {"content": typed}});
+        assert_eq!(
+            ClaudeTranscript::read_entry(&user_msg),
+            ClaudeTranscript::User(typed)
+        );
     }
 }

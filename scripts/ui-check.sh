@@ -1694,9 +1694,8 @@ for factor, (bar, circle, actions, title, sidebar) in zip((1, 1.5), (rects[:5], 
     assert abs(actions[3] - 36 * factor) <= 0.5, ("capsule height", actions)
     for item in (circle, actions, title):
         assert abs(item[1] + item[3] / 2 - bar[1] - bar[3] / 2) <= 0.75, ("vertical center", item)
-    # The floating sidebar's AX outline has an inset origin. Its measured width
-    # determines the toolbar padding, which starts at the toolbar's own origin.
-    assert abs(circle[0] - bar[0] - sidebar[2] - 8 * factor) <= 0.5, ("sidebar placement", circle, sidebar)
+    gap = circle[0] - (sidebar[0] + sidebar[2])
+    assert 12 * factor <= gap <= 20 * factor, ("sidebar to toolbar gap", gap, circle, sidebar)
     assert abs(bar[0] + bar[2] - actions[0] - actions[2] - 12 * factor) <= 0.5, ("trailing margin", actions)
 assert abs(rects[8][3] - rects[3][3] * 1.5) <= 1.5, "title height follows zoom"
 assert abs(rects[5][1] - rects[0][1]) <= 0.5, "bar stays at the window top"

@@ -137,8 +137,6 @@ mod macos {
             NSWindow::setAllowsAutomaticWindowTabbing(false, mtm);
 
             let target = RotaShellTarget::new(mtm, tx.clone());
-            install_reopen_apple_event_handler(&target);
-            install_main_menu(mtm, &target);
 
             let status_bar = NSStatusBar::systemStatusBar();
             let status_item = status_bar.statusItemWithLength(NSVariableStatusItemLength);
@@ -181,6 +179,7 @@ mod macos {
         }
 
         pub fn ensure_main_menu(&self) {
+            install_reopen_apple_event_handler(&self.target);
             if let Some(mtm) = MainThreadMarker::new() {
                 install_main_menu(mtm, &self.target);
             }
