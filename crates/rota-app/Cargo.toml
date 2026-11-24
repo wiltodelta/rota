@@ -1,0 +1,26 @@
+[package]
+name = "rota-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "Rota"
+path = "src/main.rs"
+
+[dependencies]
+rota-platform.workspace = true
+rota-core.workspace = true
+rota-ui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+jiff.workspace = true
+uuid.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-foundation.workspace = true
+objc2-app-kit.workspace = true
+
+[lints]
+workspace = true

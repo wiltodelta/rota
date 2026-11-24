@@ -19,7 +19,7 @@ flowchart LR
     Finish --> History[RunHistory, Notifier]
 ```
 
-## RotaCore
+## Core Engine (`rota-platform`, `rota-core`, `rota-cli`)
 
 - `CronSchedule` parses five-field cron (Vixie semantics: day of month and day
   of week OR when both are restricted; weekday 7 is Sunday) and finds the next
@@ -652,7 +652,20 @@ flowchart LR
   Cancel, adjacent-session selection and empty history were exercised on
   synthetic data in both appearances at the 820 pt minimum width.
 
-## App
+## App & 120 Hz Metal UI Engine (`rota-ui`, `rota-app`)
+
+Rota's user interface is built on a dedicated 120 Hz GPU-accelerated rendering
+engine in `crates/rota-ui` (`wgpu 30` Metal backend + WGSL single-pass instanced
+SDF/atlas shader, `winit 0.30` ProMotion window loop, `taffy 0.15` Flexbox/Grid
+layout, `CoreText` `@2x` glyph and color-emoji shaping into shelf-packed GPU
+atlases, `VirtualScrollState` `O(log N)` prefix-sum viewport virtualization, and a
+live `NSAccessibilityElement` tree synchronized onto the window's `NSView` for
+VoiceOver and `scripts/ui-driver.swift`). `crates/rota-app` pairs that renderer
+with a lightweight AppKit menu bar shell (`NSStatusItem`, `NSPanel`, native
+`NSMenu` bar, `LSUIElement` `.accessory`/`.regular` switching, and AppleEvent
+reopen handling) while keeping OS-specific hooks behind `crates/rota-platform`
+for cross-platform portability. When no spinner or pulse is visible, the event
+loop rests in `ControlFlow::Wait` at 0% idle CPU.
 
 `ImportSheet` separates the fixed search header and action footer from the
 scrolling source groups. It is 640 x 500 pt and fits the 820 x 520 pt minimum content size.
@@ -789,108 +802,17 @@ with tolerant handling of optional output, not full harness output parity.
 The proposed adapter, journal, and view boundary is documented in that report;
 the implemented subset and journal schema are in [Transcript format](transcript-format.md).
 
-AppKit shell, SwiftUI content, the same structure as watch-me-sleep:
-`AppDelegate` owns an `NSStatusItem`, the borderless `NSPanel` dropdown
-(`MenuBarPanel.swift`, ported from watch-me-sleep with its sizing and Liquid
-Glass rules), and the main window as an `NSWindow` around an
-`NSHostingController`. The app turns `.regular` while the window is open and
-back to `.accessory` when it closes. Window tabbing is off. Settings is a mode
-of the main window, not the family's separate Settings window: the main window
-is Rota's primary surface, and agent settings belong beside the routines they
-run (decided 2026-10-27). `AppModel.settingsPane` swaps the sidebar for Back and
-the General, Chat and Agents sections (`SettingsMode.swift`) and the detail for
-the selected form, hides the import/new actions and titles the window after the
-section. Back (Escape, as its cancel shortcut, from any focus), picking a session
-from a notification and closing the window leave the mode and restore the
-previous selection; Command-, reopens the last section. `SidebarSettingsButton` sits below the routines
-and sessions list, not over it, so the history never scrolls under it and it needs
-no bar of its own; it shares the section rows' label style and text edge. Settings shows a hidden
-sidebar through `AppModel.sidebarShown` without changing the saved preference.
-The sidebar toggle and View > Hide Sidebar are dimmed in Settings, since its
-sections and Back live there.
-Section rows and Back use `ScaledSidebarLabelStyle`: the sidebar row style keeps
-its own icon gap and font at 100%, so the label sets them itself, with a routine
-row's icon column and gap (`SidebarIconColumn`, 16 pt symbols), so every name in both
-sidebars starts on one edge at each zoom level (measured within 1 pt, 80-150%),
-colours the icon with the accent, and on the focused selection gives name and
-icon the routine rows' `SidebarText` foreground.
-SwiftUI widens the window by the sidebar's width whenever a hidden sidebar
-returns, by the toggle or by Settings; neither the split item's
-`collapseBehavior` nor a `setFrame` override in an `NSWindow` subclass stopped
-it (2026-10-27). `keepMainWindowWidth` watches `didResizeNotification` for a
-second after the reveal and puts back the frame when only the width grew, so
-the detail gives up the room as with a dragged divider. `ui-check.sh` checks it. The
-panel footer places Open Rota on the left and groups Settings with Quit on
-the right, per the requested Rota layout rather than the family default.
-Two more departures from `macos-apps.md` came from the 2026-10-21 UX audit: the
-footer actions are text only in the primary colour (one gear among three read as a
-different kind of action, and secondary gray read as captions), and the Updates
-footer follows the automatic-check switch instead of always promising a daily check.
-Rota uses one appearance-adaptive content backing over the glass, with 75% opacity.
-The shared panel host accepts `contentBackgroundOpacity`; Rota sets it to zero
-so a second backing does not mask the material. Other callers retain the 96%
-default. Text contrast is checked on black, white, gray and colored backdrops.
-Settings forms scroll when the screen is shorter
-than their natural height, and the window frame stays inside the visible screen.
-Unsent composer drafts live in `AppModel.sessionDrafts`, keyed by session ID,
-until sent or the app quits. The chat's base fonts never fall below 10 pt before interface scaling. Reduce
-Motion stops the stop-ring rotation and suppresses shimmer.
-Progress animations (`ActivityAnimations.swift`: the spinners and the shimmer) run as Core
-Animation on their own layers. A SwiftUI-driven animation, whether a per-frame `TimelineView`
-or a repeating animation, made SwiftUI re-rasterize every text in the same hosting view on each
-frame, so an open running session cost most of a core, more the longer its transcript.
-A `CAGradientLayer` `locations` animation stayed still on screen, so the shimmer moves its band.
-Each keystroke in the message field runs a layout pass over the detail column, and the
-column's hosting view, which `NavigationSplitView` creates, recomputes its minimum size on
-each pass. A `ViewThatFits` there rebuilds every candidate on each pass: the session header's
-nested one built four copies of its action row per pass and took about 60% of the main thread
-while typing. `SessionHeader` (`SessionHeaderFit`) and the question card's buttons (`FirstFit`)
-choose their arrangement from widths measured by hidden copies, which keep their identity, so a
-pass only reads them. Keep `ViewThatFits`, Markdown parsing and file checks out of views the
-session column re-renders while the user types or the sidebar refreshes; `SessionPreviewText`
-renders row excerpts off the main actor (see `SessionHistoryRow` below).
-Local performance diagnostics (`AppPerformance`, `PerformanceDiagnostics`)
-record process resources, main-queue probe delays and common transcript-reader
-timings on a utility queue. The bounded journal contains numeric UI context,
-not conversation content. Sleep resets probes and resource baselines.
-The event contract, retention source of truth and verification are in
-[Local performance diagnostics](performance.md).
-The File menu holds New Routine and Import, the Routine menu Run Now, Stop and
-Edit Routine for `AppModel.selectedRoutine`; sheets open from `AppModel`
-flags so menus and buttons share them. The session header's Show Routine action
-selects its owning routine's existing detail page, where Edit opens the settings.
-At narrow widths the session header moves its utility actions onto a second row,
-keeping the labeled navigation action visible. Utility actions use accessible
-icons with help text when their full titles no longer fit. The routine header
-also moves its actions onto a second row instead of truncating their labels. `ChatTextSettings` holds the chat's
-font family, monospaced family and text scale in UserDefaults. Its font defaults are
-IBM Plex Sans and JetBrains Mono. `BundledFonts` registers the bundled faces with
-Core Text at process scope before the settings resolve any fonts. SwiftPM copies
-`Resources/Fonts` into `Rota_Rota.bundle`; `create-app.sh` embeds that resource
-bundle, including the OFL notices, in `Contents/Resources`. `BundledFonts`
-resolves it there explicitly for a packaged app and uses `Bundle.module` for
-tests and command-line builds. SwiftPM's command-line resource accessor does
-not search `Contents/Resources`; the Xcode build accessor does, which can mask
-a packaging defect during local testing. Explicit font preferences,
-including empty names selecting system fonts, keep their previous meaning.
-Font sources and update instructions are in `Sources/Rota/Resources/Fonts/README.md`.
-`chatTextScale` ranges from 0.7 to 2 and multiplies the interface scale. On first
-load without that key, the legacy `chatFontSize` (clamped to its previous
-10–28 pt range) is divided by the 14 pt body base and saved without rounding.
-The old key is retained but is no longer read after migration. Body text uses
-14/22 pt (font/line height), code blocks 12.5/20 pt; headings H1–H6 use
-19/27, 17/25, 14.5/22, 14/22, 13.5/21 and 13.5/21 pt. H1–H4 use semibold,
-H5–H6 regular. Prose and code blocks use native paragraph minimum line heights,
-allowing a taller user-selected font to fit. SwiftUI message text, tables and
-the composer add matching line spacing. Paragraph gaps and list indents follow
-both scales; surrounding controls and container padding follow the interface
-scale. The two preferences persist independently, and View > Reset resets
-only the interface scale. View > Chat Zoom changes the chat multiplier in 5%
-steps within its existing bounds and resets it independently to 100%. Its
-Option-Command shortcuts leave the interface zoom unchanged.
-`InterfaceScaleSettings`
-stores one app-wide scale (80%, 90%, 100%, 110%, 125% or 150%). View menu zoom
-commands and Settings > General change that same value. AppKit inserts a separator
+## Desktop Shell & 120 Hz Metal UI Engine (`rota-ui`, `rota-app`)
+
+AppKit menu-bar shell (`crates/rota-app`) over a custom 120 Hz Metal / `wgpu 30` + `taffy` + `CoreText` + `NSAccessibility` UI engine (`crates/rota-ui`):
+- `rota-app` owns the `NSStatusItem` (`MenuIcon` / `MenuIconActive`), the borderless `340x420` `NSPanel` dropdown (`MenuBarPanel`, backed by `NSVisualEffectView` Popover vibrancy and direct in-memory `NSBitmapImageRep` rendering with `MouseUp` activation), native `NSMenu` menus (`File`, `Routine`, `Session`, `View`, `Help`, plus all popup menus when clicked by mouse), and the main `winit` / Metal window (`minimum 820x520`, default `1040x680`). The app switches activation policy to `.regular` while the main window is open and back to `.accessory` when it closes. Window tabbing is off.
+- `rota-ui` batches all surfaces, rounded rectangles, hairline borders, soft drop shadows, SF Symbols / 4x4 supersampled SDF icons, `CoreText` `@2x` glyph runs, and color emoji/PNG bitmaps into a single-pass instanced WGSL shader (`shader.wgsl`) backed by a shelf-packed `TextureAtlas`. Clipped containers intersect rectangular and 4-corner SDF `border-box` clips (`Scene::push_rounded_clip`, inset inside the container's stroke) so child fills and scroll regions never bleed past rounded corners or overpaint parent borders.
+- Frame scheduling is strictly demand-driven (`ControlFlow::Wait`, 0% idle CPU); `ActivityClock` requests continuous 120 Hz redraws only while an active run spinner/pulse, a critically-damped `SpringSet` transition (`spring.rs`), a trackpad rubber-band overscroll rebound, or a scrollbar fade (`scroll_physics.rs`) is in flight, and uses `ControlFlow::WaitUntil` (`530 ms`) for focused caret blinking. Buttons follow standard macOS `MouseUp` activation with `pressed` highlight and drag-out cancellation; text editors support `Ime::Preedit` marked text, `set_ime_cursor_area` candidate positioning, Cocoa shortcuts (`Ctrl+A/E/K/D/H/B/F/P/N`), auto-growing multi-line composer height, and native file `Drag & Drop`. Shaped `CoreText` paragraphs and parsed `MarkdownBlock` trees are cached so typing in the composer never re-parses Markdown or hits the filesystem.
+- `RotaAxElement` subclasses `NSAccessibilityElement` (`crates/rota-ui/src/a11y_macos.rs`), pooling Objective-C instances by `(NSView, identifier)` across 120 Hz redraws while populating role, identifier, title, value, Cocoa-flipped screen frame, parent/children hierarchy, and `accessibilityPerformPress` on every frame and marking `winit`'s content `NSView` non-element (`setAccessibilityElement(false)`), so VoiceOver and `scripts/ui-driver.swift` inspect and drive the exact rendered controls without element invalidation.
+- Settings is a mode of the main window, not a separate Settings window: the main window is Rota's primary surface, and agent settings belong beside the routines they run (decided 2026-10-27). `SettingsView` swaps the sidebar for `Back` and the `General`, `Chat` and `Agents` sections and the detail pane for the selected form, hides the import/new actions, and titles the window after the section. `Back` or `Escape` restores the previous selection; `Command-,` reopens the last section. `SidebarSettingsButton` sits below the routines and sessions list so history never scrolls under it.
+- Local performance diagnostics (`PerformanceDiagnostics`) record process resources (`task_info` RSS and `getrusage` CPU), main-thread probe delays and shared `TranscriptReader` timings on a background thread. The bounded journal (`current.jsonl` / `previous.jsonl`) contains numeric UI context, never conversation content. Sleep resets probes and resource baselines; see [Local performance diagnostics](performance.md).
+- `register_bundled_fonts()` registers bundled `IBM Plex Sans` and `JetBrains Mono` from `Contents/Resources/Fonts` (or `Resources/Fonts` during Cargo tests) with Core Text at process scope (`CTFontManagerScope::Process`). Font sources and update instructions are in `Resources/Fonts/README.md`.
+- `chatScale` ranges from `0.7` to `2.0` and multiplies `interfaceScale` (`80%`, `90%`, `100%`, `110%`, `125%`, `150%`). Body text uses `14/22 pt`, code blocks `12.5/20 pt`, and headings `H1`–`H6` use `19/27`, `17/25`, `14.5/22`, `14/22`, `13.5/21` and `13.5/21 pt` (`H1`–`H4` semibold). Both preferences persist independently in `NSUserDefaults`; `View > Reset` resets only the interface scale while `View > Chat Zoom` adjusts the chat multiplier in 5% steps. AppKit inserts a separator
 before the native `toggleFullScreen:` action after AppKit menu changes finish,
 because SwiftUI can discard a trailing command-group divider. The check
 uses the action selector and preserves an existing separator after menu rebuilds.

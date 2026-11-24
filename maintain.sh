@@ -1,18 +1,28 @@
 #!/bin/bash
-# Shared by translate-like-me, watch-me-sleep and rota: change every copy together
-# (claude-config docs/macos-apps.md, "Shared files").
-# The canonical gate: lint with fixes, tests, then the release bundle.
+# Canonical quality gate for Rota (Rust workspace): format, file-size check,
+# strict clippy, fatal osv-scanner lockfile check, tests, and signed .app bundle.
 
-set -e
+set -euo pipefail
 cd "$(dirname "$0")"
+export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"
 
-command -v swiftlint >/dev/null 2>&1 ||
-    { echo "error: swiftlint is not installed (brew install swiftlint)" >&2; exit 1; }
-swiftlint lint --fix
-# `--fix` prints only what it corrected; fail on what it could not fix, as CI does.
-swiftlint lint --strict --quiet
+command -v cargo >/dev/null 2>&1 ||
+    { echo "error: cargo is not installed (brew install rustup && rustup default stable)" >&2; exit 1; }
+command -v osv-scanner >/dev/null 2>&1 ||
+    { echo "error: osv-scanner is not installed (brew install osv-scanner)" >&2; exit 1; }
 
-swift test
-# The bundle, not a bare `swift build -c release`: assembly, actool, Sparkle
-# embedding, signing and the SDK stamp check would otherwise run only in CI.
+cargo fmt --all
+cargo fmt --all -- --check
+
+# Enforce modular file cap (<= 500 lines per Rust source file).
+OVER_LIMIT="$(find crates -name '*.rs' -print0 | xargs -0 wc -l | awk '$2 != "total" && $1 > 500 {print}')"
+if [[ -n "$OVER_LIMIT" ]]; then
+    echo "error: Rust source files exceed 500-line limit:" >&2
+    echo "$OVER_LIMIT" >&2
+    exit 1
+fi
+
+cargo clippy --workspace --all-targets -- -D warnings
+osv-scanner --lockfile=Cargo.lock
+cargo test --workspace
 ./create-app.sh

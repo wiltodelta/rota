@@ -34,7 +34,7 @@ def tree_hash(path: Path) -> str:
 def source_hash(repo: Path) -> str:
     paths = subprocess.check_output([
         "git", "-C", str(repo), "ls-files", "-co", "--exclude-standard", "-z", "--",
-        "Sources", "scripts", "Package.swift", "Package.resolved", "create-app.sh",
+        "crates", "Resources", "scripts", "Cargo.toml", "Cargo.lock", "create-app.sh",
         ":(glob)*.xcassets/**", ":(glob)*.icon/**",
     ]).decode().split("\0")
     digest = hashlib.sha256()

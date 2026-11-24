@@ -110,7 +110,7 @@ entry matching the run outcome into one footer with the completion time, result,
 repeat the status as a transcript row or offer a bulk Copy action. Earlier status
 entries from continued runs remain in order, and a missing final status uses the
 run record outcome. Legacy sessions share the footer without Copy. Normalized entries render
-in their recorded order with stable IDs and SwiftUI scroll targets, except that
+in their recorded order with stable IDs and virtualized scroll targets, except that
 Antigravity's same-step archived reasoning (`antigravity/<session>/<step>/thinking`),
 which arrives after its completed streamed response (`.../text`), aligns immediately
 before that response in the view projection. Adjacent tool

@@ -54,7 +54,7 @@ must cover native expansion and relocation, rather than tailing a decompressed
 copy. `SessionArchiveTests` checks restore failure and recovery boundaries.
 
 Run builds, `maintain.sh` and UI checks sequentially. UI scripts also assemble
-and sign `Rota.app`; SwiftPM's build lock does not cover bundle assembly or signing.
+and sign `Rota.app`; Cargo's build lock does not cover bundle assembly or signing.
 
 ## Recovery and ownership
 

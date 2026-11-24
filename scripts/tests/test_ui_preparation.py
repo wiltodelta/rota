@@ -24,9 +24,9 @@ class PreparationTests(unittest.TestCase):
         self.repo = root / "repo"
         self.repo.mkdir()
         subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
-        (self.repo / "Sources").mkdir()
-        self.source = self.repo / "Sources/View.swift"
-        self.source.write_text("struct Fixture {}\n")
+        (self.repo / "crates/rota-app/src").mkdir(parents=True)
+        self.source = self.repo / "crates/rota-app/src/view.rs"
+        self.source.write_text("pub struct Fixture;\n")
         self.app = root / "Rota.app"
         (self.app / "Contents").mkdir(parents=True)
         self.info = self.app / "Contents/Info.plist"
@@ -51,8 +51,8 @@ class PreparationTests(unittest.TestCase):
                 path.write_bytes(original)
 
     def test_new_source_and_missing_resource_are_rejected(self):
-        added = self.repo / "Sources/New.swift"
-        added.write_text("struct Added {}")
+        added = self.repo / "crates/rota-app/src/new.rs"
+        added.write_text("pub struct Added;\n")
         with self.assertRaisesRegex(ValueError, "inputs changed"):
             validate(self.manifest, self.repo)
         added.unlink()

@@ -1,0 +1,7 @@
+[target.aarch64-apple-darwin]
+rustflags = [
+    "-C", "link-arg=-Wl,-platform_version,macos,15.0,26.0",
+]
+
+[env]
+MACOSX_DEPLOYMENT_TARGET = "15.0"
