@@ -290,11 +290,6 @@ fn modal_header_body_and_footer_share_continuous_unbroken_border() {
                 .render_to_rgba(vp.width as u32, vp.height as u32, 2.0, &scene)
                 .expect("render modal to rgba");
 
-            let px = |x: u32, y: u32| -> [u8; 3] {
-                let off = ((y * pw + x) * 4) as usize;
-                [rgba[off], rgba[off + 1], rgba[off + 2]]
-            };
-
             let lx = (modal_b.x * 2.0).round() as u32;
             let rx = (modal_b.max_x() * 2.0).round() as u32 - 1;
             let hdr_y = ((modal_b.y + 24.0) * 2.0).round() as u32;
@@ -302,9 +297,9 @@ fn modal_header_body_and_footer_share_continuous_unbroken_border() {
             let ftr_y = ((modal_b.max_y() - 24.0) * 2.0).round() as u32;
 
             for x_col in [lx, lx + 1, rx - 1, rx] {
-                let c_hdr = px(x_col, hdr_y);
-                let c_body = px(x_col, body_y);
-                let c_ftr = px(x_col, ftr_y);
+                let c_hdr = rgb_at(&rgba, pw, x_col, hdr_y);
+                let c_body = rgb_at(&rgba, pw, x_col, body_y);
+                let c_ftr = rgb_at(&rgba, pw, x_col, ftr_y);
                 let diff_body = c_hdr[0].abs_diff(c_body[0]);
                 let diff_ftr = c_hdr[0].abs_diff(c_ftr[0]);
                 assert!(
@@ -314,4 +309,82 @@ fn modal_header_body_and_footer_share_continuous_unbroken_border() {
             }
         }
     }
+}
+
+fn rgb_at(rgba: &[u8], pw: u32, x: u32, y: u32) -> [u8; 3] {
+    let off = ((y * pw + x) * 4) as usize;
+    [rgba[off], rgba[off + 1], rgba[off + 2]]
+}
+
+#[test]
+fn single_line_fields_and_import_search_center_text_vertically_on_pixels() {
+    let mut gpu = GpuRenderer::new_headless().expect("headless Metal GpuRenderer");
+    let mut fx = make_fixture(Appearance::Light);
+    fx.state.window_vibrant = false;
+    let vp = Size::new(1000.0, 680.0);
+
+    let mut imp = ImportSheetState::new();
+    imp.scans = Some(Vec::new());
+    fx.state.import_modal = Some(imp);
+    fx.state.focus = Some(FocusTarget::ImportSearch);
+    let _ = render_main_window(&mut fx.state, vp, 2.0, 3.0, &mut gpu);
+    let (scene, _) = render_main_window(&mut fx.state, vp, 2.0, 3.5, &mut gpu);
+
+    let tree = fx.state.last_tree.as_ref().expect("computed tree");
+    let search_b = tree.bounds_by_id("importSearch").expect("importSearch bounds");
+    let text_b = tree
+        .bounds_by_id("importSearch-text")
+        .expect("importSearch-text bounds");
+    let layout_delta = (text_b.center().y - search_b.center().y).abs();
+    assert!(
+        layout_delta <= 1.0,
+        "importSearch-text center ({:.2}) must align with importSearch center ({:.2}), delta={layout_delta:.2}",
+        text_b.center().y,
+        search_b.center().y
+    );
+
+    let (pw, _ph, rgba) = gpu
+        .render_to_rgba(vp.width as u32, vp.height as u32, 2.0, &scene)
+        .expect("render importSheet to rgba");
+
+    let x0 = ((text_b.x + 2.0) * 2.0).round() as u32;
+    let x1 = ((text_b.x + 180.0) * 2.0).round() as u32;
+    let mid_x = ((search_b.x + search_b.width * 0.8) * 2.0).round() as u32;
+    let mid_y = (search_b.center().y * 2.0).round() as u32;
+    let bg = rgb_at(&rgba, pw, mid_x, mid_y);
+    let span = |a: [u8; 3], b: [u8; 3]| -> u8 {
+        a[0].abs_diff(b[0])
+            .max(a[1].abs_diff(b[1]))
+            .max(a[2].abs_diff(b[2]))
+    };
+
+    let top_in = (1..mid_y)
+        .rev()
+        .find(|&y| span(rgb_at(&rgba, pw, mid_x, y), bg) >= 12)
+        .expect("search box top border")
+        + 1;
+    let bot_in = ((mid_y + 1)..(vp.height as u32 * 2 - 1))
+        .find(|&y| span(rgb_at(&rgba, pw, mid_x, y), bg) >= 12)
+        .expect("search box bottom border")
+        - 1;
+    let box_center_px = (top_in + bot_in) as f32 * 0.5;
+
+    let mut row_ink = Vec::new();
+    for y in (top_in + 3)..=(bot_in - 3) {
+        let cnt = (x0..=x1)
+            .filter(|&x| span(rgb_at(&rgba, pw, x, y), bg) >= 24)
+            .count();
+        row_ink.push((y, cnt));
+    }
+    let peak = row_ink.iter().map(|&(_, c)| c).max().unwrap_or(0);
+    assert!(peak >= 4, "placeholder text must render visible ink");
+    let floor = ((peak as f32) * 0.15).ceil() as usize;
+    let first_y = row_ink.iter().find(|&&(_, c)| c >= floor).unwrap().0;
+    let last_y = row_ink.iter().rfind(|&&(_, c)| c >= floor).unwrap().0;
+    let ink_center_px = (first_y + last_y) as f32 * 0.5;
+    let px_delta = (ink_center_px - box_center_px).abs();
+    assert!(
+        px_delta <= 3.5,
+        "importSearch placeholder ink center ({ink_center_px:.1}px) off box center ({box_center_px:.1}px) by {px_delta:.1}px"
+    );
 }

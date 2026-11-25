@@ -274,25 +274,28 @@ fn text_editor_internal_preedit(
     } else {
         Point::ZERO
     };
+    let mut inner_col = UiElement::column()
+        .width(inner_w)
+        .height(min_height.max(theme.ui_px(20.0)))
+        .clip()
+        .scroll_offset(scroll_pt);
+    if !state.multiline {
+        inner_col = inner_col.justify_center();
+    }
     outer.child(
-        UiElement::column()
-            .width(inner_w)
-            .height(min_height.max(theme.ui_px(20.0)))
-            .clip()
-            .scroll_offset(scroll_pt)
-            .child(
-                UiElement::text(
-                    spans,
-                    TextLayoutOpts {
-                        max_width: max_text_w,
-                        max_lines: if state.multiline { Some(8) } else { Some(1) },
-                        line_height_factor: 1.44,
-                        ..Default::default()
-                    },
-                )
-                .id(text_node_id)
-                .width(if single_focused { 4096.0 } else { inner_w }),
-            ),
+        inner_col.child(
+            UiElement::text(
+                spans,
+                TextLayoutOpts {
+                    max_width: max_text_w,
+                    max_lines: if state.multiline { Some(8) } else { Some(1) },
+                    line_height_factor: 1.44,
+                    ..Default::default()
+                },
+            )
+            .id(text_node_id)
+            .width(if single_focused { 4096.0 } else { inner_w }),
+        ),
     )
 }
 
