@@ -376,6 +376,16 @@ flowchart LR
   2026-10-26). The notification starts a turn, so it clears the ended turn. Messages are typed in as a bracketed paste
   (`screen -X stuff` passes `^`, `\`, `$` through as typed); once the last turn
   ended with nothing typed since and no background task running, the run types `/exit`.
+  A failed request (the Mac slept, the network dropped) leaves Claude at its prompt
+  with an `isApiErrorMessage` entry and no `turn_duration`; transcripts show it
+  going on by itself within 80 s after some errors and waiting for input after
+  others, so `stallGrace` (5 minutes of awake silence, restarted by bookkeeping
+  entries and tool results, cancelled by anything else Claude writes) counts as the turn's end, and the failed run goes to `Resilience`
+  (2.1.331, 2026-11-26). Each launch has its own exit file and first ends any
+  screen still open under the session's name (`ScreenRun.terminate`): two screens
+  under one name refuse every `screen -S` command, so the run could neither type
+  `/exit` nor quit, and a late exit status from the old screen once failed the new run.
+  `ScreenRun.quit` falls back to the same termination when `screen` refuses the command.
   Claude files that `/exit` as a command echo and its farewell ("Bye!") as a
   `<local-command-stdout>` user entry; the chat hides both (2.1.330, 2026-11-21).
   Dialogs Claude draws in the terminal reach the chat (`ClaudeDialog`). Claude
@@ -1780,7 +1790,13 @@ runs persist a private stdout spool and process lease; the wrapper saves the
 actual exit code. Shell and terminal runs follow the existing screen and
 native archive. Process ownership includes kernel birth time, so stale leases
 cannot signal a reused PID. Stop waits for owned descendants to exit and
-escalates when they ignore termination. Codex waits for a turn ID and native
+escalates when they ignore termination. `proc_listchildpids` returns a count of
+PIDs, not bytes, and the walk passes through the setuid-root `login` that
+`screen` starts, which `proc_pidinfo` cannot read; before 2026-11-26 both cut the
+list short. Stop then ended only the screen or the `DurableStream` wrapper shell:
+Claude stayed in its screen, and `agy` kept working on its conversation, so a
+continued run started a second `agy` there, which failed (`expected tool step at
+index …`) without exiting and left the run open for hours. Codex waits for a turn ID and native
 completion even if Stop arrives before the start reply. A lost connection
 reserves the routine until reconciliation succeeds; scheduled slots, manual
 runs and follow-up messages cannot create another writer while state is unknown.

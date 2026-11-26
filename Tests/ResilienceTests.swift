@@ -349,6 +349,14 @@ final class ResilienceTests: XCTestCase {
             + "\"https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse\": EOF"))
         XCTAssertTrue(NetworkFailure.matches("Eligibility check failed: Get "
             + "\"https://www.googleapis.com/oauth2/v2/userinfo\": EOF"))
+        for text in ["API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)",
+                     "API Error: Connection closed mid-response. The response above may be incomplete.",
+                     "API Error: Connection lost while your computer was asleep",
+                     "API Error: The response stopped arriving. The response above may be incomplete.",
+                     "API Error: Response stalled mid-stream. The response above may be incomplete."] {
+            XCTAssertTrue(NetworkFailure.matches(text), text)
+        }
+        XCTAssertFalse(NetworkFailure.matches("You've hit your weekly limit · resets 10pm (America/Los_Angeles)"))
         XCTAssertFalse(NetworkFailure.matches("The test operation timed out"))
         XCTAssertFalse(NetworkFailure.matches("API error: quota exceeded"))
         XCTAssertFalse(NetworkFailure.matches("API error: unauthorized"))

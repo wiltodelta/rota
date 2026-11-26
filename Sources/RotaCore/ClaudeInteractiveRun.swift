@@ -13,7 +13,10 @@ import os
 /// into the terminal as a bracketed paste, so a line break stays a line break.
 /// Once the last turn has ended with no message waiting and no background task
 /// running, the run types `/exit`: Claude starts a turn of its own when a task
-/// it left running finishes, and leaving earlier would stop that task.
+/// it left running finishes, and leaving earlier would stop that task. A request
+/// that failed (the Mac slept, the network dropped) leaves Claude at its prompt
+/// with no turn end, so an API error followed by `stallGrace` of silence counts
+/// as one, and the failed run goes to `Resilience`.
 /// "Open in Terminal" attaches to the screen session. A dialog Claude draws there
 /// that no hook answers reaches the chat: its `Notification` hook names the
 /// dialog file, the run reads the options off the screen (`ClaudeDialog`) and
@@ -38,6 +41,15 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
     /// Messages typed in and not yet seen in the transcript.
     private var unanswered = 0
     private var turnEnded = false
+    /// Since when Claude has been silent after an API error: set by the error, moved on by each
+    /// bookkeeping entry or tool result, cleared by anything else.
+    private var erroredAt: TimeInterval?
+    /// How long Claude may sit on an API error before the run takes its turn as over. Transcripts
+    /// read on 2026-11-26 show Claude going on by itself within 80 s of some errors, and waiting
+    /// for input after others ("The response stopped arriving", 18 minutes until Stop).
+    static let stallGrace: TimeInterval = 300
+    /// Uptime, which stops while the Mac sleeps, so a stall is measured awake.
+    var uptime: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     /// Background shells and agents started in this run and not yet reported finished.
     private var background: Set<String> = []
     private var failed = false
@@ -52,7 +64,8 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         self.journal = journal
         self.session = session
         name = Self.screenName(session)
-        exitFile = folder.appendingPathComponent("\(name).exit")
+        // Per launch: a session left from an earlier run must not write this run's status.
+        exitFile = folder.appendingPathComponent("\(name)-\(UUID().uuidString).exit")
         script = folder.appendingPathComponent("\(name).zsh")
         effortFile = folder.appendingPathComponent("\(name)-\(UUID().uuidString).effort")
         dialogs = ClaudeDialogBridge(screen: name, session: session, folder: folder, journal: journal, queue: queue)
@@ -120,6 +133,11 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         var environment = spec.environment
         environment["ROTA_SESSION_EFFORT"] = effortFile.path
         environment["ROTA_SESSION_DIALOG"] = dialogs.file.path
+        // A screen still open under this name belongs to a finished run (an active or surviving one
+        // blocks continuing): two Claudes would write one transcript, and two screens one name.
+        if ScreenRun.terminate(name) > 0 {
+            Self.log.notice("ended a screen left open for claude \(self.session, privacy: .public)")
+        }
         try ScreenRun.launchDetached(name, script: script, in: spec.workingDirectory, environment: environment)
         journal.session(session)
         if let timeout = spec.timeout {
@@ -163,7 +181,7 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
            let status = exitStatus ?? (isAlive() ? nil : exitStatus ?? -1) {
             return finish(status: status)
         }
-        if turnEnded, unanswered == 0, background.isEmpty, !exiting, stopReason == nil {
+        if readyToExit, !exiting, stopReason == nil {
             exiting = true
             type("/exit")
             type("\r")
@@ -172,6 +190,12 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         }
         // Strong on purpose: the run keeps itself alive until Claude exits.
         queue.asyncAfter(deadline: .now() + 1) { self.poll() }
+    }
+
+    /// The last turn ended, or Claude sat on an API error for `stallGrace`, and nothing is left to wait for.
+    var readyToExit: Bool {
+        let stalled = erroredAt.map { uptime() - $0 >= Self.stallGrace } ?? false
+        return (turnEnded || stalled) && unanswered == 0 && background.isEmpty
     }
 
     private func readEffort() {
@@ -243,6 +267,12 @@ final class ClaudeInteractiveRun: RunControl, @unchecked Sendable {
         let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         let entry = object.map(ClaudeTranscript.read(entry:)) ?? .other
         restore(entry)
+        switch entry {
+        case .apiError: erroredAt = uptime()
+        // Bookkeeping and tool results show Claude still busy: the silence starts again.
+        case .other: if erroredAt != nil { erroredAt = uptime() }
+        default: erroredAt = nil
+        }
         if let object { dialogs.track(object, movesOn: entry.movesOn) }
         record(entry, data: data)
     }

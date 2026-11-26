@@ -63,6 +63,56 @@ final class ClaudeInteractiveTests: XCTestCase {
             + "\t811.rota-claude-060c03c9x\t(Detached)\n2 Sockets in /tmp/.screen.\n"
         XCTAssertEqual(ScreenRun.pid("rota-claude-060c03c9", in: list), 63754)
         XCTAssertNil(ScreenRun.pid("rota-claude-ffffffff", in: list))
+        // A continued session once launched beside a screen left under its name (2026-11-26).
+        let twice = list + "\t88674.rota-claude-060c03c9\t(Detached)\n"
+        XCTAssertEqual(ScreenRun.pids("rota-claude-060c03c9", in: twice), [63754, 88674])
+    }
+
+    /// Claude at its prompt after a failed request writes no turn end: the run waits out
+    /// `stallGrace` of silence, and anything Claude writes or receives in between restarts it.
+    func testAnAPIErrorFollowedBySilenceEndsTheTurn() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("rota-stall-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let log = folder.appendingPathComponent("session.log")
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        let spec = LaunchSpec(executable: "/bin/false", prompt: "Work", arguments: [], workingDirectory: folder.path,
+                              environment: [:], mode: .claudeInteractive, timeout: nil, log: log)
+        let journal = RunJournal(output: try FileHandle(forWritingTo: log),
+                                 events: RunEvents(session: { _ in }, finished: { _ in }))
+        defer { journal.finish(.cancelled) }
+        let run = ClaudeInteractiveRun(spec: spec, journal: journal, session: "synthetic", folder: folder)
+        var clock: TimeInterval = 1000
+        run.uptime = { clock }
+        func write(_ json: [String: Any]) throws { run.handle(entry: try JSONSerialization.data(withJSONObject: json)) }
+        let error: [String: Any] = ["type": "assistant", "isApiErrorMessage": true, "message": [
+            "model": "<synthetic>", "content": [["type": "text", "text": "API Error: The response stopped arriving."]]]]
+        let reply: [String: Any] = ["type": "assistant", "message": ["model": "claude-opus-5-5", "content": [
+            ["type": "text", "text": "Done."]]]]
+
+        try write(reply)
+        try write(error)
+        try write(["type": "file-history-snapshot"])
+        clock += ClaudeInteractiveRun.stallGrace - 1
+        XCTAssertFalse(run.readyToExit, "Claude may still go on by itself")
+        clock += 1
+        XCTAssertTrue(run.readyToExit)
+
+        try write(["type": "user", "toolUseResult": ["backgroundTaskId": "b1"], "message": ["content": [
+            ["type": "tool_result", "content": "running"]]]])
+        clock += ClaudeInteractiveRun.stallGrace
+        XCTAssertFalse(run.readyToExit, "a background task wakes Claude when it finishes")
+
+        try write(error)
+        try write(["type": "user", "toolUseResult": ["task_id": "b1", "task_type": "local_bash"]])
+        try write(error)
+        clock += ClaudeInteractiveRun.stallGrace / 2
+        try write(["type": "user", "message": ["content": [["type": "tool_result", "content": "ok"]]]])
+        clock += ClaudeInteractiveRun.stallGrace / 2
+        XCTAssertFalse(run.readyToExit, "a tool result restarts the silence")
+        try write(reply)
+        clock += ClaudeInteractiveRun.stallGrace
+        XCTAssertFalse(run.readyToExit, "Claude went on, and its turn has not ended")
     }
 
     func testCommandLine() {

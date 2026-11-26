@@ -30,15 +30,35 @@ final class ScreenRun: RunControl, @unchecked Sendable {
         list.split(separator: "\n").contains { pid(name, in: String($0)) != nil && $0.contains("(Attached)") }
     }
 
-    static func pid(_ name: String, in list: String) -> pid_t? {
-        list.split(whereSeparator: \.isWhitespace).lazy.compactMap { field -> pid_t? in
+    static func pid(_ name: String, in list: String) -> pid_t? { pids(name, in: list).first }
+
+    /// Every session named exactly `name` in a `screen -ls` listing.
+    static func pids(_ name: String, in list: String) -> [pid_t] {
+        list.split(whereSeparator: \.isWhitespace).compactMap { field -> pid_t? in
             let parts = field.split(separator: ".", maxSplits: 1)
             guard parts.count == 2, parts[1] == name else { return nil }
             return pid_t(parts[0])
-        }.first
+        }
     }
 
     static func alive(_ name: String) -> Bool { pid(name) != nil }
+
+    /// Ends every session named exactly `name` with all its processes, and returns how many there were.
+    /// Two sessions under one name refuse each `screen -S name` command ("several suitable screens"),
+    /// so a run could neither type into its session nor quit it, and waited for hours (2026-11-26).
+    @discardableResult
+    static func terminate(_ name: String) -> Int {
+        let roots = pids(name, in: list(name)).compactMap(OwnedProcess.init(pid:))
+        guard !roots.isEmpty else { return 0 }
+        let owned = roots.flatMap { $0.descendants() + [$0] }
+        owned.forEach { $0.signal(SIGTERM) }
+        for _ in 0..<50 where owned.contains(where: \.exists) { usleep(100_000) }
+        owned.forEach { $0.signal(SIGKILL) }
+        // A killed screen leaves its socket listed as dead, which would still read as alive.
+        _ = ProcessLauncher.capture(screen, ["-wipe", name], in: NSTemporaryDirectory(), timeout: commandTimeout,
+                                    loginShell: false)
+        return roots.count
+    }
 
     /// Starts a detached UTF-8 `screen` session running `script` in a login `zsh` shell.
     /// `-U` forces UTF-8 window decoding even when LaunchServices starts Rota without `LANG`.
@@ -68,10 +88,11 @@ final class ScreenRun: RunControl, @unchecked Sendable {
     /// Types `text` into the first window of session `name`, as keys.
     static func type(_ name: String, _ text: String) { command(name, ["-p", "0", "-X", "stuff", text]) }
 
-    /// Quits session `name`; a wedged screen that ignores its own commands is ended by its pid.
+    /// Quits session `name`; a wedged screen that ignores its own commands, or one of two sharing
+    /// the name, is ended with its processes.
     static func quit(_ name: String) {
-        guard command(name, ["-X", "quit"]) != 0, let pid = pid(name) else { return }
-        kill(pid, SIGTERM)
+        guard command(name, ["-X", "quit"]) != 0 else { return }
+        terminate(name)
     }
 
     private let journal: RunJournal

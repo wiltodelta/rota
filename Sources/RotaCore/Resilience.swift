@@ -221,7 +221,10 @@ public enum NetworkFailure {
         "error sending request", "fetch failed", "socket hang up", "appears to be offline", "connection reset",
         "dns error", "failed to connect", "unable to connect",
         "read: operation timed out", "no route to host", "dial tcp: lookup",
-        "went to sleep mid-response", "request failed: post", "eligibility check failed"
+        "went to sleep mid-response", "request failed: post", "eligibility check failed",
+        // Claude Code's own wording for a lost or stalled stream (transcripts through 2026-11-26).
+        "can't reach the api server", "connection closed mid-response", "connection lost",
+        "response stopped arriving", "response stalled mid-stream"
     ]
 
     public static func matches(_ text: String) -> Bool {
