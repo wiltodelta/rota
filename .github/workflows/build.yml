@@ -114,9 +114,9 @@ jobs:
         echo "Git tag: $(git describe --tags --abbrev=0 2>/dev/null || echo 'No tag found')"
         echo "Building version: $(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo '1.0.0')"
 
-    - name: Clean build directory for release (on tag)
+    - name: Clean build directories for release (on tag)
       if: startsWith(github.ref, 'refs/tags/v')
-      run: rm -rf target
+      run: rm -rf target .build
 
     - name: Cache Cargo registry
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -129,14 +129,16 @@ jobs:
         restore-keys: |
           macos-26-cargo-reg-
 
-    - name: Cache Cargo target (branch and PR)
+    - name: Cache Cargo and SwiftPM build outputs (branch and PR)
       if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: target
-        key: macos-26-cargo-target-${{ env.LATEST_XCODE }}-${{ hashFiles('Cargo.lock') }}
+        path: |
+          target
+          .build
+        key: macos-26-hybrid-build-${{ env.LATEST_XCODE }}-${{ hashFiles('Cargo.lock', 'Package.resolved') }}
         restore-keys: |
-          macos-26-cargo-target-${{ env.LATEST_XCODE }}-
+          macos-26-hybrid-build-${{ env.LATEST_XCODE }}-
 
     - name: Lint, Security Audit, and File-Length Gate
       env:
@@ -154,9 +156,19 @@ jobs:
           brew install osv-scanner
         fi
         osv-scanner --lockfile=Cargo.lock
+        if ! command -v swiftlint >/dev/null 2>&1; then
+          brew install swiftlint
+        fi
+        swiftlint lint --strict
 
-    - name: Run Rust Workspace Tests
-      run: cargo test --workspace
+    - name: Run Rust Workspace and Swift UI Tests
+      run: |
+        cargo test --workspace
+        cargo build --release --target aarch64-apple-darwin -p rota-ffi
+        mkdir -p target/swift-ffi
+        cp target/aarch64-apple-darwin/release/librota_ffi.a target/swift-ffi/librota_ffi.a
+        swift package resolve
+        swift test --disable-automatic-resolution
 
     - name: Test diagnostic and review scripts
       run: python3 -B -m unittest discover -s scripts/tests -v
@@ -226,7 +238,7 @@ jobs:
         grep -q '[^[:space:]]' release-notes.md ||
           { echo "::error::the $GITHUB_REF_NAME annotation has no body; it is the release notes"; exit 1; }
         cp release-notes.md "$FEED/${ZIP%.zip}.md"
-        echo "$SPARKLE_PRIVATE_KEY" | target/sparkle-2.10.0/bin/generate_appcast \
+        echo "$SPARKLE_PRIVATE_KEY" | .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
           --ed-key-file - --embed-release-notes --maximum-deltas 0 \
           --download-url-prefix "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/" \
           -o "$PWD/appcast.xml" "$FEED"

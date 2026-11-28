@@ -32,9 +32,10 @@ pub use model::{
 pub use rpc::{JsonRpcError, JsonRpcPeer, LineTransport, MessageTransport, WebSocketTransport};
 pub use runners::{
     AgentAccess, AgentLauncher, AntigravityCatalog, AntigravityConfiguration, ClaudeConfiguration,
-    ClaudeRunSettings, ClaudeUserSettings, ExecutableDiscovery, GrokCatalog, InstalledExecutable,
-    LaunchError, LaunchSpec, ModelCatalog, ModelOption, NativeTranscript, NativeTranscriptEvent,
-    ProcessLauncher, QuestionHook, QuestionReplyFn, RoutineLaunching, RunControl, RunEvents,
+    ClaudeInteractiveRun, ClaudeRunSettings, ClaudeUserSettings, ExecutableDiscovery, GrokCatalog,
+    InstalledExecutable, LaunchError, LaunchSpec, ModelCatalog, ModelOption, NativeTranscript,
+    NativeTranscriptEvent, ProcessLauncher, QuestionHook, QuestionReplyFn, RoutineLaunching, RunControl,
+    RunEvents, ScreenRun,
 };
 pub use schedule::{
     CalendarDay, CalendarEntry, CalendarEntryKind, CalendarQuery, CronError, CronSchedule, ScheduleCalendar,

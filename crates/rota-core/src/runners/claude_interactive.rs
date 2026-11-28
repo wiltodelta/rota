@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
 use jiff::Timestamp;
-use rota_platform::{Logger, OwnedProcess, home_dir};
+use rota_platform::{Logger, OwnedProcess, home_dir, system_uptime_seconds};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -25,6 +25,7 @@ pub(super) struct InteractiveState {
     pub(super) prompt_pending: bool,
     pub(super) unanswered: usize,
     pub(super) turn_ended: bool,
+    pub(super) errored_at: Option<f64>,
     pub(super) background: HashSet<String>,
     pub(super) failed: bool,
     pub(super) exiting: bool,
@@ -43,11 +44,14 @@ pub struct ClaudeInteractiveRun {
     pub(super) effort_file: PathBuf,
     pub(super) settings_file: Option<PathBuf>,
     pub(super) dialogs: Arc<ClaudeDialogBridge>,
+    pub(super) uptime: Arc<dyn Fn() -> f64 + Send + Sync>,
     pub(super) state: Mutex<InteractiveState>,
 }
 
 impl ClaudeInteractiveRun {
     pub(super) const LOG: Logger = Logger::new("claude");
+    /// How long Claude may sit silent on an API error before the run takes its turn as over.
+    pub const STALL_GRACE_SECS: f64 = 300.0;
 
     pub fn screen_name(session: &str) -> String {
         let prefix: String = session.chars().take(8).collect();
@@ -118,11 +122,12 @@ print -r -- $? > {exit_q}",
         };
         let dialogs = ClaudeDialogBridge::new(&name, &session, &folder, Arc::clone(&journal));
         let run = Arc::new(Self {
-            exit_file: folder.join(format!("{name}.exit")),
+            exit_file: folder.join(format!("{name}-{}.exit", Uuid::new_v4())),
             script: folder.join(format!("{name}.zsh")),
             effort_file: folder.join(format!("{name}-{}.effort", Uuid::new_v4())),
             settings_file,
             dialogs,
+            uptime: Arc::new(system_uptime_seconds),
             spec,
             journal,
             session,
@@ -134,6 +139,7 @@ print -r -- $? > {exit_q}",
                 prompt_pending: true,
                 unanswered: 0,
                 turn_ended: false,
+                errored_at: None,
                 background: HashSet::new(),
                 failed: false,
                 exiting: false,
@@ -203,6 +209,11 @@ print -r -- $? > {exit_q}",
             "ROTA_SESSION_DIALOG".into(),
             self.dialogs.file.to_string_lossy().into_owned(),
         );
+        // A screen still open under this name belongs to a finished run (an active or surviving one
+        // blocks continuing): two Claudes would write one transcript, and two screens one name.
+        if ScreenRun::terminate(&self.name) > 0 {
+            Self::LOG.info(&format!("ended a screen left open for claude {}", self.session));
+        }
         if let Err(err) =
             ScreenRun::launch_detached(&self.name, &self.script, &self.spec.working_directory, &env, true)
         {
@@ -346,6 +357,52 @@ print -r -- $? > {exit_q}",
         if let Some(s) = &self.settings_file {
             let _ = std::fs::remove_file(s);
         }
+    }
+
+    pub fn new_for_test(
+        spec: LaunchSpec,
+        journal: Arc<RunJournal>,
+        session: &str,
+        folder: &Path,
+        uptime: Arc<dyn Fn() -> f64 + Send + Sync>,
+    ) -> Self {
+        let name = Self::screen_name(session);
+        let dialogs = ClaudeDialogBridge::new(&name, session, folder, Arc::clone(&journal));
+        Self {
+            exit_file: folder.join(format!("{name}-{}.exit", Uuid::new_v4())),
+            script: folder.join(format!("{name}.zsh")),
+            effort_file: folder.join(format!("{name}-{}.effort", Uuid::new_v4())),
+            settings_file: None,
+            dialogs,
+            uptime,
+            spec,
+            journal,
+            session: session.to_string(),
+            name,
+            state: Mutex::new(InteractiveState {
+                transcript: None,
+                offset: 0,
+                partial: Vec::new(),
+                prompt_pending: true,
+                unanswered: 0,
+                turn_ended: false,
+                errored_at: None,
+                background: HashSet::new(),
+                failed: false,
+                exiting: false,
+                stop_reason: None,
+                stopping: Vec::new(),
+                header_written: false,
+            }),
+        }
+    }
+
+    /// The last turn ended, or Claude sat on an API error for `STALL_GRACE_SECS`, and nothing is left to wait for.
+    pub fn ready_to_exit(&self) -> bool {
+        let now_up = (self.uptime)();
+        let g = self.state.lock().unwrap();
+        let stalled = g.errored_at.is_some_and(|t| now_up - t >= Self::STALL_GRACE_SECS);
+        (g.turn_ended || stalled) && g.unanswered == 0 && g.background.is_empty()
     }
 }
 

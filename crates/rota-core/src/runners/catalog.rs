@@ -4,6 +4,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::model::{Harness, SessionConfiguration};
@@ -14,7 +15,8 @@ pub use super::catalog_providers::{
     AntigravityCatalog, AntigravityConfiguration, AntigravityRow, GrokCatalog,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelOption {
     pub id: String,
     pub title: String,

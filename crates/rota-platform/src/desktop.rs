@@ -129,6 +129,10 @@ pub fn bundled_fonts_directory() -> Option<PathBuf> {
         .parent()?
         .parent()?
         .to_path_buf();
+    let swift_fonts = repo_root.join("Sources/Rota/Resources/Fonts");
+    if swift_fonts.is_dir() {
+        return Some(swift_fonts);
+    }
     let candidate = repo_root.join("Resources/Fonts");
     candidate.is_dir().then_some(candidate)
 }

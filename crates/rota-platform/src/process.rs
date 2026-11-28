@@ -132,50 +132,58 @@ impl OwnedProcess {
         if !self.exists() {
             return Vec::new();
         }
+        Self::descendants_of(self.pid)
+    }
+
+    /// Walks through a child it may not read, such as the setuid-root `login` that `screen` starts
+    /// above the shell, to the processes under it; only readable processes are returned.
+    fn descendants_of(pid: i32) -> Vec<Self> {
+        let mut out = Vec::new();
+        for child_pid in Self::direct_child_pids(pid) {
+            if child_pid <= 0 {
+                continue;
+            }
+            let Some(child) = Self::capture(child_pid) else {
+                out.extend(Self::descendants_of(child_pid));
+                continue;
+            };
+            if child.parent == pid as u32 {
+                out.extend(Self::descendants_of(child_pid));
+                out.push(child);
+            }
+        }
+        out
+    }
+
+    fn direct_child_pids(pid: i32) -> Vec<i32> {
         #[cfg(target_os = "macos")]
         {
             let mut pids = vec![0i32; 4096];
             let byte_len = (pids.len() * std::mem::size_of::<i32>()) as libc::c_int;
-            // SAFETY: Buffer is valid writable memory of `byte_len` bytes.
-            let bytes =
-                unsafe { proc_listchildpids(self.pid, pids.as_mut_ptr().cast::<libc::c_void>(), byte_len) };
-            if bytes <= 0 {
+            // SAFETY: Buffer is valid writable memory of `byte_len` bytes; `proc_listchildpids`
+            // takes the buffer's size in bytes and returns a count of PIDs.
+            let count =
+                unsafe { proc_listchildpids(pid, pids.as_mut_ptr().cast::<libc::c_void>(), byte_len) };
+            if count <= 0 {
                 return Vec::new();
             }
-            let count = (bytes as usize) / std::mem::size_of::<i32>();
-            let mut out = Vec::new();
-            for &child_pid in &pids[..count.min(pids.len())] {
-                if child_pid <= 0 {
-                    continue;
-                }
-                if let Some(child) = Self::capture(child_pid)
-                    && child.parent == self.pid as u32
-                {
-                    out.extend(child.descendants());
-                    out.push(child);
-                }
-            }
-            out
+            pids.truncate((count as usize).min(pids.len()));
+            pids
         }
         #[cfg(target_os = "linux")]
         {
-            let mut out = Vec::new();
-            let path = format!("/proc/{}/task/{}/children", self.pid, self.pid);
-            if let Ok(content) = std::fs::read_to_string(path) {
-                for token in content.split_whitespace() {
-                    if let Ok(child_pid) = token.parse::<i32>()
-                        && let Some(child) = Self::capture(child_pid)
-                        && child.parent == self.pid as u32
-                    {
-                        out.extend(child.descendants());
-                        out.push(child);
-                    }
-                }
-            }
-            out
+            std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/children"))
+                .ok()
+                .map(|s| {
+                    s.split_whitespace()
+                        .filter_map(|t| t.parse::<i32>().ok())
+                        .collect()
+                })
+                .unwrap_or_default()
         }
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         {
+            let _ = pid;
             Vec::new()
         }
     }
@@ -220,5 +228,34 @@ mod tests {
         let mut forged = me;
         forged.seconds = forged.seconds.wrapping_add(100);
         assert!(!forged.exists());
+    }
+
+    /// `proc_listchildpids` returns a count of PIDs, not bytes: read as bytes, a process with
+    /// fewer than four children had none, and Stop left a session's agent running (2026-11-26).
+    #[test]
+    fn descendants_reach_every_level() {
+        let mut proc = std::process::Command::new("/bin/sh")
+            .args(["-c", "/bin/sh -c 'sleep 30 & wait' & wait"])
+            .spawn()
+            .expect("spawn nested sh");
+        let root = OwnedProcess::capture(proc.id() as i32).expect("capture root sh");
+        let mut found = Vec::new();
+        for _ in 0..50 {
+            if found.len() >= 2 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            found = root.descendants();
+        }
+        let _ = proc.kill();
+        let _ = proc.wait();
+        for child in &found {
+            child.signal(libc::SIGKILL);
+        }
+        assert_eq!(
+            found.len(),
+            2,
+            "expected inner shell and its sleep, got {found:?}"
+        );
     }
 }

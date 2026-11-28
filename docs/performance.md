@@ -43,10 +43,10 @@ the small system-owned status-item window is excluded.
 Transcript timing runs in the shared `TranscriptSessionReader`, so it covers
 the UI readers for every harness, including both Claude modes and Shell,
 without probing or changing agent protocols. It measures reading and parsing,
-not network latency or GPU UI layout. Background timers and journal writes
-use a background thread; the main queue only answers one small probe at a time.
+not network latency or SwiftUI layout. Background timers and journal writes
+use a utility queue; the main queue only answers one small probe at a time.
 An I/O failure disables the journal for that launch and logs the failure via
-`os_log`; it does not fail a routine. Built-in diagnostics do not hold a
+`os.Logger`; it does not fail a routine. Built-in diagnostics do not hold a
 power assertion or prevent the Mac from sleeping.
 
 Open the folder in Finder and review the matching time interval in both

@@ -18,7 +18,7 @@ pub type ServiceProbeFn = Arc<dyn Fn(Harness, Box<dyn FnOnce(bool) + Send>) + Se
 pub struct NetworkFailure;
 
 impl NetworkFailure {
-    const PHRASES: [&'static str; 24] = [
+    const PHRASES: [&'static str; 30] = [
         "connection error",
         "econnreset",
         "econnrefused",
@@ -43,11 +43,18 @@ impl NetworkFailure {
         "dial tcp: lookup",
         "went to sleep mid-response",
         "request failed: post",
+        "eligibility check failed",
+        // Claude Code's own wording for a lost or stalled stream (transcripts through 2026-11-26).
+        "can't reach the api server",
+        "connection closed mid-response",
+        "connection lost",
+        "response stopped arriving",
+        "response stalled mid-stream",
     ];
 
     pub fn matches(text: &str) -> bool {
         let lowered = text.to_ascii_lowercase();
-        Self::PHRASES.iter().any(|p| lowered.contains(p)) || lowered.contains("eligibility check failed")
+        Self::PHRASES.iter().any(|p| lowered.contains(p))
     }
 }
 

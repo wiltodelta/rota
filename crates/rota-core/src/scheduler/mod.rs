@@ -11,19 +11,15 @@ pub mod sessions;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, Weak};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, Weak};
 
 use jiff::Timestamp;
-use rota_platform::{Logger, NetworkMonitorHandle, bundled_helper_path};
+use rota_platform::{Logger, bundled_helper_path};
 use uuid::Uuid;
 
-use crate::control::{ControlServer, ControlServerHandle};
 use crate::model::serde_ext::uppercase_uuid;
 use crate::model::{Harness, LaunchMode, QuestionAnswer, Routine, RunOutcome, RunRecord, RunTrigger};
-use crate::runners::{
-    AgentLauncher, ClaudeUserSettings, LaunchSpec, QuestionReplyFn, RoutineLaunching, RunControl,
-};
+use crate::runners::{ClaudeUserSettings, LaunchSpec, QuestionReplyFn, RoutineLaunching, RunControl};
 use crate::storage::{RoutineStore, RunHistory, StorageLocation};
 
 pub use handoff::SessionRestart;
@@ -75,8 +71,6 @@ pub struct Scheduler {
     pub(crate) claude_interactive: AtomicBool,
     pub(crate) completion_notifications: AtomicBool,
     pub(crate) online: Arc<AtomicBool>,
-    shutdown: Arc<(Mutex<bool>, Condvar)>,
-    network_monitor: Mutex<Option<NetworkMonitorHandle>>,
     pub(crate) seams: Mutex<SchedulerSeams>,
     pub(crate) state: Mutex<SchedulerState>,
 }
@@ -108,8 +102,6 @@ impl Scheduler {
             claude_interactive: AtomicBool::new(false),
             completion_notifications: AtomicBool::new(false),
             online,
-            shutdown: Arc::new((Mutex::new(false), Condvar::new())),
-            network_monitor: Mutex::new(None),
             seams: Mutex::new(SchedulerSeams::default()),
             state: Mutex::new(SchedulerState {
                 routines,
@@ -138,60 +130,15 @@ impl Scheduler {
         }))
     }
 
-    pub fn start_standard(
-        location: StorageLocation,
-        notifier: Option<Arc<dyn SchedulerNotifier>>,
-    ) -> Result<(Arc<Self>, ControlServerHandle), String> {
-        let scheduler = Self::new(location.clone(), Arc::new(AgentLauncher::new()), notifier)?;
-        let server = ControlServer::for_scheduler(location.socket_path(), Arc::clone(&scheduler))
-            .map_err(|e| e.message)?;
-        scheduler.recover_orphans();
-        scheduler.tick();
-        scheduler.resume_pending();
-        scheduler.start_background_services();
-        Ok((scheduler, server))
-    }
-
-    fn start_background_services(self: &Arc<Self>) {
-        let weak_net = Arc::downgrade(self);
-        let monitor = NetworkMonitorHandle::start(move |satisfied| {
-            if let Some(s) = weak_net.upgrade() {
-                if satisfied {
-                    s.network_became_available();
-                } else {
-                    s.online.store(false, Ordering::Release);
-                }
-            }
-        });
-        *self.network_monitor.lock().unwrap() = Some(monitor);
-
-        let weak_tick = Arc::downgrade(self);
-        let shutdown = Arc::clone(&self.shutdown);
-        let _ = std::thread::Builder::new()
-            .name("rota-scheduler-tick".to_string())
-            .spawn(move || {
-                let (lock, cvar) = &*shutdown;
-                loop {
-                    let guard = lock.lock().unwrap();
-                    let (guard, _) = cvar.wait_timeout(guard, Duration::from_secs(30)).unwrap();
-                    if *guard {
-                        break;
-                    }
-                    drop(guard);
-                    let Some(s) = weak_tick.upgrade() else {
-                        break;
-                    };
-                    s.tick();
-                }
-            });
-    }
-
     pub fn revision(&self) -> u64 {
         self.revision.load(Ordering::Acquire)
     }
 
     pub(crate) fn bump_revision(&self) {
-        self.revision.fetch_add(1, Ordering::AcqRel);
+        let next = self.revision.fetch_add(1, Ordering::AcqRel) + 1;
+        if let Some(notifier) = &self.notifier {
+            notifier.on_revision_changed(next);
+        }
     }
 
     pub(crate) fn invalidate_caches_and_bump(&self) {
@@ -464,15 +411,5 @@ open Claude Code there once and trust it to run interactively, with computer use
         g.cached_sessions = None;
         drop(g);
         self.bump_revision();
-    }
-}
-
-impl Drop for Scheduler {
-    fn drop(&mut self) {
-        let (lock, cvar) = &*self.shutdown;
-        if let Ok(mut stopped) = lock.lock() {
-            *stopped = true;
-            cvar.notify_all();
-        }
     }
 }

@@ -1,6 +1,5 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
-use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -20,6 +19,14 @@ pub(crate) fn make_pipe() -> Result<(i32, i32), String> {
     let mut fds = [0i32; 2];
     if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
         return Err(std::io::Error::last_os_error().to_string());
+    }
+    unsafe {
+        for fd in fds {
+            let flags = libc::fcntl(fd, libc::F_GETFD);
+            if flags >= 0 {
+                let _ = libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+            }
+        }
     }
     Ok((fds[0], fds[1]))
 }
@@ -150,7 +157,6 @@ impl DurableStream {
         let pid = child.id() as i32;
         let stdin = child.stdin.take();
         if let Some(s) = &stdin {
-            let _ = s.as_raw_fd();
             crate::rpc::disable_sigpipe(s);
         }
         let lease = match RunLease::save_pid(pid, &spec.log, &id) {

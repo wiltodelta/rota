@@ -1,0 +1,14 @@
+# Test cases grow with the scenarios they cover, and a live run returns a
+# tuple of outcome, log and session; body, file and tuple limits are for
+# production types.
+disabled_rules:
+  - type_body_length
+  - file_length
+  - large_tuple
+
+# Fixtures inside multiline strings are verbatim CLI output and payloads;
+# wrapping them would change what the test feeds the parser.
+line_length:
+  warning: 120
+  error: 200
+  ignores_multiline_strings: true

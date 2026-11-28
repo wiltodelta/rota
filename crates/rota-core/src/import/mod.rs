@@ -4,12 +4,13 @@ use std::time::SystemTime;
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use rota_platform::{ReadOnlySqlite, SqlValue, home_dir};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::model::{Harness, Routine};
 use crate::schedule::ScheduleText;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum ImportSource {
     ClaudeDesktop,
     Codex,
@@ -40,7 +41,8 @@ impl ImportSource {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ImportCandidate {
     pub routine: Routine,
     pub source: ImportSource,
@@ -75,7 +77,8 @@ impl ImportCandidate {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ImportScan {
     pub source: ImportSource,
     pub candidates: Vec<ImportCandidate>,

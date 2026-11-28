@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build Rota (100% Rust) and assemble its signed .app bundle.
+# Build Rota (native SwiftUI/AppKit Tahoe UI + Rust engine) and assemble its signed .app bundle.
 #   ./create-app.sh              everyday build (Developer ID when available, no timestamp)
 #   RELEASE=1 ./create-app.sh    release build: Developer ID with a secure timestamp
 # Only a release build is com.wiltodelta.rota. Every other build is
@@ -18,26 +18,29 @@ else
 fi
 APP_DIR="$APP_NAME.app"
 BIN="Rota"
-MACOS_MIN="15.0"
 
-# The latest release tag, as CI builds it, so a local build never reports an
-# older version than the release (which Sparkle would then offer over it).
 VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
 if [[ -z "$VERSION" ]]; then
     [[ -n "${GITHUB_ACTIONS:-}" ]] && { echo "error: no git tag to take the version from" >&2; exit 1; }
     VERSION="0.0.0"
 fi
-echo "Building $APP_NAME $VERSION (release, aarch64-apple-darwin)..."
+echo "Building $APP_NAME $VERSION (release, arm64)..."
 
-cargo build --release --target aarch64-apple-darwin -p rota-app -p rota-cli
-BIN_DIR="target/aarch64-apple-darwin/release"
+cargo build --release --target aarch64-apple-darwin -p rota-ffi -p rota-cli
+RUST_BIN_DIR="target/aarch64-apple-darwin/release"
+mkdir -p target/swift-ffi
+cp "$RUST_BIN_DIR/librota_ffi.a" target/swift-ffi/librota_ffi.a
+
+MACOS_MIN="$(sed -n 's/^let deploymentTarget = "\(.*\)"$/\1/p' Package.swift)"
+swift build -c release --arch arm64 --disable-automatic-resolution --product Rota
+SWIFT_BIN_DIR="$(swift build -c release --arch arm64 --show-bin-path)"
 
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" \
     "$APP_DIR/Contents/Frameworks" "$APP_DIR/Contents/Helpers"
-cp "$BIN_DIR/$BIN" "$APP_DIR/Contents/MacOS/$BIN"
-cp "$BIN_DIR/rota-cli" "$APP_DIR/Contents/Helpers/rota"
-ditto "Resources/Fonts" "$APP_DIR/Contents/Resources/Fonts"
+cp "$SWIFT_BIN_DIR/$BIN" "$APP_DIR/Contents/MacOS/$BIN"
+cp "$RUST_BIN_DIR/rota-cli" "$APP_DIR/Contents/Helpers/rota"
+ditto "$SWIFT_BIN_DIR/Rota_Rota.bundle" "$APP_DIR/Contents/Resources/Rota_Rota.bundle"
 
 SDK_STAMP="$(vtool -show-build "$APP_DIR/Contents/MacOS/$BIN" | awk '/ sdk /{print $2}')"
 if ! [[ "$SDK_STAMP" =~ ^[0-9]+ ]] || (( ${SDK_STAMP%%.*} < 26 )); then
@@ -45,35 +48,11 @@ if ! [[ "$SDK_STAMP" =~ ^[0-9]+ ]] || (( ${SDK_STAMP%%.*} < 26 )); then
     exit 1
 fi
 
-# Sparkle 2.10.0 binary framework verified by SHA-256.
-SPARKLE_VER="2.10.0"
-SPARKLE_SHA256="17e28312b8e18ab7cdbbe09a6fb28cc55a5479ec6c371dbc07cdecd2a14fd959"
-SPARKLE_URL="https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VER/Sparkle-for-Swift-Package-Manager.zip"
-SPARKLE_CACHE="target/sparkle-$SPARKLE_VER"
-if [[ ! -d "$SPARKLE_CACHE/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework" ]]; then
-    mkdir -p "$SPARKLE_CACHE"
-    SPARKLE_ZIP="$SPARKLE_CACHE/Sparkle.zip"
-    SWIFTPM_CACHED="$HOME/Library/Caches/org.swift.swiftpm/artifacts/https___github_com_sparkle_project_Sparkle_releases_download_2_10_0_Sparkle_for_Swift_Package_Manager_zip"
-    if [[ -f "$SWIFTPM_CACHED" ]] && [[ "$(shasum -a 256 "$SWIFTPM_CACHED" | awk '{print $1}')" == "$SPARKLE_SHA256" ]]; then
-        cp "$SWIFTPM_CACHED" "$SPARKLE_ZIP"
-    else
-        curl -fLsS "$SPARKLE_URL" -o "$SPARKLE_ZIP"
-    fi
-    ACTUAL_SHA="$(shasum -a 256 "$SPARKLE_ZIP" | awk '{print $1}')"
-    if [[ "$ACTUAL_SHA" != "$SPARKLE_SHA256" ]]; then
-        echo "error: Sparkle archive SHA-256 mismatch ($ACTUAL_SHA != $SPARKLE_SHA256)" >&2
-        rm -f "$SPARKLE_ZIP"
-        exit 1
-    fi
-    unzip -q -o "$SPARKLE_ZIP" -d "$SPARKLE_CACHE"
-fi
-
-ditto "$SPARKLE_CACHE/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework" \
-    "$APP_DIR/Contents/Frameworks/Sparkle.framework"
+ditto "$SWIFT_BIN_DIR/Sparkle.framework" "$APP_DIR/Contents/Frameworks/Sparkle.framework"
 rm -rf "$APP_DIR/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices" \
     "$APP_DIR/Contents/Frameworks/Sparkle.framework/XPCServices"
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents/MacOS/$BIN" 2>/dev/null || true
-cp "$SPARKLE_CACHE/LICENSE" "$APP_DIR/Contents/Resources/Sparkle LICENSE.txt"
+cp ".build/artifacts/sparkle/Sparkle/LICENSE" "$APP_DIR/Contents/Resources/Sparkle LICENSE.txt"
 
 PARTIAL_PLIST="$(mktemp -t rota-icon)"
 trap 'rm -f "$PARTIAL_PLIST"' EXIT

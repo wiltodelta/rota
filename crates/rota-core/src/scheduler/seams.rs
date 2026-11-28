@@ -22,6 +22,15 @@ pub type ClaudeSettingsFn = Arc<dyn Fn() -> ClaudeUserSettings + Send + Sync>;
 pub type TerminalOpenerFn = Arc<dyn Fn(&Path, Option<&str>) -> Result<(), String> + Send + Sync>;
 pub type HistoryReaderFn = Arc<dyn Fn(&RunHistory, &str) -> Vec<RunRecord> + Send + Sync>;
 
+pub struct SchedulerSnapshotMaps {
+    pub routines: Vec<crate::model::Routine>,
+    pub active: HashMap<uuid::Uuid, RunRecord>,
+    pub surviving_sessions: HashMap<uuid::Uuid, RunRecord>,
+    pub opening_terminals: Vec<uuid::Uuid>,
+    pub run_starts: HashMap<uuid::Uuid, Timestamp>,
+    pub last_error: Option<String>,
+}
+
 pub(crate) struct SchedulerSeams {
     pub now: ClockFn,
     pub tz: TimeZone,
@@ -73,6 +82,32 @@ impl Scheduler {
 
     pub fn set_command_path(&self, path: Option<String>) {
         self.state.lock().unwrap().command_path = path;
+    }
+
+    pub fn set_online_flag(&self, online: bool) {
+        self.online.store(online, Ordering::Release);
+    }
+
+    pub fn set_last_error(&self, err: Option<String>) {
+        let mut g = self.state.lock().unwrap();
+        if g.last_error == err {
+            return;
+        }
+        g.last_error = err;
+        drop(g);
+        self.bump_revision();
+    }
+
+    pub fn snapshot_maps(&self) -> SchedulerSnapshotMaps {
+        let g = self.state.lock().unwrap();
+        SchedulerSnapshotMaps {
+            routines: g.routines.clone(),
+            active: g.active.clone(),
+            surviving_sessions: g.surviving_sessions.clone(),
+            opening_terminals: g.opening_terminals.iter().copied().collect(),
+            run_starts: g.run_starts.clone(),
+            last_error: g.last_error.clone(),
+        }
     }
 
     pub fn set_clock(&self, now_fn: ClockFn) {

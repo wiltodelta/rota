@@ -41,9 +41,11 @@ impl ClaudeInteractiveRun {
                 }
             }
 
+            let now_up = (self.uptime)();
             let should_exit = {
                 let mut g = self.state.lock().unwrap();
-                if g.turn_ended
+                let stalled = g.errored_at.is_some_and(|t| now_up - t >= Self::STALL_GRACE_SECS);
+                if (g.turn_ended || stalled)
                     && g.unanswered == 0
                     && g.background.is_empty()
                     && !g.exiting
@@ -151,6 +153,20 @@ impl ClaudeInteractiveRun {
             .as_ref()
             .map_or(ClaudeTranscript::Other, ClaudeTranscript::read_entry);
         self.restore_state(&entry);
+        {
+            let now_up = (self.uptime)();
+            let mut g = self.state.lock().unwrap();
+            match entry {
+                ClaudeTranscript::ApiError(_) => g.errored_at = Some(now_up),
+                // Bookkeeping and tool results show Claude still busy: the silence starts again.
+                ClaudeTranscript::Other => {
+                    if g.errored_at.is_some() {
+                        g.errored_at = Some(now_up);
+                    }
+                }
+                _ => g.errored_at = None,
+            }
+        }
         if let Some(o) = &obj {
             self.dialogs.track(o, entry.moves_on());
         }

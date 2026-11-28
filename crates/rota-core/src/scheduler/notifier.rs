@@ -8,7 +8,9 @@ use crate::schedule::ScheduleText;
 /// Delivers user-facing notifications for run outcomes, auto-paused routines, agent-created
 /// routines, and explicit `notify` / structured-question prompts.
 pub trait SchedulerNotifier: Send + Sync {
-    fn notify(&self, payload: NotificationPayload);
+    fn notify(&self, _payload: NotificationPayload) {}
+
+    fn on_revision_changed(&self, _revision: u64) {}
 
     fn run_ended(&self, record: &RunRecord, routine: &Routine, notify_on_success: bool) {
         if let Some(payload) = build_run_ended_payload(record, routine, notify_on_success) {

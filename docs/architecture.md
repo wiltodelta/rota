@@ -376,6 +376,16 @@ flowchart LR
   2026-10-26). The notification starts a turn, so it clears the ended turn. Messages are typed in as a bracketed paste
   (`screen -X stuff` passes `^`, `\`, `$` through as typed); once the last turn
   ended with nothing typed since and no background task running, the run types `/exit`.
+  A failed request (the Mac slept, the network dropped) leaves Claude at its prompt
+  with an `isApiErrorMessage` entry and no `turn_duration`; transcripts show it
+  going on by itself within 80 s after some errors and waiting for input after
+  others, so `stallGrace` (5 minutes of awake silence, restarted by bookkeeping
+  entries and tool results, cancelled by anything else Claude writes) counts as the turn's end, and the failed run goes to `Resilience`
+  (2.1.331, 2026-11-26). Each launch has its own exit file and first ends any
+  screen still open under the session's name (`ScreenRun.terminate`): two screens
+  under one name refuse every `screen -S` command, so the run could neither type
+  `/exit` nor quit, and a late exit status from the old screen once failed the new run.
+  `ScreenRun.quit` falls back to the same termination when `screen` refuses the command.
   Claude files that `/exit` as a command echo and its farewell ("Bye!") as a
   `<local-command-stdout>` user entry; the chat hides both (2.1.330, 2026-11-21).
   Dialogs Claude draws in the terminal reach the chat (`ClaudeDialog`). Claude
@@ -654,20 +664,18 @@ flowchart LR
   Cancel, adjacent-session selection and empty history were exercised on
   synthetic data in both appearances at the 820 pt minimum width.
 
-## App & 120 Hz Metal UI Engine (`rota-ui`, `rota-app`)
+## Native AppKit/SwiftUI Layer & Rust C FFI Bridge (`Sources/Rota`, `Sources/RotaCore`, `crates/rota-ffi`)
 
-Rota's user interface is built on a dedicated 120 Hz GPU-accelerated rendering
-engine in `crates/rota-ui` (`wgpu 30` Metal backend + WGSL single-pass instanced
-SDF/atlas shader, `winit 0.30` ProMotion window loop, `taffy 0.15` Flexbox/Grid
-layout, `CoreText` `@2x` glyph and color-emoji shaping into shelf-packed GPU
-atlases, `VirtualScrollState` `O(log N)` prefix-sum viewport virtualization, and a
-live `NSAccessibilityElement` tree synchronized onto the window's `NSView` for
-VoiceOver and `scripts/ui-driver.swift`). `crates/rota-app` pairs that renderer
-with a lightweight AppKit menu bar shell (`NSStatusItem`, `NSPanel`, native
-`NSMenu` bar, `LSUIElement` `.accessory`/`.regular` switching, and AppleEvent
-reopen handling) while keeping OS-specific hooks behind `crates/rota-platform`
-for cross-platform portability. When no spinner or pulse is visible, the event
-loop rests in `ControlFlow::Wait` at 0% idle CPU.
+Rota pairs its 100% Rust core engine (`rota-platform`, `rota-core`, `rota-cli`)
+with the native macOS 26 Tahoe AppKit/SwiftUI presentation layer (`Sources/Rota`)
+over a static C FFI boundary (`crates/rota-ffi` / `Sources/CRotaFFI`). All
+scheduling, runner execution, transcript journaling and paging, resilience,
+SQLite/JSON imports, CLI discovery, model catalogs and the Unix control socket
+execute in Rust. `rota-ffi` streams revision and notification callbacks to
+`@MainActor @Observable Scheduler` in `Sources/RotaCore` so SwiftUI renders
+native `NavigationSplitView`, `.glassEffect(.regular.interactive())`,
+`GlassEffectContainer`, `WindowToolbarOverlay`, `MenuBarPanel` and system menus
+at 0% idle CPU with cached in-memory row state during scrolling.
 
 `ImportSheet` separates the fixed search header and action footer from the
 scrolling source groups. It is 640 x 500 pt and fits the 820 x 520 pt minimum content size.
@@ -804,16 +812,13 @@ with tolerant handling of optional output, not full harness output parity.
 The proposed adapter, journal, and view boundary is documented in that report;
 the implemented subset and journal schema are in [Transcript format](transcript-format.md).
 
-## Desktop Shell & 120 Hz Metal UI Engine (`rota-ui`, `rota-app`)
+## App Shell & Native Controls (`Sources/Rota`)
 
-AppKit menu-bar shell (`crates/rota-app`) over a custom 120 Hz Metal / `wgpu 30` + `taffy` + `CoreText` + `NSAccessibility` UI engine (`crates/rota-ui`):
-- `rota-app` owns the `NSStatusItem` (`MenuIcon` / `MenuIconActive`), the borderless `340x420` `NSPanel` dropdown (`MenuBarPanel`, backed by `NSVisualEffectView` Popover vibrancy and direct in-memory `NSBitmapImageRep` rendering with `MouseUp` activation), native `NSMenu` menus (`File`, `Routine`, `Session`, `View`, `Help`, plus all popup menus when clicked by mouse), and the main `winit` / Metal window (`minimum 820x520`, default `1040x680`). `MacShell::ensure_main_menu` installs the native `NSMenu` bar and the `'aevt'/'rapp'` AppleEvent reopen handler from `ApplicationHandler::resumed` (`applicationDidFinishLaunching:`, after `[NSApp finishLaunching]` registers AppKit's default reopen handler) so `open Rota.app` and Finder double-clicks reopen the main window while running in the menu bar. The app switches activation policy to `.regular` while the main window is open and back to `.accessory` when it closes. Window tabbing is off.
-- `rota-ui` batches all surfaces, rounded rectangles, hairline borders, soft drop shadows, SF Symbols / 4x4 supersampled SDF icons, `CoreText` `@2x` glyph runs, and color emoji/PNG bitmaps into a single-pass instanced WGSL shader (`shader.wgsl`) backed by a shelf-packed `TextureAtlas`. Clipped containers intersect rectangular and 4-corner SDF `border-box` clips (`Scene::push_rounded_clip`, inset inside the container's stroke) so child fills and scroll regions never bleed past rounded corners or overpaint parent borders.
-- Frame scheduling is strictly demand-driven (`ControlFlow::Wait`, 0% idle CPU); `ActivityClock` requests continuous 120 Hz redraws only while an active run spinner/pulse, a critically-damped `SpringSet` transition (`spring.rs`), a trackpad rubber-band overscroll rebound, or a scrollbar fade (`scroll_physics.rs`) is in flight, and uses `ControlFlow::WaitUntil` (`530 ms`) for focused caret blinking. Buttons follow standard macOS `MouseUp` activation with `pressed` highlight and drag-out cancellation; text editors support `Ime::Preedit` marked text, `set_ime_cursor_area` candidate positioning, Cocoa shortcuts (`Ctrl+A/E/K/D/H/B/F/P/N`), auto-growing multi-line composer height, and native file `Drag & Drop`. Shaped `CoreText` paragraphs and parsed `MarkdownBlock` trees are cached so typing in the composer never re-parses Markdown or hits the filesystem.
-- `RotaAxElement` subclasses `NSAccessibilityElement` (`crates/rota-ui/src/a11y_macos.rs`), pooling Objective-C instances by `(NSView, identifier)` across 120 Hz redraws while populating role, identifier, title, value, Cocoa-flipped screen frame, parent/children hierarchy, and `accessibilityPerformPress` on every frame and marking `winit`'s content `NSView` non-element (`setAccessibilityElement(false)`), so VoiceOver and `scripts/ui-driver.swift` inspect and drive the exact rendered controls without element invalidation.
+AppKit menu-bar shell (`RotaApp.swift`, `MenuBarPanel.swift`, `MainWindowToolbar.swift`) hosting SwiftUI Tahoe views:
+- `AppDelegate` owns the `NSStatusItem` (`MenuIcon` / `MenuIconActive`), the borderless `NSPanel` dropdown (`MenuBarPanel`), native `NSMenu` menus (`File`, `Routine`, `Session`, `View`, `Help`), and the main `NSWindow` (`minimum 820x520`, default `1040x680`, unified toolbar with `WindowToolbarOverlay`). The app switches activation policy to `.regular` while the main window is open and back to `.accessory` when it closes. Window tabbing is off.
 - Settings is a mode of the main window, not a separate Settings window: the main window is Rota's primary surface, and agent settings belong beside the routines they run (decided 2026-10-27). `SettingsView` swaps the sidebar for `Back` and the `General`, `Chat` and `Agents` sections and the detail pane for the selected form, hides the import/new actions, and titles the window after the section. `Back` or `Escape` restores the previous selection; `Command-,` reopens the last section. `SidebarSettingsButton` sits below the routines and sessions list so history never scrolls under it.
-- Local performance diagnostics (`PerformanceDiagnostics`) record process resources (`task_info` RSS and `getrusage` CPU), main-thread probe delays and shared `TranscriptReader` timings on a background thread. The bounded journal (`current.jsonl` / `previous.jsonl`) contains numeric UI context, never conversation content. Sleep resets probes and resource baselines; see [Local performance diagnostics](performance.md).
-- `register_bundled_fonts()` registers bundled `IBM Plex Sans` and `JetBrains Mono` from `Contents/Resources/Fonts` (or `Resources/Fonts` during Cargo tests) with Core Text at process scope (`CTFontManagerScope::Process`). Font sources and update instructions are in `Resources/Fonts/README.md`.
+- Local performance diagnostics (`PerformanceDiagnostics`) record process resources (`task_info` RSS and `getrusage` CPU), main-thread probe delays and shared `TranscriptSessionReader` timings on a background queue. The bounded journal (`current.jsonl` / `previous.jsonl`) contains numeric UI context, never conversation content. Sleep resets probes and resource baselines; see [Local performance diagnostics](performance.md).
+- `BundledFonts` registers bundled `IBM Plex Sans` and `JetBrains Mono` from `Rota_Rota.bundle` with Core Text at process scope. Font sources and update instructions are in `Sources/Rota/Resources/Fonts/README.md`.
 - `chatScale` ranges from `0.7` to `2.0` and multiplies `interfaceScale` (`80%`, `90%`, `100%`, `110%`, `125%`, `150%`). Body text uses `14/22 pt`, code blocks `12.5/20 pt`, and headings `H1`–`H6` use `19/27`, `17/25`, `14.5/22`, `14/22`, `13.5/21` and `13.5/21 pt` (`H1`–`H4` semibold). Both preferences persist independently in `NSUserDefaults`; `View > Reset` resets only the interface scale while `View > Chat Zoom` adjusts the chat multiplier in 5% steps. AppKit inserts a separator
 before the native `toggleFullScreen:` action after AppKit menu changes finish,
 because SwiftUI can discard a trailing command-group divider. The check
@@ -1702,7 +1707,13 @@ runs persist a private stdout spool and process lease; the wrapper saves the
 actual exit code. Shell and terminal runs follow the existing screen and
 native archive. Process ownership includes kernel birth time, so stale leases
 cannot signal a reused PID. Stop waits for owned descendants to exit and
-escalates when they ignore termination. Codex waits for a turn ID and native
+escalates when they ignore termination. `proc_listchildpids` returns a count of
+PIDs, not bytes, and the walk passes through the setuid-root `login` that
+`screen` starts, which `proc_pidinfo` cannot read; before 2026-11-26 both cut the
+list short. Stop then ended only the screen or the `DurableStream` wrapper shell:
+Claude stayed in its screen, and `agy` kept working on its conversation, so a
+continued run started a second `agy` there, which failed (`expected tool step at
+index …`) without exiting and left the run open for hours. Codex waits for a turn ID and native
 completion even if Stop arrives before the start reply. A lost connection
 reserves the routine until reconciliation succeeds; scheduled slots, manual
 runs and follow-up messages cannot create another writer while state is unknown.

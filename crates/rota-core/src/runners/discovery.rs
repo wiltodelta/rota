@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use rota_platform::{bundled_helper_path, current_username, home_dir};
+use serde::Serialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -12,7 +13,8 @@ use crate::model::serde_ext::to_sorted_pretty_vec;
 use crate::runners::{ProcessLauncher, is_executable_file};
 use crate::storage::{atomic_write_bytes, resolve_symlinks_best_effort};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InstalledExecutable {
     pub path: String,
     pub version: Option<String>,

@@ -1,5 +1,6 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use regex_lite::Regex;
 use rota_platform::OwnedProcess;
@@ -37,15 +38,15 @@ impl SessionRestart {
             "exceeded your current quota",
             "too many requests",
         ];
-        let re_429 = Regex::new(r"\b429\b").ok();
+        static RE_429: OnceLock<Regex> = OnceLock::new();
+        let re_429 = RE_429.get_or_init(|| Regex::new(r"\b429\b").expect("valid 429 regex"));
         turn.notes.iter().chain(turn.answer.iter()).any(|item| {
             if !matches!(item.kind, TranscriptItemKind::Error | TranscriptItemKind::Agent) {
                 return false;
             }
             let text = item.text.to_lowercase().replace('\u{2019}', "'");
             PHRASES.iter().any(|p| text.contains(p))
-                || (item.kind == TranscriptItemKind::Error
-                    && re_429.as_ref().is_some_and(|r| r.is_match(&text)))
+                || (item.kind == TranscriptItemKind::Error && re_429.is_match(&text))
         })
     }
 

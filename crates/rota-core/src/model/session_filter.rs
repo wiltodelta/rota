@@ -27,7 +27,8 @@ impl ConfigurationMark {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionConfiguration {
     pub model: Option<String>,
     pub effort: Option<String>,

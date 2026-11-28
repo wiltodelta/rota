@@ -52,7 +52,8 @@ impl TranscriptRecord {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TranscriptSnapshot {
     pub items: Vec<TranscriptItem>,
     pub structured: bool,

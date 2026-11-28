@@ -325,8 +325,9 @@
   Terminal (Shift-Command-T), Show Log in Finder (Shift-Command-L), Show Question
   (Shift-Command-A), Dismiss Attention (Shift-Command-D), Load Earlier Messages
   (Shift-Command-E) and Delete Session… act on the open session wherever keyboard
-  focus is. These menu commands
-  and the keys above cover the same actions regardless of keyboard focus.
+  focus is. With macOS keyboard navigation on, Tab does not reliably move between
+  the sidebar and the session's buttons (a SwiftUI limitation); these menu commands
+  and the keys above cover the same actions.
 - The menu bar panel lists every routine with its next run; hover a row to run
   or stop it (VoiceOver offers both as actions), click it to open its latest session. Right-click the icon for Settings,
   updates and Quit. From the keyboard, Up and Down highlight a routine, Return opens its

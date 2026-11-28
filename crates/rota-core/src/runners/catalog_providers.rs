@@ -229,8 +229,12 @@ impl AntigravityCatalog {
             return None;
         }
         let label = model.get("label")?.as_str()?;
-        let tier = model.get("effort")?.as_str()?;
         let adjustable = effort.get("adjustable")?.as_bool()?;
+        let tier = match model.get("effort").and_then(Value::as_str) {
+            Some(t) => t,
+            None if !adjustable => "",
+            None => return None,
+        };
         let available = if adjustable {
             let arr = effort.get("available")?.as_array()?;
             let mut list = Vec::with_capacity(arr.len());
@@ -323,11 +327,12 @@ impl AntigravityConfiguration {
         if id.is_empty() {
             return None;
         }
-        let effort = model.get("effort").and_then(Value::as_str).map(ToOwned::to_owned);
+        let raw_effort = model.get("effort").and_then(Value::as_str);
         let title = model
             .get("label")
             .and_then(Value::as_str)
-            .map(|lbl| ModelOption::strip_effort_suffix(lbl, effort.as_deref().unwrap_or("")));
+            .map(|lbl| ModelOption::strip_effort_suffix(lbl, raw_effort.unwrap_or("")));
+        let effort = Some(raw_effort.unwrap_or("none").to_string());
         Some(SessionConfiguration::new(
             Some(id.to_string()),
             effort,

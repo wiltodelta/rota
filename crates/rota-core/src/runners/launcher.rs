@@ -119,7 +119,7 @@ impl ProcessLauncher {
         let stdout_stdio = unsafe { <Stdio as std::os::fd::FromRawFd>::from_raw_fd(write_fd) };
         cmd.stdout(stdout_stdio);
         if include_stderr {
-            let dup_fd = unsafe { libc::dup(write_fd) };
+            let dup_fd = unsafe { libc::fcntl(write_fd, libc::F_DUPFD_CLOEXEC, 0) };
             if dup_fd >= 0 {
                 cmd.stderr(unsafe { <Stdio as std::os::fd::FromRawFd>::from_raw_fd(dup_fd) });
             } else {
@@ -128,7 +128,9 @@ impl ProcessLauncher {
         } else {
             cmd.stderr(Stdio::null());
         }
-        let mut child = match cmd.spawn() {
+        let spawn_result = cmd.spawn();
+        drop(cmd);
+        let mut child = match spawn_result {
             Ok(c) => c,
             Err(err) => {
                 unsafe {

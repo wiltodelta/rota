@@ -2,13 +2,14 @@
 
 ## Building
 
-`./create-app.sh` compiles the Rust workspace (`rota-app` -> `Contents/MacOS/Rota`
-and `rota-cli` -> `Contents/Helpers/rota`) in `--release` mode for
-`aarch64-apple-darwin` and assembles `Rota.app`: the version from the latest
+`./create-app.sh` compiles the Rust static library and CLI (`rota-ffi` ->
+`target/swift-ffi/librota_ffi.a` and `rota-cli` -> `Contents/Helpers/rota`) in
+`--release` mode for `aarch64-apple-darwin`, builds the SwiftUI app (`Rota` ->
+`Contents/MacOS/Rota`), and assembles `Rota.app`: the version from the latest
 `vX.Y.Z` tag (`0.0.0` before the first one; CI refuses a build without a tag), a
-check that the binary carries the macOS 26 SDK stamp from `.cargo/config.toml`,
-bundled `IBM Plex Sans` and `JetBrains Mono` fonts (`Contents/Resources/Fonts`),
-the SHA-256 verified Sparkle 2.10.0 framework, the `Info.plist`, and one
+check that the binary carries the macOS 26 SDK stamp from `Package.swift`,
+bundled `IBM Plex Sans` and `JetBrains Mono` fonts (`Contents/Resources/Rota_Rota.bundle`),
+`Sparkle.framework` 2.10.0, the `Info.plist`, and one
 `Assets.car` compiled by `actool` from the Icon Composer icon (`App Icon.icon`),
 the menu bar template images (`MenuIcons.xcassets`), and `HarnessLogos.xcassets`.
 `scripts/draw-icon.py` writes the icon and menu bar template assets from one
@@ -61,10 +62,9 @@ and the Sparkle key.
 
 ## Sparkle
 
-`SystemUpdater` (in `crates/rota-platform/src/updater.rs`) drives
-`SPUStandardUpdaterController` dynamically from `Contents/Frameworks/Sparkle.framework`.
-`create-app.sh` verifies the Sparkle 2.10.0 archive SHA-256, copies
-`Sparkle.framework` into `Contents/Frameworks`, adds the
+`Updater.swift` (in `Sources/Rota/Updater.swift`) drives
+`SPUStandardUpdaterController` from `Contents/Frameworks/Sparkle.framework`.
+`create-app.sh` copies `Sparkle.framework` from SwiftPM's verified build artifacts into `Contents/Frameworks`, adds the
 `@executable_path/../Frameworks` rpath, removes its XPC services (they exist
 for sandboxed apps), ships its MIT license, and signs `Autoupdate`,
 `Updater.app`, the framework, `Contents/Helpers/rota`, and the app in that order.
@@ -84,7 +84,7 @@ Rota without reading or quitting it.
 ## Verify a release
 
 Check an extracted release's launch outside the checkout as well as its signature.
-Font registration resolves `Contents/Resources/Fonts` inside the packaged `.app`
+Font registration resolves `Contents/Resources/Rota_Rota.bundle` inside the packaged `.app`
 bundle explicitly.
 
 ```bash

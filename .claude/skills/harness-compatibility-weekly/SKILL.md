@@ -23,10 +23,11 @@ in `.claude/harness-compatibility-weekly.md`. Damaged state is a failure, never 
 reason to initialize a fresh baseline.
 
 Read `docs/harness-output-contract.md`, `docs/harness-compatibility.md`, the
-Architecture coverage matrix, `HarnessCapabilities.swift`, `ModelCatalog.swift`
-and affected adapter/tests. Inspect the working diff so proposals account for
-work already implemented locally. Read only relevant source files; this is not
-a general repository maintenance audit.
+Architecture coverage matrix, `crates/rota-core/src/model/harness.rs`,
+`crates/rota-core/src/runners/{catalog.rs, catalog_providers.rs}`,
+`Sources/RotaCore/HarnessCapabilities.swift` and affected adapter/tests. Inspect
+the working diff so proposals account for work already implemented locally. Read
+only relevant source files; this is not a general repository maintenance audit.
 
 Create a task-owned system temporary directory. Run these from the repository:
 

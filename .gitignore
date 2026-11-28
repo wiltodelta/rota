@@ -1,7 +1,7 @@
 # Rust / Cargo
 /target/
 
-# Legacy Xcode / SwiftPM
+# Xcode / SwiftPM
 .build/
 .swiftpm/
 *.xcodeproj/

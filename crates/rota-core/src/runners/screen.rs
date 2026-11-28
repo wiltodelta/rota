@@ -64,15 +64,58 @@ impl ScreenRun {
     }
 
     pub fn pid_in_list(name: &str, list: &str) -> Option<i32> {
-        for token in list.split_whitespace() {
-            if let Some((pid_str, session_name)) = token.split_once('.')
-                && session_name == name
-                && let Ok(pid) = pid_str.parse::<i32>()
-            {
-                return Some(pid);
-            }
+        Self::pids_in_list(name, list).into_iter().next()
+    }
+
+    /// Every session named exactly `name` in a `screen -ls` listing.
+    pub fn pids_in_list(name: &str, list: &str) -> Vec<i32> {
+        list.split_whitespace()
+            .filter_map(|token| {
+                let (pid_str, session_name) = token.split_once('.')?;
+                (session_name == name).then(|| pid_str.parse::<i32>().ok())?
+            })
+            .collect()
+    }
+
+    /// Ends every session named exactly `name` with all its processes, and returns how many there were.
+    /// Two sessions under one name refuse each `screen -S name` command ("several suitable screens").
+    pub fn terminate(name: &str) -> usize {
+        let roots: Vec<OwnedProcess> = Self::pids_in_list(name, &Self::list(name))
+            .into_iter()
+            .filter_map(OwnedProcess::capture)
+            .collect();
+        if roots.is_empty() {
+            return 0;
         }
-        None
+        let mut owned: Vec<OwnedProcess> = Vec::new();
+        for r in &roots {
+            owned.extend(r.descendants());
+            owned.push(*r);
+        }
+        for p in &owned {
+            p.signal(libc::SIGTERM);
+        }
+        for _ in 0..50 {
+            if !owned.iter().any(OwnedProcess::exists) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        for p in &owned {
+            p.signal(libc::SIGKILL);
+        }
+        // A killed screen leaves its socket listed as dead, which would still read as alive.
+        let wipe_args = vec!["-wipe".to_string(), name.to_string()];
+        let _ = ProcessLauncher::capture(
+            Self::SCREEN,
+            &wipe_args,
+            &std::env::temp_dir(),
+            Some(Self::COMMAND_TIMEOUT),
+            true,
+            false,
+            &HashMap::new(),
+        );
+        roots.len()
     }
 
     pub fn pid(name: &str) -> Option<i32> {
@@ -129,13 +172,11 @@ impl ScreenRun {
         Self::command(name, &["-p", "0", "-X", "stuff", text]);
     }
 
+    /// Quits session `name`; a wedged screen that ignores its own commands, or one of two sharing
+    /// the name, is ended with its processes.
     pub fn quit(name: &str) {
-        if Self::command(name, &["-X", "quit"]) != 0
-            && let Some(pid) = Self::pid(name)
-        {
-            unsafe {
-                let _ = libc::kill(pid, libc::SIGTERM);
-            }
+        if Self::command(name, &["-X", "quit"]) != 0 {
+            let _ = Self::terminate(name);
         }
     }
 

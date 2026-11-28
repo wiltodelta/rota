@@ -107,14 +107,13 @@ The runner seam test sends an actual `item/completed` notification through
 Opt-in live checks spend vendor quota and create native sessions:
 
 ```sh
-ROTA_LIVE_QUESTIONS=1 swift test --filter LiveQuestionTests
+bash scripts/check-harnesses.sh --live
 ```
 
-The live suite checks each installed agent's native questionnaire and its reply,
-Claude/Grok multiple selection,
-Codex's asynchronous message and a later answer in the same thread.
-`InstalledHarnessContractTests` walks interaction methods in the installed Codex
-JSON schema without inference, as part of the ordinary test suite. Interactive Claude
+The live and contract suites check installed agents, tool output and mid-turn
+messaging, while `crates/rota-core/tests/installed_harness_contracts.rs` walks
+interaction methods in the installed Codex JSON schema without inference, as part
+of the ordinary test suite. Interactive Claude
 also needs `ROTA_INTERACTIVE_TEST_DIR` set to an already trusted test workspace.
 Tests never create trust grants or change the agents' own configuration.
 

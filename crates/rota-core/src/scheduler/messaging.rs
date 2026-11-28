@@ -14,17 +14,7 @@ impl Scheduler {
         if !record.is_unread() {
             return Ok(record);
         }
-        let Some(mut stored) = self
-            .history
-            .records(&record.routine_id)
-            .into_iter()
-            .find(|r| r.id == session_id)
-        else {
-            return Ok(record);
-        };
-        stored.read_at = Some(self.now());
-        self.save_record(&stored);
-        Ok(stored)
+        Ok(self.update_stored_read_at(&record, Some(self.now())))
     }
 
     pub fn mark_unread(&self, session_id: Uuid) -> Result<RunRecord, String> {
@@ -37,24 +27,21 @@ impl Scheduler {
         if !record.can_mark_unread() {
             return Ok(record);
         }
+        Ok(self.update_stored_read_at(&record, None))
+    }
+
+    fn update_stored_read_at(&self, record: &RunRecord, read_at: Option<jiff::Timestamp>) -> RunRecord {
         let Some(mut stored) = self
             .history
             .records(&record.routine_id)
             .into_iter()
-            .find(|r| r.id == session_id)
+            .find(|r| r.id == record.id)
         else {
-            return Ok(record);
+            return record.clone();
         };
-        stored.read_at = None;
+        stored.read_at = read_at;
         self.save_record(&stored);
-        Ok(stored)
-    }
-
-    pub fn set_attention(&self, session_id: Uuid, message: Option<String>) -> Result<RunRecord, String> {
-        let Some(record) = self.current_record(session_id) else {
-            return Err(format!("No session {session_id}."));
-        };
-        Ok(self.apply_attention(&record, message))
+        stored
     }
 
     pub(crate) fn apply_attention(&self, record: &RunRecord, message: Option<String>) -> RunRecord {
@@ -169,29 +156,46 @@ impl Scheduler {
             (encoded, Some((store, staged)))
         };
 
-        let Some(mut latest) = self.current_record(session_id) else {
-            if let Some((store, staged)) = staged_cleanup {
-                for att in &staged {
-                    let _ = store.discard(att);
-                }
+        let deliver = || -> Result<RunRecord, String> {
+            let Some(mut latest) = self.current_record(session_id) else {
+                return Err(format!("No session {session_id}."));
+            };
+            if !self.accepts_message(&latest) {
+                return Err(
+                    "That session cannot take a message now. Answer the blocking question first.".into(),
+                );
             }
+            latest.attention = latest.next_question().map(|q| q.title.clone());
+            if !self.deliver_message(&payload, &latest) {
+                return Err(self
+                    .last_error()
+                    .unwrap_or_else(|| "The session did not accept the message.".to_string()));
+            }
+            self.current_record(session_id)
+                .ok_or_else(|| "The session did not accept the message.".to_string())
+        };
+        let outcome = deliver();
+        if outcome.is_err()
+            && let Some((store, staged)) = staged_cleanup
+        {
+            for att in &staged {
+                let _ = store.discard(att);
+            }
+        }
+        outcome
+    }
+
+    /// Delivers an already-encoded user message (including staged `[RotaAttachment ...]` blocks)
+    /// from the UI composer into `session_id`.
+    pub fn message_encoded(&self, session_id: Uuid, message: &str) -> Result<RunRecord, String> {
+        let Some(mut record) = self.current_record(session_id) else {
             return Err(format!("No session {session_id}."));
         };
-        if !self.accepts_message(&latest) {
-            if let Some((store, staged)) = staged_cleanup {
-                for att in &staged {
-                    let _ = store.discard(att);
-                }
-            }
-            return Err("That session cannot take a message now. Answer the blocking question first.".into());
+        if record.has_blocking_question() {
+            return Err("Answer the blocking question before sending a message.".to_string());
         }
-        latest.attention = latest.next_question().map(|q| q.title.clone());
-        if !self.deliver_message(&payload, &latest) {
-            if let Some((store, staged)) = staged_cleanup {
-                for att in &staged {
-                    let _ = store.discard(att);
-                }
-            }
+        record.attention = record.next_question().map(|q| q.title.clone());
+        if !self.deliver_message(message, &record) {
             let err = self
                 .last_error()
                 .unwrap_or_else(|| "The session did not accept the message.".to_string());
@@ -205,6 +209,7 @@ impl Scheduler {
         if !self.can_message(record) {
             return false;
         }
+        let now = self.now();
         let live_ctrl = {
             let mut g = self.state.lock().unwrap();
             if g.active.contains_key(&record.id) {
@@ -212,7 +217,7 @@ impl Scheduler {
                     return false;
                 };
                 let mut updated = record.clone();
-                updated.updated_at = Some(self.now());
+                updated.updated_at = Some(now);
                 g.active.insert(record.id, updated.clone());
                 Some((ctrl, updated))
             } else {
