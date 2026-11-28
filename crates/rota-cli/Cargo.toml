@@ -1,0 +1,19 @@
+[package]
+name = "rota-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rota-cli"
+path = "src/main.rs"
+
+[dependencies]
+rota-core.workspace = true
+rota-platform.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+jiff.workspace = true
+
+[lints]
+workspace = true

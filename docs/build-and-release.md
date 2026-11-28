@@ -2,15 +2,19 @@
 
 ## Building
 
-`./create-app.sh` builds the release binary for Apple silicon and assembles
-`Rota.app`: the version from the latest `vX.Y.Z` tag (`0.0.0` before the first
-one; CI refuses a build without a tag), a check that the binary carries the
-macOS 26 SDK stamp from `Package.swift`, the embedded Sparkle framework, and
-the Info.plist, and one `Assets.car` compiled by `actool` from the Icon
-Composer icon (`App Icon.icon`) and the menu bar template images
-(`MenuIcons.xcassets`). `scripts/draw-icon.py` writes both from one
-geometry, the icon's `icon.json` included; change the script and rerun it
-rather than editing its output.
+`./create-app.sh` compiles the Rust static library and CLI (`rota-ffi` ->
+`target/swift-ffi/librota_ffi.a` and `rota-cli` -> `Contents/Helpers/rota`) in
+`--release` mode for `aarch64-apple-darwin`, builds the SwiftUI app (`Rota` ->
+`Contents/MacOS/Rota`), and assembles `Rota.app`: the version from the latest
+`vX.Y.Z` tag (`0.0.0` before the first one; CI refuses a build without a tag), a
+check that the binary carries the macOS 26 SDK stamp from `Package.swift`,
+bundled `IBM Plex Sans` and `JetBrains Mono` fonts (`Contents/Resources/Rota_Rota.bundle`),
+`Sparkle.framework` 2.10.0, the `Info.plist`, and one
+`Assets.car` compiled by `actool` from the Icon Composer icon (`App Icon.icon`),
+the menu bar template images (`MenuIcons.xcassets`), and `HarnessLogos.xcassets`.
+`scripts/draw-icon.py` writes the icon and menu bar template assets from one
+geometry, `icon.json` included; change the script and rerun it rather than
+editing its output.
 
 ## Signing and notarization
 
@@ -30,19 +34,20 @@ supported.
 
 ## Release process
 
-A pushed annotated `vX.Y.Z` tag runs `.github/workflows/build.yml`: lint and
-tests, a temporary keychain with the Developer ID identity and the notarytool
-profile, `RELEASE=1 ./create-app.sh`, `./notarize.sh`, then the Sparkle
-`appcast.xml` (this release only, EdDSA-signed, with the tag body embedded as
-Markdown release notes), the GitHub Release with the zip, the appcast, the
-tag's first line as its title and its body as the notes, and a `homebrew` job
-that bumps `Casks/rota.rb` in
+A pushed annotated `vX.Y.Z` tag runs `.github/workflows/build.yml`: `rustfmt`,
+500-line file check, `clippy -D warnings`, `osv-scanner --lockfile=Cargo.lock`,
+`cargo test --workspace`, Python script tests, a temporary keychain with the
+Developer ID identity and the notarytool profile, `RELEASE=1 ./create-app.sh`,
+`./notarize.sh`, then the Sparkle `appcast.xml` (this release only, EdDSA-signed,
+with the tag body embedded as Markdown release notes), the GitHub Release with
+the zip, the appcast, the tag's first line as its title and its body as the
+notes, and a `homebrew` job that bumps `Casks/rota.rb` in
 [wiltodelta/homebrew-tap](https://github.com/wiltodelta/homebrew-tap) with the
 new `version` and `sha256`. The cask sets `auto_updates true`, so Homebrew
-leaves installed copies to Sparkle and only keeps fresh installs current. CI refuses a
-lightweight tag, one without a body, and one that is not `vX.Y.Z` or not above
-every earlier tag: Sparkle offers only a higher version. Branch and pull request builds are
-signed ad hoc and uploaded as a workflow artifact.
+leaves installed copies to Sparkle and only keeps fresh installs current. CI
+refuses a lightweight tag, one without a body, and one that is not `vX.Y.Z` or
+not above every earlier tag: Sparkle offers only a higher version. Branch and
+pull request builds are signed ad hoc and uploaded as a workflow artifact.
 
 The repository secrets it reads are `DEVELOPER_ID_P12_BASE64`,
 `DEVELOPER_ID_P12_PASSWORD`, `NOTARY_KEY_P8_BASE64`, `NOTARY_KEY_ID`,
@@ -57,16 +62,15 @@ and the Sparkle key.
 
 ## Sparkle
 
-`Updater` (in the `Rota` target) runs `SPUStandardUpdaterController` with
-gentle reminders: a scheduled check that finds an update while Rota is not in
-front publishes `pendingVersion` instead of opening a window. `create-app.sh`
-copies `Sparkle.framework` into `Contents/Frameworks`, adds the
+`Updater.swift` (in `Sources/Rota/Updater.swift`) drives
+`SPUStandardUpdaterController` from `Contents/Frameworks/Sparkle.framework`.
+`create-app.sh` copies `Sparkle.framework` from SwiftPM's verified build artifacts into `Contents/Frameworks`, adds the
 `@executable_path/../Frameworks` rpath, removes its XPC services (they exist
 for sandboxed apps), ships its MIT license, and signs `Autoupdate`,
-`Updater.app`, the framework and the app in that order. One EdDSA key serves
-every app of the team; `SUPublicEDKey` in `create-app.sh` is its public half,
-and `SURequireSignedFeed` makes the app reject a feed that is not signed with
-it. `SUFeedURL` points at the latest release's `appcast.xml`.
+`Updater.app`, the framework, `Contents/Helpers/rota`, and the app in that order.
+One EdDSA key serves every app of the team; `SUPublicEDKey` in `create-app.sh` is
+its public half, and `SURequireSignedFeed` makes the app reject a feed that is
+not signed with it. `SUFeedURL` points at the latest release's `appcast.xml`.
 
 ## Bundle identifier
 
@@ -80,10 +84,8 @@ Rota without reading or quitting it.
 ## Verify a release
 
 Check an extracted release's launch outside the checkout as well as its signature.
-The CI command-line SwiftPM resource accessor differs from Xcode's local accessor:
-0.2.7 included the font bundle but crashed at launch because the accessor did not
-search `Contents/Resources`. Font registration resolves that packaged location
-explicitly. A local build or an archive listing alone does not verify this path.
+Font registration resolves `Contents/Resources/Rota_Rota.bundle` inside the packaged `.app`
+bundle explicitly.
 
 ```bash
 gh release download vX.Y.Z -R wiltodelta/rota -p "*.zip" -D /tmp/asset-check && \

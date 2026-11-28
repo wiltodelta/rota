@@ -11,11 +11,12 @@ unsupported-content boundaries live in the
 
 ## Check levels
 
-1. Run `swift test`. Synthetic peers exercise real adapters without a model:
-   cancellation before readiness, queued prompt outcomes, paginated recovery,
-   native item identity, images, reasoning, tool output and durable process
-   recovery. Installed CLI flags and Codex schemas are checked when available;
-   missing executables produce explicit skips.
+1. Run `cargo test --workspace && swift test`. Synthetic peers exercise real
+   adapters without a model: cancellation before readiness, queued prompt
+   outcomes, paginated recovery, native item identity, images, reasoning, tool
+   output and durable process recovery. Installed CLI flags and Codex schemas
+   are checked in `crates/rota-core/tests/installed_harness_contracts.rs` when
+   available; missing executables produce explicit skips.
 2. Run `bash scripts/check-harnesses.sh`. This additionally reads installed model
    metadata without inference. It uses configured executable selections, reports
    versions in test output, checks advertised options and never saves agent
@@ -54,7 +55,7 @@ must cover native expansion and relocation, rather than tailing a decompressed
 copy. `SessionArchiveTests` checks restore failure and recovery boundaries.
 
 Run builds, `maintain.sh` and UI checks sequentially. UI scripts also assemble
-and sign `Rota.app`; SwiftPM's build lock does not cover bundle assembly or signing.
+and sign `Rota.app`; Cargo's build lock does not cover bundle assembly or signing.
 
 ## Recovery and ownership
 

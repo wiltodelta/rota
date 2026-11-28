@@ -36,10 +36,10 @@ personal session data never belongs in fixtures.
 | MCP resource links | Title/name, MIME type and URI as literal text | Shared block adapters; `ToolContentContractTests`. Display does not fetch or open a resource. |
 | Unsupported content blocks | Notice naming the type, with available display metadata/text | Shared block adapters and unknown Grok tool-content wrappers; `ToolContentContractTests`. Supported neighbors retain their order. |
 | Tool and run failures | Available failure text and native final outcome | Antigravity stream/archive (its `finished_reason` outranks status, and stale historical `result` errors after a completed response do not fail the turn), Claude result/API errors, Codex error/turn notifications. `SessionContentTests`, `AntigravityTests`. A tool failure does not itself declare the whole run failed. |
-| Codex `model/verification` | Turn-scoped status note (`Trusted Access for Cyber` or unsupported requirement) | `CodexDaemonRun`, `CodexItemOutput`; `HarnessLifecycleTests`, `InstalledHarnessContractTests`. Does not invent a form, URL or final outcome. |
-| Questions and approvals | Native choices/forms, or an unreadable-dialog notice with Terminal access | `AgentQuestionTests`, `AntigravityQuestionTests`, `ClaudeDialogRecoveryTests`, `LiveQuestionTests`. Choices are never invented from prose. |
+| Codex `model/verification` | Turn-scoped status note (`Trusted Access for Cyber` or unsupported requirement) | `CodexDaemonRun`, `CodexItemOutput`; `installed_harness_contracts`. Does not invent a form, URL or final outcome. |
+| Questions and approvals | Native choices/forms, or an unreadable-dialog notice with Terminal access | `AgentQuestionTests`, `AntigravityQuestionTests`, `ClaudeDialogRecoveryTests`. Choices are never invented from prose. |
 | Child-agent activity | Brief parent-session status, separate from its answer | `SessionContentTests`. Antigravity's completed invocation confirms launch, not child completion. |
-| Shell stdout/stderr | Existing literal log | Shell has no model content-block protocol. `LiveHarnessTests` covers exit status and Stop. |
+| Shell stdout/stderr | Existing literal log | Shell has no model content-block protocol. `live_harnesses` covers exit status and output. |
 
 ## Unsupported content and deliberate limits
 
@@ -63,12 +63,13 @@ schemas and complete child conversations have no dedicated presentation.
 
 ## Verification and maintenance
 
-Run `swift test --filter 'ToolContentContractTests|SessionContentTests|TranscriptAdapterTests|TranscriptBoundaryTests'`
+Run `cargo test -p rota-core` and `swift test`
 for decoding, journal replay, neighboring content and message boundaries.
-`ToolContentContractTests` also checks that opaque bytes and private metadata
+`transcript_and_rpc` also checks that opaque bytes and private metadata
 never enter either journal. Prove new assertions fail with the old decoder.
 
-`InstalledHarnessContractTests.testInstalledCodexInteractionSchemaMatchesAdapters`
+`installed_codex_interaction_schema_matches_adapters` in
+`crates/rota-core/tests/installed_harness_contracts.rs`
 generates the installed schema once for interaction requests, `model/verification`
 notifications and every declared dynamic-output block
 through `CodexItemOutput`. Known text/image and verification variants retain their presentation;

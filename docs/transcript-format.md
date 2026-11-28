@@ -185,13 +185,14 @@ this contract. CLI changes to core framing, text delivery, or lifecycle can
 still require an adapter update. Full compatibility with every CLI release is
 not promised.
 
-Tests in `TranscriptJournalTests` exercise the writer-to-reader seam, unknown
-neighbors, compatibility fallbacks, partial Unicode messages, replay and resume.
-Assertions about normalized replay must require `structured == true` and no
-problem: equality of displayed text alone can pass through the legacy fallback
-even when ID allocation is broken. Mutation checks run on disposable copies.
-The existing `LiveHarnessTests` also validate normalized history for real agent
-runs. UI checks must include synthetic normalized data, not just Shell logs.
+Tests in `crates/rota-core/tests/transcript_and_rpc.rs` exercise the
+writer-to-reader seam, unknown neighbors, compatibility fallbacks, partial
+Unicode messages, replay and resume. Assertions about normalized replay must
+require `structured == true` and no problem: equality of displayed text alone
+can pass through the legacy fallback even when ID allocation is broken.
+Mutation checks run on disposable copies. `crates/rota-core/tests/live_harnesses.rs`
+also validates normalized history for real agent runs. UI checks must include
+synthetic normalized data, not just Shell logs.
 
 The initial implementation was rendered through the signed development bundle
 with producer-generated synthetic data at the 820-point minimum width, in

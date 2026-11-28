@@ -54,9 +54,9 @@ files before sharing it. Keep the launch metadata with the relevant events
 to identify the app build. Use the external collector's stack snapshots to
 investigate where a slow interval spent time.
 
-Tests: `swift test --filter '^RotaTests.PerformanceTests/'` covers interval
-CPU, pending probes, sleep, bounded rotation, failure isolation and shared
-transcript instrumentation without launching an agent.
+Tests: `cargo test -p rota-core --test transcript_and_rpc` covers bounded
+rotation, failure isolation and shared transcript instrumentation without
+launching an agent.
 
 ## External collector
 

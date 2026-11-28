@@ -70,17 +70,6 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
-    /// The `claude` arguments; the other harnesses are driven over their protocols
-    /// and take none. Every agent runs with approvals bypassed, the
-    /// `bypassPermissions` mode Claude Desktop routines use: nobody is there to
-    /// answer a prompt. The prompt itself goes in on stdin.
-    /// Claude gets Chrome exactly when the user's settings turn it on by default,
-    /// as an interactive session would.
-    public func arguments(settings: ClaudeUserSettings, resume: String? = nil) -> [String] {
-        guard self == .claude else { return [] }
-        return ClaudeStreamRun.arguments(chrome: settings.chromeByDefault, resume: resume)
-    }
-
     /// The terminal command that opens session `session`, if the harness has one
     /// in that state: the executable (nil for the harness's own) and its arguments.
     /// While an agent runs, Rota holds its session and talks to it in the chat;
@@ -91,7 +80,7 @@ public enum Harness: String, CaseIterable, Codable, Identifiable, Sendable {
         case (.codex, false): return (nil, ["resume", session])
         case (.grok, false): return (nil, ["--resume", session])
         case (.antigravity, false): return (nil, ["--conversation", session])
-        case (.shell, true): return (ScreenRun.screen, ["-r", session])
+        case (.shell, true): return ("/usr/bin/screen", ["-r", session])
         case (.claude, true), (.codex, true), (.grok, true), (.antigravity, true), (.shell, false): return nil
         }
     }

@@ -1,7 +1,12 @@
 import Foundation
 
+public func lossyUTF8<Bytes: Collection>(_ bytes: Bytes) -> String where Bytes.Element == UInt8 {
+    // swiftlint:disable:next optional_data_string_conversion
+    String(decoding: bytes, as: UTF8.self)
+}
+
 /// Values reported by a harness, kept separately from requested model/effort overrides.
-public struct SessionConfiguration: Equatable, Sendable {
+public struct SessionConfiguration: Codable, Equatable, Sendable {
     public var model: String?
     public var effort: String?
     public var modelTitle: String?

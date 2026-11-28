@@ -69,25 +69,20 @@ jobs:
   build:
     needs: changes
     if: needs.changes.outputs.build == 'true'
-    # macOS 26 host: actool compiles the Icon Composer icon (once the repository
-    # has one) with macOS 26 system frameworks; it crashed on macos-15 for
-    # Translate Like Me.
+    # macOS 26 host: actool compiles the Icon Composer icon with macOS 26 system frameworks.
     runs-on: macos-26
     permissions:
       contents: write
     outputs:
       zip-sha256: ${{ steps.zip.outputs.sha256 }}
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
-        fetch-depth: 0  # Fetch all history and tags for version detection
+        fetch-depth: 0
         fetch-tags: true
 
-    # A release tag is vX.Y.Z and above every earlier tag: Sparkle offers only a
-    # higher version, so a lower number never reaches anybody already on the
-    # newer release (watch-me-sleep 3.6.1, tagged after 3.7 on 2026-10-11).
     - name: Check the release tag (on tag)
       if: startsWith(github.ref, 'refs/tags/v')
       run: |
@@ -96,71 +91,88 @@ jobs:
         HIGHEST="$(git tag -l 'v*' | sort -V | tail -1)"
         [[ "$HIGHEST" == "$GITHUB_REF_NAME" ]] ||
           { echo "::error::$GITHUB_REF_NAME is not above the existing tag $HIGHEST"; exit 1; }
-    
-    # The runner context is not available in job-level env, so the signing
-    # keychain path is exported here for the import and cleanup steps.
+
     - name: Select Latest Xcode
       run: |
         echo "SIGNING_KEYCHAIN=$RUNNER_TEMP/signing.keychain-db" >> "$GITHUB_ENV"
-        # Find the latest Xcode version
         LATEST_XCODE=$(ls /Applications | grep "Xcode" | sort -V | tail -1)
         echo "Using: $LATEST_XCODE"
         echo "LATEST_XCODE=$LATEST_XCODE" >> "$GITHUB_ENV"
         sudo xcode-select -s /Applications/$LATEST_XCODE/Contents/Developer
-    
+
+    - name: Install Rust Toolchain
+      run: |
+        rustup toolchain install stable --profile minimal --component rustfmt,clippy
+        rustup default stable
+        rustup target add aarch64-apple-darwin
+        rustc --version
+        cargo --version
+
     - name: Display Build Environment
       run: |
         xcodebuild -version
-        swift --version
-    
-    - name: Display Version Info
-      run: |
         echo "Git tag: $(git describe --tags --abbrev=0 2>/dev/null || echo 'No tag found')"
         echo "Building version: $(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo '1.0.0')"
-    
-    - name: Clean build directory for release (on tag)
-      if: startsWith(github.ref, 'refs/tags/v')
-      run: |
-        rm -rf .build
-        rm -rf ~/Library/Developer/Xcode/DerivedData
 
-    - name: Cache SwiftPM build output (branch and PR)
-      id: build-cache
+    - name: Clean build directories for release (on tag)
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: rm -rf target .build
+
+    - name: Cache Cargo registry
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: macos-26-cargo-reg-${{ hashFiles('Cargo.lock') }}
+        restore-keys: |
+          macos-26-cargo-reg-
+
+    - name: Cache Cargo and SwiftPM build outputs (branch and PR)
       if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: .build
-        key: macos-26-build-${{ env.LATEST_XCODE }}-${{ hashFiles('Package.resolved', 'Package.swift') }}
-
-    - name: Cache SwiftPM packages
-      if: ${{ startsWith(github.ref, 'refs/tags/v') || steps.build-cache.outputs.cache-hit != 'true' }}
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: ~/Library/Caches/org.swift.swiftpm
-        key: macos-26-swiftpm-${{ hashFiles('Package.resolved', 'Package.swift') }}
+        path: |
+          target
+          .build
+        key: macos-26-hybrid-build-${{ env.LATEST_XCODE }}-${{ hashFiles('Cargo.lock', 'Package.resolved') }}
         restore-keys: |
-          macos-26-swiftpm-
-    
-    - name: Lint with SwiftLint
+          macos-26-hybrid-build-${{ env.LATEST_XCODE }}-
+
+    - name: Lint, Security Audit, and File-Length Gate
       env:
         HOMEBREW_NO_AUTO_UPDATE: "1"
       run: |
+        cargo fmt --all -- --check
+        OVER_LIMIT="$(find crates -name '*.rs' -print0 | xargs -0 wc -l | awk '$2 != "total" && $1 > 500 {print}')"
+        if [[ -n "$OVER_LIMIT" ]]; then
+          echo "::error::Rust source files exceed 500-line limit:"
+          echo "$OVER_LIMIT"
+          exit 1
+        fi
+        cargo clippy --workspace --all-targets -- -D warnings
+        if ! command -v osv-scanner >/dev/null 2>&1; then
+          brew install osv-scanner
+        fi
+        osv-scanner --lockfile=Cargo.lock
         if ! command -v swiftlint >/dev/null 2>&1; then
           brew install swiftlint
         fi
         swiftlint lint --strict
 
-    - name: Run Tests
-      run: swift test
+    - name: Run Rust Workspace and Swift UI Tests
+      run: |
+        cargo test --workspace
+        cargo build --release --target aarch64-apple-darwin -p rota-ffi
+        mkdir -p target/swift-ffi
+        cp target/aarch64-apple-darwin/release/librota_ffi.a target/swift-ffi/librota_ffi.a
+        swift package resolve
+        swift test --disable-automatic-resolution
 
     - name: Test diagnostic and review scripts
       run: python3 -B -m unittest discover -s scripts/tests -v
 
-    # Tag builds only: a temporary keychain with the Developer ID Application
-    # identity and the notarytool profile, so create-app.sh signs with it
-    # (hardened runtime, timestamp) and notarize.sh notarizes
-    # and staples. Secrets are never exposed to pull requests from forks; branch
-    # builds stay ad hoc.
     - name: Import signing identity and notary credentials (on tag)
       if: startsWith(github.ref, 'refs/tags/v')
       env:
@@ -198,8 +210,6 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/v')
       run: |
         ./notarize.sh
-        # Nothing after this needs the Developer ID; lock it before third-party
-        # steps run.
         security lock-keychain "$SIGNING_KEYCHAIN"
 
     # The released zip's checksum, for the cask bump (the homebrew job).
@@ -221,12 +231,9 @@ jobs:
         mkdir -p "$FEED"
         ZIP=$(ls Rota-v*-macOS.zip)
         cp "$ZIP" "$FEED/"
-        # Release notes are the annotated tag's body; refuse a lightweight tag or
-        # an empty body rather than publish a release without notes.
         [[ $(git cat-file -t "$GITHUB_REF_NAME") == tag ]] ||
           { echo "::error::$GITHUB_REF_NAME must be an annotated tag (git tag -a)"; exit 1; }
         git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME" > release-notes.md
-        # The annotation's first line ("App Name X.Y") is the release title.
         echo "RELEASE_TITLE=$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")" >> "$GITHUB_ENV"
         grep -q '[^[:space:]]' release-notes.md ||
           { echo "::error::the $GITHUB_REF_NAME annotation has no body; it is the release notes"; exit 1; }
@@ -241,14 +248,14 @@ jobs:
     - name: Zip unsigned build (not a tag)
       if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
       run: ./notarize.sh --zip-only
-    
+
     - name: Upload App Bundle
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
       with:
         name: Rota-macOS
         path: Rota-v*-macOS.zip
         retention-days: 30
-    
+
     - name: Create Release (on tag)
       if: startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
@@ -309,5 +316,3 @@ jobs:
         git add "$C"
         git commit -m "rota $VERSION" || { echo "Cask already current"; exit 0; }
         git push
-
-

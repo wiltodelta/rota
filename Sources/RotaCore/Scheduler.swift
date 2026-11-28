@@ -1,3 +1,4 @@
+internal import CRotaFFI
 import Foundation
 import Observation
 import os
@@ -5,11 +6,8 @@ import os
 @MainActor
 public protocol RunNotifying {
     func runEnded(_ record: RunRecord, routine: Routine)
-    /// The routine was turned off after failing `failures` times in a row.
     func routinePaused(_ routine: Routine, failures: Int)
-    /// Another process, such as an agent through the `rota` command, added the routine.
     func routineAdded(_ routine: Routine)
-    /// A session (or, without one, a process outside Rota) sent the user a notification.
     func sessionNotified(_ record: RunRecord?, routine: Routine?, title: String?, text: String, needsReply: Bool)
 }
 
@@ -18,344 +16,248 @@ public extension RunNotifying {
     func sessionNotified(_ record: RunRecord?, routine: Routine?, title: String?, text: String, needsReply: Bool) {}
 }
 
-/// Owns the routines, fires them on schedule and tracks the runs in flight.
+struct SchedulerSnapshotPayload: Decodable {
+    var revision: UInt64
+    var routines: [Routine]
+    var active: [String: RunRecord]
+    var survivingSessions: [String: RunRecord]
+    var openingTerminals: [String]
+    var runStarts: [String: Date]
+    var lastError: String?
+}
+
+private struct RevisionEventPayload: Decodable {
+    var revision: UInt64
+}
+
+private struct WeakSchedulerBox: @unchecked Sendable {
+    weak var scheduler: Scheduler?
+}
+
+private let schedulerCallbacks = FFICallbackRegistry<WeakSchedulerBox>()
+
+private func schedulerEventTrampoline(
+    ctx: UInt,
+    kind: UInt32,
+    payloadPtr: UnsafePointer<CChar>?
+) {
+    let payload = payloadPtr.map { String(cString: $0) } ?? "{}"
+    DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+            schedulerCallbacks.lookup(ctx)?.scheduler?.handleRustEvent(kind: kind, payloadJSON: payload)
+        }
+    }
+}
+
+/// Owns scheduled routines and sessions, delegating execution, persistence and resilience to `rota-core`.
 @MainActor
 @Observable
 public final class Scheduler {
-    /// A slot missed by up to this long (the Mac slept, Rota was closed) runs once
-    /// late, as Claude Desktop does; an older one is recorded as skipped.
-    public static let missedRunGrace: TimeInterval = Routine.missedRunGrace
-    /// Scheduled runs failing this many times in a row pause the routine.
-    public static let failuresBeforePause = 5
     static let log = Logger(subsystem: "com.wiltodelta.rota", category: "scheduler")
 
     public internal(set) var routines: [Routine] = [] {
         didSet { cachedSessions = nil }
     }
     public internal(set) var active: [UUID: RunRecord] = [:]
-    /// Bumped whenever a run record changes, so views re-read history.
     public internal(set) var historyVersion = 0 {
         didSet {
             cachedHistory.removeAll(keepingCapacity: true)
             cachedSessions = nil
         }
     }
-    public var lastError: String?
+    public var lastError: String? {
+        didSet {
+            guard !suppressErrorSync, lastError != oldValue else { return }
+            _ = try? callRustRaw("setLastError", params: ["error": lastError as Any], includeSeams: false)
+        }
+    }
 
-    @ObservationIgnored public var now: () -> Date = Date.init
+    @ObservationIgnored private var hasCustomNow = false
+    @ObservationIgnored public var now: () -> Date = Date.init {
+        didSet { hasCustomNow = true }
+    }
     @ObservationIgnored public var calendar = Calendar.current
     @ObservationIgnored public var executable: (Harness) -> String = { $0.defaultExecutable() }
-    /// What the user's `~/.claude.json` turns on for Claude runs; read at each run, as Claude would.
-    @ObservationIgnored public var claudeSettings: () -> ClaudeUserSettings = { ClaudeUserSettings.read() }
-    /// Whether the Mac is awake and online; while it is not, scheduled runs and resumes wait.
     @ObservationIgnored public var isOnline: () -> Bool = { true }
-    /// Whether a screen session is still up; a seam so tests never run `screen`.
-    @ObservationIgnored public var sessionAlive: (String) -> Bool = { ScreenRun.alive($0) }
-    /// Sessions that were going when the Mac went to sleep.
-    @ObservationIgnored var sleptThrough: Set<UUID> = []
-    /// Sessions whose surviving or unknown native state must be reconciled.
-    var survivingSessions: [UUID: RunRecord] = [:]
-    @ObservationIgnored var reconciliationRetry: [UUID: Date] = [:]
-    @ObservationIgnored var pendingResumes: [UUID: String] = [:]
-    /// Agent runs that failed on the network before they had a session, to run again: routine id to trigger.
-    @ObservationIgnored var pendingReruns: [String: RunTrigger] = [:]
-    /// Reruns in a row per routine, reset by a run that gets a session.
-    @ObservationIgnored var reruns: [String: Int] = [:]
-    @ObservationIgnored var retryScheduled = false
-    /// Asks the harness's service whether it answers (`ServiceProbe`); a seam so tests never use the network.
-    @ObservationIgnored public var probe: (Harness, @escaping @MainActor (Bool) -> Void) -> Void = ServiceProbe.check
-    /// Whether Claude routines run as an interactive `claude` (Settings), else `claude -p`.
     @ObservationIgnored public var claudeInteractive: () -> Bool = { false }
     @ObservationIgnored public var notifier: RunNotifying?
-    /// The `rota` command inside the app, handed to runs as ROTA_CLI.
     @ObservationIgnored public var commandPath: String?
-    @ObservationIgnored let store: RoutineStore
     @ObservationIgnored public let history: RunHistory
-    /// Read seam for verifying that UI refreshes reuse decoded history.
-    @ObservationIgnored var readHistory: (RunHistory, String) -> [RunRecord] = { $0.records(for: $1) }
     @ObservationIgnored var cachedHistory: [String: [RunRecord]] = [:]
     @ObservationIgnored var cachedSessions: [RunRecord]?
-    @ObservationIgnored let launcher: RoutineLaunching
-    @ObservationIgnored var questionDeliveries: [UUID: Set<String>] = [:]
-    @ObservationIgnored var questionReplies: [UUID: [String: @Sendable (QuestionAnswer) -> Void]] = [:]
-    @ObservationIgnored var hookAnswers: [String: QuestionAnswer] = [:]
-    @ObservationIgnored var controls: [UUID: RunControl] = [:]
-    /// Each launch has its own identity, including continuations of the same record.
-    @ObservationIgnored var launchIDs: [UUID: UUID] = [:]
-    /// When each active session's current run started, a continued turn included.
+
+    @ObservationIgnored var survivingSessions: [UUID: RunRecord] = [:]
+    @ObservationIgnored var openingTerminals: Set<UUID> = []
     @ObservationIgnored var runStarts: [UUID: Date] = [:]
-    /// Messages handed back as each session ended; that same session continues with them.
-    @ObservationIgnored var lateMessages: [UUID: [String]] = [:]
+
+    @ObservationIgnored nonisolated(unsafe) var handle: OpaquePointer?
+    @ObservationIgnored nonisolated(unsafe) private var callbackToken: UInt = 0
     @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored var lastAppliedRevision: UInt64 = 0
+    @ObservationIgnored private var refreshScheduled = false
+    @ObservationIgnored private var suppressErrorSync = false
 
     public init(location: StorageLocation, launcher: RoutineLaunching) {
-        store = RoutineStore(location: location)
         history = RunHistory(location: location)
-        self.launcher = launcher
-        do {
-            routines = try store.load()
-        } catch {
-            lastError = "Could not read routines: \(error.localizedDescription)"
-            Self.log.error("Could not read routines: \(error.localizedDescription, privacy: .public)")
+        let token = schedulerCallbacks.register(WeakSchedulerBox(scheduler: self))
+        callbackToken = token
+        var errPtr: UnsafeMutablePointer<CChar>?
+        let realLauncher = launcher is ProcessLauncher
+        let created = location.root.path.withCString { rootPtr in
+            location.logs.path.withCString { logsPtr in
+                rota_scheduler_create(rootPtr, logsPtr, realLauncher, token, schedulerEventTrampoline, &errPtr)
+            }
+        }
+        handle = created
+        if created == nil {
+            let msg = FFIJSON.string(taking: errPtr) ?? "Could not initialize scheduler."
+            suppressErrorSync = true
+            lastError = msg
+            suppressErrorSync = false
+            Self.log.error("\(msg, privacy: .public)")
+        } else {
+            refreshSnapshotFromRust()
         }
     }
 
-    /// Closes runs a previous launch left open and starts the 30-second tick.
-    public func start() {
-        // Runs the last launch left open were cut off: the Mac shut down, or Rota stopped.
-        for record in history.closeOrphans(routineIDs: routines.map(\.id), now: now()) {
-            if stillRunning(record) {
-                if adoptSurviving(record) { continue }
-                survivingSessions[record.id] = record
-            } else if record.sessionID != nil
-                || record.logPath.map({ RunLease.read(URL(fileURLWithPath: $0)) != nil }) == true {
-                reconcileNative(record)
-            }
+    deinit {
+        if callbackToken != 0 {
+            schedulerCallbacks.unregister(callbackToken)
         }
-        restoreAntigravityQuestions()
-        historyVersion += 1
-        tick()
-        resumePending()
-        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+        if let handle {
+            rota_scheduler_free(handle)
+        }
+    }
+
+    public func start() {
+        _ = callRust("start")
+        timer?.invalidate()
+        let nextTimer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
+        RunLoop.main.add(nextTimer, forMode: .common)
+        timer = nextTimer
     }
 
-    // MARK: Running
-
-    @discardableResult
-    public func run(_ routine: Routine, trigger: RunTrigger) -> Bool {
-        run(routine, trigger: trigger, consumingScheduledSlot: true)
+    public func tick() {
+        _ = callRust("tick")
     }
 
-    @discardableResult
-    func run(_ routine: Routine, trigger: RunTrigger, consumingScheduledSlot: Bool) -> Bool {
-        guard !hasActiveSession(routine.id) else { return false }
-        guard !hasSurvivingSession(routine.id) else {
-            lastError = "This routine still has a native session running. Close it before starting another."
-            return false
+    public func systemWillSleep() {
+        _ = callRust("systemWillSleep")
+    }
+
+    public func networkBecameAvailable() {
+        _ = callRust("networkBecameAvailable")
+    }
+
+    func seamsDictionary() -> [String: Any] {
+        var exeMap: [String: String] = [:]
+        for harness in Harness.allCases {
+            exeMap[harness.rawValue] = executable(harness)
         }
-        if consumingScheduledSlot, trigger == .scheduled || trigger == .catchUp {
-            guard reserveScheduledRun(routine) else { return false }
-        }
-        var record = RunRecord(routineID: routine.id, trigger: trigger, harness: routine.harness,
-                               startedAt: now(), outcome: .running)
-        record.model = routine.model
-        record.effort = routine.effort
-        let logURL = history.logFile(for: record)
-        record.logPath = logURL.path
-        start(record, spec: spec(for: routine, record: record, harness: routine.harness, prompt: routine.prompt,
-                                 log: logURL))
-        return true
+        var seams: [String: Any] = [
+            "executables": exeMap,
+            "claudeInteractive": claudeInteractive(),
+            "online": isOnline(),
+            "timeZone": calendar.timeZone.identifier,
+            "commandPath": commandPath as Any
+        ]
+        seams["now"] = hasCustomNow ? FFIDateCoding.format(now()) : NSNull()
+        return seams
     }
 
-    /// How `routine` runs `prompt` on `harness`: a new session, or `resume`'s.
-    func spec(for routine: Routine, record: RunRecord, harness: Harness, prompt: String, log: URL,
-              resume: String? = nil) -> LaunchSpec {
-        // Historical sessions keep their original options; never borrow a later routine edit.
-        // Only Claude reads ~/.claude.json, a file of hundreds of KB on a busy Mac.
-        let settings = harness == .claude ? claudeSettings() : ClaudeUserSettings()
-        var spec = LaunchSpec(
-            executable: executable(harness), prompt: prompt,
-            arguments: harness.arguments(settings: settings, resume: resume),
-            workingDirectory: routine.workingDirectory,
-            environment: sessionEnvironment(record),
-            mode: harness.launchMode, timeout: routine.timeLimitMinutes.map { TimeInterval($0 * 60) },
-            log: log, resume: resume,
-            model: record.model, effort: record.effort)
-        if harness == .claude, claudeInteractive() {
-            if settings.trusts(routine.workingDirectory) {
-                spec.mode = .claudeInteractive
-            } else {
-                spec.notice = "ran with claude -p: Claude Code has not been trusted in this folder; "
-                    + "open Claude Code there once and trust it to run interactively, with computer use"
+    func refreshSnapshotFromRust() {
+        guard let handle,
+              let raw = FFIJSON.string(taking: rota_scheduler_snapshot(handle)),
+              let snap = try? FFIJSON.decoder.decode(SchedulerSnapshotPayload.self, from: Data(raw.utf8)) else {
+            return
+        }
+        applySnapshot(snap)
+    }
+
+    private static func mapUUIDKeys<Value>(_ raw: [String: Value]) -> [UUID: Value] {
+        var mapped: [UUID: Value] = [:]
+        for (key, val) in raw {
+            if let uuid = UUID(uuidString: key) { mapped[uuid] = val }
+        }
+        return mapped
+    }
+
+    func applySnapshotObject(_ obj: Any) {
+        guard let snap = try? FFIJSON.decode(SchedulerSnapshotPayload.self, from: obj) else { return }
+        applySnapshot(snap)
+    }
+
+    private func applySnapshot(_ snap: SchedulerSnapshotPayload) {
+        let revisionBumped = snap.revision != lastAppliedRevision
+        lastAppliedRevision = snap.revision
+        if routines != snap.routines { routines = snap.routines }
+        let nextActive = Self.mapUUIDKeys(snap.active)
+        if active != nextActive { active = nextActive }
+        survivingSessions = Self.mapUUIDKeys(snap.survivingSessions)
+        openingTerminals = Set(snap.openingTerminals.compactMap(UUID.init(uuidString:)))
+        runStarts = Self.mapUUIDKeys(snap.runStarts)
+        if lastError != snap.lastError {
+            suppressErrorSync = true
+            lastError = snap.lastError
+            suppressErrorSync = false
+        }
+        if revisionBumped { historyVersion += 1 }
+    }
+
+    func handleRustEvent(kind: UInt32, payloadJSON: String) {
+        if kind == ROTA_EVENT_REVISION_CHANGED.rawValue {
+            if let rev = try? FFIJSON.decoder.decode(RevisionEventPayload.self, from: Data(payloadJSON.utf8)),
+               rev.revision <= lastAppliedRevision {
+                return
             }
+            guard !refreshScheduled else { return }
+            refreshScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.refreshScheduled = false
+                    self.refreshSnapshotFromRust()
+                }
+            }
+            return
         }
-        return spec
-    }
-
-    /// Launches one session without replacing another session of the same routine.
-    @discardableResult
-    func start(_ record: RunRecord, spec: LaunchSpec) -> Bool {
-        guard active[record.id] == nil, !hasNativeConflict(record) else { return false }
-        var record = record
-        record.updatedAt = now()
-        record.launchMode = spec.mode
-        record.executablePath = spec.executable
-        record.cliVersion = nil
-        record.serverVersion = nil
-        record.needsReconciliation = nil
-        let id = record.id
-        let launchID = UUID()
-        record.executionID = launchID
-        launchIDs[id] = launchID
-        let events = events(for: record, launchID: launchID)
-        do {
-            active[id] = record
-            runStarts[id] = now()
-            let control = try launcher.launch(spec, events: events)
-            guard launchIDs[id] == launchID else { return true }
-            controls[id] = control
-            // The launch may already have reported the session (a runner that waits
-            // on a process spins the run loop), so save what is active, not the copy.
-            saveRecord(active[id] ?? record)
-            Self.log.info("Started \(id, privacy: .public) on \(record.harness.rawValue, privacy: .public)")
-            return true
-        } catch {
-            guard launchIDs[id] == launchID else { return false }
-            launchIDs[id] = nil
-            runStarts[id] = nil
-            active[id] = nil
-            record.outcome = .launchFailed(error.localizedDescription)
-            record.endedAt = now()
-            saveRecord(record)
-            if let routine = self.routine(record.routineID) { notifier?.runEnded(record, routine: routine) }
-            return false
+        refreshSnapshotFromRust()
+        guard let dict = (try? JSONSerialization.jsonObject(with: Data(payloadJSON.utf8))) as? [String: Any] else {
+            return
         }
+        deliverNotificationEvent(kind: kind, dict: dict)
     }
 
-    /// Stops every active session of a routine. Session controls use the UUID overload.
-    public func stop(_ routineID: String) {
-        for record in Array(active.values) where record.routineID == routineID { stop(record.id) }
-    }
-
-    public func stop(_ id: UUID) {
-        if let record = active[id] { cancelQuestions(on: record) }
-        controls[id]?.stop()
-    }
-
-    public func stopAll() {
-        Array(controls.keys).forEach { stop($0) }
-    }
-
-    /// Sends `message` into `record`'s session: into the live session while it
-    /// runs, or by continuing the finished session as a run of its own.
-    @discardableResult
-    public func message(_ message: String, to record: RunRecord) -> Bool {
-        guard var record = current(record.id, routineID: record.routineID) else { return false }
-        guard !record.hasBlockingQuestion else { return false }
-        // The delivery path saves this copy, including the cleared attention mark.
-        record.attention = record.nextQuestion?.title
-        return deliverMessage(message, to: record)
-    }
-
-    /// Shared delivery for ordinary messages and explicit answers to async questions.
-    func deliverMessage(_ message: String, to record: RunRecord) -> Bool {
-        guard canMessage(record) else { return false }
-        if isActive(record) {
-            guard let control = controls[record.id] else { return false }
-            var record = record
-            record.updatedAt = now()
-            control.send(message)
-            active[record.id] = record
-            saveRecord(record)
-            return true
+    private func deliverNotificationEvent(kind: UInt32, dict: [String: Any]) {
+        switch kind {
+        case ROTA_EVENT_RUN_ENDED.rawValue:
+            if let recObj = dict["record"], let routObj = dict["routine"],
+               let rec = try? FFIJSON.decode(RunRecord.self, from: recObj),
+               let rout = try? FFIJSON.decode(Routine.self, from: routObj) {
+                notifier?.runEnded(rec, routine: rout)
+            }
+        case ROTA_EVENT_ROUTINE_PAUSED.rawValue:
+            if let routObj = dict["routine"],
+               let rout = try? FFIJSON.decode(Routine.self, from: routObj),
+               let count = dict["failures"] as? Int {
+                notifier?.routinePaused(rout, failures: count)
+            }
+        case ROTA_EVENT_ROUTINE_ADDED.rawValue:
+            if let routObj = dict["routine"],
+               let rout = try? FFIJSON.decode(Routine.self, from: routObj) {
+                notifier?.routineAdded(rout)
+            }
+        case ROTA_EVENT_SESSION_NOTIFIED.rawValue:
+            let rec = dict["record"].flatMap { try? FFIJSON.decode(RunRecord.self, from: $0) }
+            let rout = dict["routine"].flatMap { try? FFIJSON.decode(Routine.self, from: $0) }
+            let title = dict["title"] as? String
+            let text = dict["text"] as? String ?? ""
+            let needsReply = dict["needsReply"] as? Bool ?? false
+            notifier?.sessionNotified(rec, routine: rout, title: title, text: text, needsReply: needsReply)
+        default:
+            break
         }
-        return continueSession(record, with: message)
-    }
-
-    /// The current run start, or current native terminal turn start, while it works.
-    public func runStartedAt(_ record: RunRecord) -> Date? {
-        isActive(record) ? runStarts[record.id] : nil
-    }
-
-    /// Transcript lookup is off the main actor; tests supply an isolated producer file.
-    public var terminalTranscript: @Sendable (Harness, String) -> URL? = NativeTranscript.locate
-    var openingTerminals: Set<UUID> = []
-
-    func attachSession(_ session: String, to runID: UUID) {
-        guard var record = active[runID] else { return }
-        record.sessionID = session
-        active[runID] = record
-        saveRecord(record)
-    }
-
-    func finish(_ runID: UUID, outcome: RunOutcome) {
-        guard var record = active[runID] else { return }
-        let routineID = record.routineID
-        cancelQuestions(on: record)
-        record = current(record.id, routineID: routineID) ?? record
-        record.outcome = outcome
-        record.endedAt = now()
-        active[runID] = nil
-        launchIDs[runID] = nil
-        controls[runID] = nil
-        runStarts[runID] = nil
-        saveRecord(record)
-        let slept = self.sleptThrough.remove(runID) != nil
-        if record.needsReconciliation == true {
-            reserveUnverified(record)
-        } else {
-            recover(record, sleptThrough: slept)
-        }
-        Self.log.info("\(routineID, privacy: .public) ended: \(outcome.title, privacy: .public)")
-        if let routine = routine(routineID) { notifier?.runEnded(record, routine: routine) }
-        pauseAfterRepeatedFailures(routineID)
-        if let messages = lateMessages.removeValue(forKey: runID) {
-            continueLate(record, with: messages.joined(separator: "\n\n"))
-        }
-    }
-
-    /// A message the run could no longer take waits for the run's end, then continues its session.
-    func receiveLate(_ message: String, routineID: String, runID: UUID) {
-        if active[runID] != nil { return lateMessages[runID, default: []].append(message) }
-        guard let record = current(runID, routineID: routineID), record.outcome != .running else { return }
-        continueLate(record, with: message)
-    }
-
-    private func continueLate(_ record: RunRecord, with message: String) {
-        guard !continueSession(record, with: message) else { return }
-        Self.log.error("\(record.routineID, privacy: .public): a late message could not continue the session")
-    }
-
-    /// Turns a routine off once its last scheduled runs all failed, instead of
-    /// failing and notifying on every slot.
-    private func pauseAfterRepeatedFailures(_ routineID: String) {
-        guard let routine = routine(routineID), routine.enabled else { return }
-        // Skips are not failures of the routine: an overlap only means a long run.
-        let scheduled = history.records(for: routineID).filter { record in
-            guard record.trigger != .manual, record.terminalState == nil,
-                  record.outcome != .running else { return false }
-            if case .skipped = record.outcome { return false }
-            return true
-        }
-        let recent = scheduled.prefix(Self.failuresBeforePause)
-        guard recent.count == Self.failuresBeforePause, recent.allSatisfy({ $0.outcome.isFailure }) else { return }
-        setEnabled(false, for: routineID)
-        Self.log.warning("\(routineID, privacy: .public) paused after \(Self.failuresBeforePause) failures")
-        notifier?.routinePaused(routine, failures: Self.failuresBeforePause)
-    }
-
-    /// Marks `record`'s session read, now that the user has it open.
-    public func markRead(_ record: RunRecord) {
-        if record.isUnread { setReadAt(now(), on: record) }
-    }
-
-    /// Marks a read session unread again, for the user to come back to; it stays unread until opened anew.
-    public func markUnread(_ record: RunRecord) {
-        if record.canMarkUnread { setReadAt(nil, on: record) }
-    }
-
-    private func setReadAt(_ date: Date?, on record: RunRecord) {
-        guard var stored = history.records(for: record.routineID).first(where: { $0.id == record.id }) else { return }
-        stored.readAt = date
-        saveRecord(stored)
-    }
-
-    /// Sessions that finished since the user last opened them.
-    public var unreadCount: Int {
-        _ = historyVersion
-        return allRecords().filter(\.isUnread).count
-    }
-
-    func saveRecord(_ record: RunRecord) {
-        do {
-            try history.upsert(record)
-        } catch {
-            lastError = "Could not save run history: \(error.localizedDescription)"
-        }
-        historyVersion += 1
     }
 }

@@ -1,9 +1,12 @@
 // swift-tools-version:6.0
+import Foundation
 import PackageDescription
 
 /// Oldest supported macOS. `create-app.sh` reads this line for the bundle's
 /// `LSMinimumSystemVersion`.
 let deploymentTarget = "15.0"
+let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
+let rustFFILibDir = "\(packageRoot)/target/swift-ffi"
 
 let package = Package(
     name: "Rota",
@@ -11,8 +14,7 @@ let package = Package(
         .macOS(deploymentTarget)
     ],
     products: [
-        .executable(name: "Rota", targets: ["Rota"]),
-        .executable(name: "RotaCLI", targets: ["RotaCLI"])
+        .executable(name: "Rota", targets: ["Rota"])
     ],
     dependencies: [
         // In-place updates from the appcast published with each release;
@@ -21,8 +23,26 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "CRotaFFI",
+            path: "Sources/CRotaFFI",
+            publicHeadersPath: "include"
+        ),
+        .target(
             name: "RotaCore",
-            path: "Sources/RotaCore"
+            dependencies: ["CRotaFFI"],
+            path: "Sources/RotaCore",
+            linkerSettings: [
+                .unsafeFlags(["-L", rustFFILibDir, "-lrota_ffi"]),
+                .linkedLibrary("sqlite3"),
+                .linkedFramework("AppKit"),
+                .linkedFramework("Foundation"),
+                .linkedFramework("ApplicationServices"),
+                .linkedFramework("CoreGraphics"),
+                .linkedFramework("CoreText"),
+                .linkedFramework("Network"),
+                .linkedFramework("ServiceManagement"),
+                .linkedFramework("UserNotifications")
+            ]
         ),
         .executableTarget(
             name: "Rota",
@@ -33,17 +53,11 @@ let package = Package(
             // LC_BUILD_VERSION, and macOS then runs the app in its pre-Tahoe
             // compatibility look. Stamp a macOS 26 SDK version instead.
             linkerSettings: [
-                .unsafeFlags(["-Xlinker", "-platform_version", "-Xlinker", "macos",
-                              "-Xlinker", deploymentTarget, "-Xlinker", "26.0"])
+                .unsafeFlags([
+                    "-Xlinker", "-platform_version", "-Xlinker", "macos",
+                    "-Xlinker", deploymentTarget, "-Xlinker", "26.0"
+                ])
             ]
-        ),
-        // The `rota` command and `rota mcp`; create-app.sh copies it to
-        // Contents/Helpers/rota (a binary named rota would collide with Rota on a
-        // case-insensitive disk).
-        .executableTarget(
-            name: "RotaCLI",
-            dependencies: ["RotaCore"],
-            path: "Sources/RotaCLI"
         ),
         .testTarget(
             name: "RotaTests",

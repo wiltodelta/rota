@@ -201,7 +201,7 @@ immediately.
 
 ## Build from source
 
-Requires Xcode 26 or later.
+Requires Xcode 26 or later and the Rust stable toolchain (`rustup`, target `aarch64-apple-darwin`).
 
 ```bash
 git clone https://github.com/wiltodelta/rota.git
@@ -210,11 +210,12 @@ cd rota
 open Rota.app
 ```
 
-The script assembles and signs a development app with its own bundle identity
-and data folder, separate from the installed release. It uses Developer ID
-when available, with ad hoc signing as a fallback.
+The script compiles the Rust engine (`rota-ffi` and `rota-cli`) and the SwiftUI
+app (`Rota`), verifies the macOS 26 SDK stamp, embeds `Sparkle.framework`, and signs a development app with
+its own bundle identity and data folder, separate from the installed release. It
+uses Developer ID when available, with ad hoc signing as a fallback.
 
-Run `bash maintain.sh` for lint, tests, and the signed bundle build.
+Run `bash maintain.sh` for `rustfmt`, `clippy`, `osv-scanner`, `swiftlint`, Rust and Swift tests, and the signed bundle build.
 `scripts/ui-check.sh` checks the interface in both appearances at the minimum
 window width; its optional `--live` mode uses a real Codex session.
 `scripts/capture-screenshots.sh` regenerates the README images from disabled

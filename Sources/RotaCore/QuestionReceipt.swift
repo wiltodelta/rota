@@ -16,7 +16,7 @@ public struct QuestionReceipt: Decodable, Equatable, Sendable {
             ["question": field.title, "answers": answer.values[field.id] ?? []] as [String: Any]
         }
         return "Answer to your question " + question.id + ":\n" + QuestionRequest.json([
-            "action": answer.action, "questions": fields,
+            "action": answer.action, "questions": fields
         ])
     }
 

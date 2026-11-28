@@ -1,7 +1,7 @@
 import Foundation
 
 /// One entry of a session as the chat shows it.
-public struct TranscriptItem: Equatable, Identifiable, Sendable {
+public struct TranscriptItem: Codable, Equatable, Identifiable, Sendable {
     public enum Kind: String, Codable, Sendable {
         /// The routine's prompt or a message the user sent.
         case user

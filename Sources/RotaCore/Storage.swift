@@ -47,15 +47,14 @@ enum JSONFile {
     static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(FFIDateCoding.format(date))
+        }
         return encoder
     }()
 
-    static let decoder: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }()
+    static let decoder: JSONDecoder = FFIJSON.decoder
 
     static func read<T: Decodable>(_ type: T.Type, from url: URL) throws -> T? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
@@ -192,7 +191,7 @@ public struct RunHistory: Sendable {
             }
             if !shared {
                 let companions = [log, TranscriptReader.journalURL(for: log), ChatAttachmentStore.folder(for: log),
-                                  DurableStream.folder(log), RunLease.url(log)]
+                                  log.appendingPathExtension("streams"), log.appendingPathExtension("lease.json")]
                 for url in companions {
                     do { try FileManager.default.removeItem(at: url) } catch let error as CocoaError
                         where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile { }
@@ -224,8 +223,8 @@ public struct RunHistory: Sendable {
         try? FileManager.default.removeItem(at: log)
         try? FileManager.default.removeItem(at: TranscriptReader.journalURL(for: log))
         try? FileManager.default.removeItem(at: ChatAttachmentStore.folder(for: log))
-        try? FileManager.default.removeItem(at: DurableStream.folder(log))
-        try? FileManager.default.removeItem(at: RunLease.url(log))
+        try? FileManager.default.removeItem(at: log.appendingPathExtension("streams"))
+        try? FileManager.default.removeItem(at: log.appendingPathExtension("lease.json"))
     }
 
     public func logFile(for record: RunRecord) -> URL {
